@@ -316,3 +316,24 @@ Minimum 5 test cases:
 ```bash
 python3 -m pytest tests/
 ```
+
+---
+
+## 15. Living Learnings Log
+
+Claude Code must maintain a file called `LEARNINGS.md` at the project root.
+After every session, before finishing, append any of the following:
+
+- API behaviour that differed from documentation
+- Bugs found and how they were fixed
+- Decisions made and why (e.g. model choice, data structure change)
+- Anything that took more than one attempt to get right
+- Deprecations, version changes, or unexpected responses from any API
+
+Format each entry as:
+
+### [Date] — [Short title]
+
+[What was learned and why it matters for future sessions]
+
+Claude Code reads LEARNINGS.md at the start of every session before writing any code.
