@@ -44,7 +44,18 @@ def _get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def get_events(target_date: date, timezone_str: str = "America/Vancouver") -> list[CalendarEvent]:
+def get_events(
+    target_date: date,
+    timezone_str: str = "America/Vancouver",
+    extra_calendar_ids: list[str] | None = None,
+) -> list[CalendarEvent]:
+    """
+    Fetch events from the primary calendar plus any IDs listed in extra_calendar_ids.
+
+    extra_calendar_ids come from context.json["calendar_ids"] and let the user
+    whitelist specific non-primary calendars without reading every calendar they
+    have access to.
+    """
     tz_str = _normalize_timezone(timezone_str)
     tz = ZoneInfo(tz_str)
     service = _get_calendar_service()
@@ -54,40 +65,56 @@ def get_events(target_date: date, timezone_str: str = "America/Vancouver") -> li
     end_of_day = datetime(target_date.year, target_date.month, target_date.day,
                           23, 59, 59, tzinfo=tz)
 
-    result = service.events().list(
-        calendarId="primary",
-        timeMin=start_of_day.isoformat(),
-        timeMax=end_of_day.isoformat(),
-        singleEvents=True,
-        orderBy="startTime",
-    ).execute()
+    time_min = start_of_day.isoformat()
+    time_max = end_of_day.isoformat()
 
+    cal_ids = ["primary"] + (extra_calendar_ids or [])
+
+    seen_ids: set[str] = set()
     events: list[CalendarEvent] = []
-    for item in result.get("items", []):
-        start_raw = item.get("start", {})
-        end_raw = item.get("end", {})
 
-        is_all_day = "date" in start_raw and "dateTime" not in start_raw
+    for cal_id in cal_ids:
+        try:
+            result = service.events().list(
+                calendarId=cal_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                orderBy="startTime",
+            ).execute()
+        except Exception:
+            continue  # skip calendars we can't read
 
-        if is_all_day:
-            start_dt = datetime.strptime(start_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
-            end_dt = datetime.strptime(end_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
-        else:
-            start_dt = datetime.fromisoformat(start_raw["dateTime"])
-            end_dt = datetime.fromisoformat(end_raw["dateTime"])
-            # Ensure timezone-aware (some GCal events omit tzinfo)
-            if start_dt.tzinfo is None:
-                start_dt = start_dt.replace(tzinfo=tz)
-            if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=tz)
+        for item in result.get("items", []):
+            event_id = item.get("id", "")
+            if event_id in seen_ids:
+                continue  # deduplicate (same event can appear in multiple calendars)
+            seen_ids.add(event_id)
 
-        events.append(CalendarEvent(
-            id=item.get("id", ""),
-            summary=item.get("summary", "(No title)"),
-            start=start_dt,
-            end=end_dt,
-            color_id=item.get("colorId"),
-            is_all_day=is_all_day,
-        ))
+            start_raw = item.get("start", {})
+            end_raw = item.get("end", {})
 
+            is_all_day = "date" in start_raw and "dateTime" not in start_raw
+
+            if is_all_day:
+                start_dt = datetime.strptime(start_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
+                end_dt = datetime.strptime(end_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
+            else:
+                start_dt = datetime.fromisoformat(start_raw["dateTime"])
+                end_dt = datetime.fromisoformat(end_raw["dateTime"])
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=tz)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=tz)
+
+            events.append(CalendarEvent(
+                id=event_id,
+                summary=item.get("summary", "(No title)"),
+                start=start_dt,
+                end=end_dt,
+                color_id=item.get("colorId"),
+                is_all_day=is_all_day,
+            ))
+
+    events.sort(key=lambda e: e.start)
     return events

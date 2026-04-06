@@ -4,7 +4,7 @@ Two-step LLM scheduling chain using Groq.
 Step 1 — enrich_tasks():   llama-3.3-70b-versatile
   Assesses cognitive load, energy requirement, and scheduling flags per task.
 
-Step 2 — generate_schedule():  meta-llama/llama-4-scout-17b-16e-instruct
+Step 2 — generate_schedule():  llama-3.3-70b-versatile
   Assigns enriched tasks to free windows using productivity science reasoning.
 
 Both steps: JSON-only output, retry once on parse failure, log full prompt
@@ -20,12 +20,13 @@ from groq import Groq
 from src.models import FreeWindow, TodoistTask
 
 ENRICH_MODEL = "llama-3.3-70b-versatile"
-SCHEDULE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+SCHEDULE_MODEL = "llama-3.3-70b-versatile"
 
 _PRIORITY_LABEL = {4: "P1", 3: "P2", 2: "P3", 1: "P4"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
+
 
 def _extract_json(text: str) -> str:
     """Strip markdown fences and any preamble text, leaving raw JSON."""
@@ -69,7 +70,9 @@ def _groq_json_call(
 
         except json.JSONDecodeError as exc:
             if attempt < 2:
-                print(f"[LLM] Attempt 1 JSON parse failed for '{description}' — retrying…")
+                print(
+                    f"[LLM] Attempt 1 JSON parse failed for '{description}' — retrying…"
+                )
                 continue
             # Both attempts failed
             print(f"\n[LLM] CRITICAL: both attempts failed for '{description}'")
@@ -85,6 +88,7 @@ def _groq_json_call(
 
 # ── Step 1 — Enrich ────────────────────────────────────────────────────────────
 
+
 def _build_enrich_prompt(
     tasks: list[TodoistTask],
     context: dict,
@@ -99,14 +103,16 @@ def _build_enrich_prompt(
         priority_str = _PRIORITY_LABEL.get(t.priority, "P4")
         if t.priority == 1:
             priority_str = "P4 (unset)"
-        task_list.append({
-            "task_id": t.id,
-            "content": t.content,
-            "priority": priority_str,
-            "duration_minutes": t.duration_minutes,
-            "labels": t.labels,
-            "deadline": t.deadline,
-        })
+        task_list.append(
+            {
+                "task_id": t.id,
+                "content": t.content,
+                "priority": priority_str,
+                "duration_minutes": t.duration_minutes,
+                "labels": t.labels,
+                "deadline": t.deadline,
+            }
+        )
 
     system = (
         "You are a scheduling assistant. Your job is to analyze tasks and assess "
@@ -208,7 +214,9 @@ def enrich_tasks(
         raise RuntimeError(f"enrich_tasks expected a JSON array, got {type(raw)}")
 
     # Index by task_id
-    enriched_map = {item.get("task_id", ""): item for item in raw if isinstance(item, dict)}
+    enriched_map = {
+        item.get("task_id", ""): item for item in raw if isinstance(item, dict)
+    }
 
     # Build final list in original task order; supply defaults for missing tasks
     result = []
@@ -218,19 +226,22 @@ def enrich_tasks(
         else:
             # LLM omitted this task — apply safe defaults
             is_waiting = "waiting" in t.labels
-            result.append({
-                "task_id": t.id,
-                "cognitive_load": "medium",
-                "energy_requirement": "moderate",
-                "suggested_block": "afternoon",
-                "can_be_split": False,
-                "scheduling_flags": ["never-schedule"] if is_waiting else [],
-            })
+            result.append(
+                {
+                    "task_id": t.id,
+                    "cognitive_load": "medium",
+                    "energy_requirement": "moderate",
+                    "suggested_block": "afternoon",
+                    "can_be_split": False,
+                    "scheduling_flags": ["never-schedule"] if is_waiting else [],
+                }
+            )
 
     return result
 
 
 # ── Step 2 — Schedule ──────────────────────────────────────────────────────────
+
 
 def _format_windows(windows: list[FreeWindow]) -> dict:
     """Format windows for the LLM — block type and duration only, no clock times.
@@ -292,18 +303,31 @@ Do NOT output any clock times — times will be computed separately by the syste
 ---
 
 ## Instructions
-1. For each task you want scheduled today, output it in `ordered_tasks` in the order it
-   should run. Use the window types and total_available_minutes to reason about capacity.
-   - Match tasks to window types (e.g. deep-work tasks → morning windows, admin → afternoon).
+
+### Priority ordering — ABSOLUTE RULE, no exceptions
+Order ALL P1 tasks before ANY P2 task. ALL P2 before ANY P3. ALL P3 before ANY P4.
+Within the same priority level, use cognitive load and window type to break ties.
+A P2 task MUST NOT appear before a P1 task in ordered_tasks under any circumstances.
+
+### What goes in ordered_tasks
+Put EVERY task here EXCEPT those with "never-schedule" in scheduling_flags.
+Do NOT push tasks because you think they might not fit — pack_schedule handles
+overflow. Your only job is to ORDER them. If in doubt, include it.
+   - Match tasks to window types (e.g. deep-work tasks → morning, admin → afternoon).
    - duration_minutes must not exceed the task's original duration_minutes.
-   - Set can_be_split: true if the task can reasonably be split across two windows.
+   - Set can_be_split: true only if the task can genuinely resume after a break.
    - break_after_minutes: 0 unless a specific transition benefit justifies a break.
-2. Tasks that cannot fit today, have @waiting label, or are lower priority given capacity:
-   put them in "pushed" with a reason and suggested_date.
-3. Tasks with scheduling_flags containing "never-schedule" must go into pushed[], not ordered_tasks.
-4. Flag tasks that are overdue P1 or have been rescheduled 3+ times.
-5. Use "placement_reason" to cite the specific productivity principle by name
-   (e.g. "Morning peak — P1 deep work per Cal Newport morning primacy principle").
+
+### What goes in pushed
+ONLY tasks with "never-schedule" in scheduling_flags (i.e. @waiting tasks).
+Do NOT push tasks for capacity reasons — that is not your decision to make.
+
+### Flagged
+Flag tasks that are overdue P1 or have been rescheduled 3+ times.
+
+### placement_reason
+Cite the specific productivity principle by name
+(e.g. "Morning peak — P1 deep work per Cal Newport morning primacy principle").
 
 ## Output Schema
 Return a single JSON object with EXACTLY this structure:

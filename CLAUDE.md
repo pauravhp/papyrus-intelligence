@@ -20,7 +20,7 @@ The agent is the intelligence layer. Todoist is the interface the user already l
 - SQLite via the built-in `sqlite3` module (`data/schedule.db`)
 - Google Calendar API (`google-api-python-client`)
 - Todoist REST API v2 + Sync API v9
-- Groq API (`groq` Python SDK). Model for Step 1 Enrich: `llama-3.3-70b-versatile`. Model for Step 2 Schedule: `meta-llama/llama-4-scout-17b-16e-instruct`.
+- Groq API (`groq` Python SDK). Model for Step 1 Enrich: `llama-3.3-70b-versatile`. Model for Step 2 Schedule: `llama-3.3-70b-versatile`.
 - `python-dotenv` for secrets
 - CLI via `argparse` — flags: `--plan-day`, `--review`, `--add-task`, `--check`
 - `productivity_science.json` — pre-compiled research reference (see Section 9)
@@ -145,6 +145,14 @@ Doist maintains an official MCP at `https://ai.todoist.net/mcp`. When the projec
 - No tasks after 11pm. Minimum 5min gap between any two task blocks.
 - Tasks pushed 3+ times: flag prominently as at-risk.
 - `@waiting` tasks are never auto-scheduled under any circumstances.
+
+**Daily fixed blocks (from context.json daily_blocks):**
+Treated identically to calendar event buffers in
+compute_free_windows(). Read from context.json at startup.
+Applied every day regardless of GCal content.
+Movable: false means they are never scheduled over.
+User can override individual instances verbally before
+a --plan-day run ("lunch is at 2pm today").
 
 ---
 
@@ -277,6 +285,7 @@ confirmed (bool), confirmed_at, diff_json
 **Deadline:** `"deadline": {"date": "YYYY-MM-DD"}` — separate field from `due`.
 
 **DEPRECATED — do not use:**
+
 - ~~`https://api.todoist.com/rest/v2/`~~ — 410 Gone
 - ~~`https://api.todoist.com/sync/v9/sync`~~ — 410 Gone (see LEARNINGS.md)
 

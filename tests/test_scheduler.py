@@ -457,3 +457,146 @@ def test_pack_no_split_moves_to_next_window():
     assert len(pushed) == 0
     assert _hm(blocks[0].start_time) == (11, 15)
     assert blocks[0].duration_minutes == 60
+
+
+# ── daily_blocks tests ────────────────────────────────────────────────────────
+
+DAILY_BLOCKS_CONTEXT = {
+    **BASE_CONTEXT,
+    "daily_blocks": [
+        {
+            "name": "Lunch",
+            "start": "13:00",
+            "end": "14:00",
+            "days": "all",
+            "movable": False,
+            "buffer_before_minutes": 0,
+            "buffer_after_minutes": 0,
+        },
+        {
+            "name": "Evening snack",
+            "start": "17:00",
+            "end": "17:45",
+            "days": "all",
+            "movable": False,
+            "buffer_before_minutes": 0,
+            "buffer_after_minutes": 0,
+        },
+        {
+            "name": "Gym",
+            "start": "07:00",
+            "end": "08:30",
+            "days": "weekdays",
+            "movable": False,
+            "buffer_before_minutes": 0,
+            "buffer_after_minutes": 0,
+        },
+    ],
+}
+
+
+def test_daily_block_lunch_splits_window():
+    """Lunch 13:00–14:00 splits a continuous day into two windows."""
+    tuesday = date(2026, 4, 7)
+    windows = compute_free_windows([], tuesday, DAILY_BLOCKS_CONTEXT)
+
+    # Window 1: 10:30–13:00 | Lunch 13:00–14:00 | Window 2: 14:00–17:00 | Snack | Window 3: 17:45–23:00
+    starts = [_hm(w.start) for w in windows]
+    ends = [_hm(w.end) for w in windows]
+
+    # Lunch must not appear inside any window
+    for w in windows:
+        assert not (w.start < datetime(2026, 4, 7, 14, 0, tzinfo=TZ) and
+                    w.end > datetime(2026, 4, 7, 13, 0, tzinfo=TZ)), (
+            f"Window {w.start}–{w.end} overlaps Lunch block"
+        )
+
+    # At least one window ends at or before 13:00
+    assert any(e <= (13, 0) for e in ends), "Expected a window ending by 13:00"
+    # At least one window starts at or after 14:00
+    assert any(s >= (14, 0) for s in starts), "Expected a window starting at 14:00 or later"
+
+
+def test_daily_block_evening_snack_creates_gap():
+    """Evening snack 17:00–17:45 creates a gap — window before ends at 17:00, after starts at 17:45."""
+    tuesday = date(2026, 4, 7)
+    windows = compute_free_windows([], tuesday, DAILY_BLOCKS_CONTEXT)
+
+    snack_start = datetime(2026, 4, 7, 17, 0, tzinfo=TZ)
+    snack_end = datetime(2026, 4, 7, 17, 45, tzinfo=TZ)
+
+    for w in windows:
+        assert not (w.start < snack_end and w.end > snack_start), (
+            f"Window {w.start}–{w.end} overlaps Evening snack"
+        )
+
+    ends = [_hm(w.end) for w in windows]
+    starts = [_hm(w.start) for w in windows]
+    assert any(e <= (17, 0) for e in ends), "Expected a window ending by 17:00"
+    assert any(s >= (17, 45) for s in starts), "Expected a window starting at 17:45 or later"
+
+
+def test_weekdays_only_block_skips_saturday():
+    """A block with days='weekdays' must NOT be applied on Saturday.
+
+    We use a no-weekend-penalty context so effective_start is 10:30.
+    A weekdays-only block at 11:00–12:00 should NOT appear, leaving a single
+    continuous window from 10:30 to 23:00 (minus other daily_blocks).
+    If it were incorrectly applied, the 10:30–11:00 and 12:00–... windows
+    would be separate.
+    """
+    # Context with no weekend_days so effective_start = 10:30 on Saturday
+    ctx_no_weekend = {
+        **BASE_CONTEXT,
+        "sleep": {
+            **BASE_CONTEXT["sleep"],
+            "weekend_days": [],   # no weekend restriction
+        },
+        "daily_blocks": [
+            {
+                "name": "Weekday block",
+                "start": "11:00",
+                "end": "12:00",
+                "days": "weekdays",
+                "movable": False,
+                "buffer_before_minutes": 0,
+                "buffer_after_minutes": 0,
+            }
+        ],
+    }
+    saturday = date(2026, 4, 11)  # Saturday
+    windows = compute_free_windows([], saturday, ctx_no_weekend)
+
+    # If the weekdays block is CORRECTLY skipped on Saturday, we get one
+    # continuous window from 10:30–23:00.
+    assert len(windows) == 1, (
+        f"Expected 1 window (weekdays block skipped on Saturday), got {len(windows)}"
+    )
+    assert _hm(windows[0].start) == (10, 30)
+    assert _hm(windows[0].end) == (23, 0)
+
+
+def test_daily_block_and_gcal_event_both_respected():
+    """Lunch block + a GCal meeting on the same day — both carved out correctly."""
+    tuesday = date(2026, 4, 7)
+    # Flamingo meeting 15:00–16:00, buffer 15min each side → blocks 14:45–16:15
+    meeting = make_event("Afternoon sync", 15, 0, 16, 0, color_id="4", target_date=tuesday)
+    windows = compute_free_windows([meeting], tuesday, DAILY_BLOCKS_CONTEXT)
+
+    lunch_start = datetime(2026, 4, 7, 13, 0, tzinfo=TZ)
+    lunch_end = datetime(2026, 4, 7, 14, 0, tzinfo=TZ)
+    meeting_buf_start = datetime(2026, 4, 7, 14, 45, tzinfo=TZ)
+    meeting_buf_end = datetime(2026, 4, 7, 16, 15, tzinfo=TZ)
+
+    for w in windows:
+        assert not (w.start < lunch_end and w.end > lunch_start), (
+            f"Window overlaps Lunch: {w.start}–{w.end}"
+        )
+        assert not (w.start < meeting_buf_end and w.end > meeting_buf_start), (
+            f"Window overlaps meeting buffer: {w.start}–{w.end}"
+        )
+
+    # Window after meeting buffer must start at 16:15
+    after_meeting = [w for w in windows if w.start >= meeting_buf_end]
+    assert after_meeting, "Expected a window after the meeting buffer"
+    assert _hm(after_meeting[0].start) == (16, 15)

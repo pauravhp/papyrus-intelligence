@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 # Model names mirrored here for display in progress messages
 ENRICH_MODEL = "llama-3.3-70b-versatile"
-SCHEDULE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+SCHEDULE_MODEL = "llama-3.3-70b-versatile"
 
 
 def _load_config() -> dict:
@@ -64,7 +64,8 @@ def _cmd_check(context: dict) -> None:
     print(f"\n[GCal] Fetching events for {today}...")
     events = []
     try:
-        events = get_events(today, tz_str)
+        extra_cal_ids = context.get("calendar_ids", [])
+        events = get_events(today, tz_str, extra_calendar_ids=extra_cal_ids)
         if events:
             for e in events:
                 time_str = (
@@ -82,7 +83,9 @@ def _cmd_check(context: dict) -> None:
     # ── Late night detection (check yesterday's events) ───────────────────────
     late_night_prior = False
     try:
-        yesterday_events = get_events(yesterday, tz_str)
+        yesterday_events = get_events(
+            yesterday, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+        )
         for ev in yesterday_events:
             if not ev.is_all_day and ev.end.hour >= 23:
                 late_night_prior = True
@@ -117,7 +120,9 @@ def _cmd_check(context: dict) -> None:
     print(f"\n[Scheduler] Computing free windows for {today}...")
     windows = []
     try:
-        windows = compute_free_windows(events, today, context, late_night_prior=late_night_prior)
+        windows = compute_free_windows(
+            events, today, context, late_night_prior=late_night_prior
+        )
         if windows:
             for w in windows:
                 print(
@@ -151,6 +156,7 @@ def _display_schedule(
     reasoning_summary: str,
     task_map: dict,
     today: date,
+    already_scheduled: list | None = None,
 ) -> None:
     """Pretty-print the final schedule (ScheduledBlock objects) to the terminal."""
     from src.models import ScheduledBlock
@@ -166,6 +172,19 @@ def _display_schedule(
             reasoning_summary.strip(), width=_WIDTH - 4, subsequent_indent="     "
         )
         print(f"\n  {wrapped}")
+
+    # ── Already Scheduled (pre-existing Todoist blocks) ───────────────────
+    if already_scheduled:
+        print(f"\n  {'─' * (_WIDTH - 4)}")
+        print("  ALREADY SCHEDULED")
+        print(f"  {'─' * (_WIDTH - 4)}")
+        for t in already_scheduled:
+            dt = t.due_datetime
+            end_dt = dt + timedelta(minutes=t.duration_minutes)
+            time_str = f"{dt.strftime('%H:%M')} – {end_dt.strftime('%H:%M')}"
+            original = task_map.get(t.id)
+            p_str = _PRIORITY_LABEL.get(original.priority, "P?") if original else "P?"
+            print(f"\n  {time_str}   {t.content}  ({t.duration_minutes}min, {p_str})")
 
     # ── Scheduled ────────────────────────────────────────────────────────
     print(f"\n  {'─' * (_WIDTH - 4)}")
@@ -184,8 +203,7 @@ def _display_schedule(
             if block.split_session:
                 # Count total parts for this task to display "part X of Y"
                 total_parts = sum(
-                    1 for b in blocks
-                    if b.task_id == block.task_id and b.split_session
+                    1 for b in blocks if b.task_id == block.task_id and b.split_session
                 )
                 split_tag = f" [part {block.split_part} of {total_parts}]"
 
@@ -226,7 +244,11 @@ def _display_schedule(
         for item in flagged:
             name = item.get("task_name", "Unknown")
             issue = item.get("issue", "").strip()
-            print(textwrap.fill(f"  !   {name}: {issue}", width=_WIDTH, subsequent_indent="       "))
+            print(
+                textwrap.fill(
+                    f"  !   {name}: {issue}", width=_WIDTH, subsequent_indent="       "
+                )
+            )
 
     print(f"\n{'═' * _WIDTH}\n")
 
@@ -286,17 +308,22 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
     print(f"[GCal] Fetching events for {date_label}…")
     events = []
     try:
-        events = get_events(target_date, tz_str)
+        extra_cal_ids = context.get("calendar_ids", [])
+        events = get_events(target_date, tz_str, extra_calendar_ids=extra_cal_ids)
         print(f"[GCal] {len(events)} event(s) found")
     except Exception as exc:
         print(f"[WARN] GCal fetch failed: {exc}")
 
     late_night_prior = False
     try:
-        for ev in get_events(day_before, tz_str):
+        for ev in get_events(
+            day_before, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+        ):
             if not ev.is_all_day and ev.end.hour >= 23:
                 late_night_prior = True
-                print(f"[GCal] Late night on {day_before} ({ev.summary} @ {ev.end.strftime('%H:%M')}) — buffer extended")
+                print(
+                    f"[GCal] Late night on {day_before} ({ev.summary} @ {ev.end.strftime('%H:%M')}) — buffer extended"
+                )
                 break
     except Exception:
         pass
@@ -311,11 +338,56 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
     except Exception as exc:
         print(f"[WARN] Todoist fetch failed: {exc}")
 
+    # ── STEP A: Filter — already_scheduled / schedulable / skipped ───────────
+    # Normalize timezone for comparison
+    from zoneinfo import ZoneInfo
+
+    _tz_aliases = {
+        "PST": "America/Vancouver",
+        "PST/Vancouver": "America/Vancouver",
+        "Vancouver": "America/Vancouver",
+    }
+    _tz_str_norm = _tz_aliases.get(tz_str, tz_str)
+    _tz = ZoneInfo(_tz_str_norm)
+
+    already_scheduled = (
+        []
+    )  # has due_datetime on target_date — block time, show, skip LLM
+    pinned_other_day = []  # has due_datetime on a different date — skip LLM, don't move
+    schedulable = []  # has duration_minutes, no due_datetime — pass to LLM
+    skipped = []  # no duration_minutes — skip entirely
+    for _t in tasks:
+        if _t.duration_minutes is None:
+            skipped.append(_t)
+            continue
+        if _t.due_datetime is not None:
+            _dt = _t.due_datetime
+            if _dt.tzinfo is None:
+                _dt = _dt.replace(tzinfo=_tz)
+            else:
+                _dt = _dt.astimezone(_tz)
+            if _dt.date() == target_date:
+                already_scheduled.append(_t)
+            else:
+                pinned_other_day.append(_t)
+            continue
+        schedulable.append(_t)
+
     # ── Scheduler ─────────────────────────────────────────────────────────────
     print("[Scheduler] Computing free windows…")
-    windows = compute_free_windows(events, target_date, context, late_night_prior=late_night_prior)
-    print(f"[Scheduler] {len(windows)} free window(s): " +
-          ", ".join(f"{w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')}" for w in windows))
+    windows = compute_free_windows(
+        events,
+        target_date,
+        context,
+        late_night_prior=late_night_prior,
+        scheduled_tasks=already_scheduled,
+    )
+    print(
+        f"[Scheduler] {len(windows)} free window(s): "
+        + ", ".join(
+            f"{w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')}" for w in windows
+        )
+    )
 
     if not tasks:
         print("[INFO] No tasks to schedule. Exiting.")
@@ -324,18 +396,44 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
         print(f"[INFO] No free windows on {date_label}. Exiting.")
         return
 
-    # ── STEP A: Filter — schedulable vs skipped ───────────────────────────────
-    schedulable = [t for t in tasks if t.duration_minutes is not None]
-    skipped = [t for t in tasks if t.duration_minutes is None]
+    if already_scheduled:
+        print(
+            f"\n📌  Already scheduled on {date_label}: {len(already_scheduled)} task(s)"
+        )
+        for t in already_scheduled:
+            dt = (
+                t.due_datetime.astimezone(_tz)
+                if t.due_datetime.tzinfo
+                else t.due_datetime.replace(tzinfo=_tz)
+            )
+            print(
+                f"    • [{dt.strftime('%H:%M')}] {t.content} ({t.duration_minutes}min)"
+            )
+
+    if pinned_other_day:
+        print(
+            f"\n📎  Pinned to another day (not touched): {len(pinned_other_day)} task(s)"
+        )
+        for t in pinned_other_day:
+            dt = (
+                t.due_datetime.astimezone(_tz)
+                if t.due_datetime.tzinfo
+                else t.due_datetime.replace(tzinfo=_tz)
+            )
+            print(
+                f"    • [{dt.strftime('%Y-%m-%d %H:%M')}] {t.content} ({t.duration_minutes}min)"
+            )
 
     if skipped:
         print(f"\n⏭   Skipped (no duration label): {len(skipped)} task(s)")
         for t in skipped:
             print(f"    • {t.content}")
-        print("    → Add @15min / @30min / @60min / @90min / @2h / @3h label in Todoist to schedule these")
+        print(
+            "    → Add @15min / @30min / @60min / @90min / @2h / @3h label in Todoist to schedule these"
+        )
 
     if not schedulable:
-        print("\n[INFO] No schedulable tasks (all lack duration labels). Exiting.")
+        print("\n[INFO] No unscheduled tasks to plan. Exiting.")
         return
 
     print(f"\n[Scheduler] {len(schedulable)} schedulable task(s) continuing to LLM…")
@@ -358,13 +456,15 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
     ]
 
     if unset_items:
-        print(f"\n⚠️   {len(unset_items)} task(s) have no priority set. Review suggestions:\n")
+        print(
+            f"\n⚠️   {len(unset_items)} task(s) have no priority set. Review suggestions:\n"
+        )
         for num, enr, t in unset_items:
             suggested = enr.get("suggested_priority", "P4")
             reason = enr.get("suggested_priority_reason", "")
-            print(f"  [{num}] \"{t.content}\"  →  {suggested}")
+            print(f'  [{num}] "{t.content}"  →  {suggested}')
             if reason:
-                print(f"        └─ \"{reason}\"")
+                print(f'        └─ "{reason}"')
 
         raw_response = input(
             "\n  Accept all? [y] or override (e.g. 1=P3,2=P2) then press Enter: "
@@ -389,31 +489,38 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
             api_int = _PRIORITY_API.get(final_label, 1)
             try:
                 todoist_client.update_task_priority(t.id, api_int)
-                t.priority = api_int  # update in-memory so display shows correct priority
-                print(f"  ✓  \"{t.content}\"  →  {final_label}")
+                t.priority = (
+                    api_int  # update in-memory so display shows correct priority
+                )
+                print(f'  ✓  "{t.content}"  →  {final_label}')
             except Exception as exc:
-                print(f"  [WARN] Could not update priority for \"{t.content}\": {exc}")
+                print(f'  [WARN] Could not update priority for "{t.content}": {exc}')
 
     # ── STEP D: generate_schedule ──────────────────────────────────────────────
     # Build merged enrichment + task details for Step 2
     enriched_with_details = []
     for t in schedulable:
-        base = enriched_map.get(t.id, {
-            "task_id": t.id,
-            "cognitive_load": "medium",
-            "energy_requirement": "moderate",
-            "suggested_block": "afternoon",
-            "can_be_split": False,
-            "scheduling_flags": ["never-schedule"] if "waiting" in t.labels else [],
-        })
-        enriched_with_details.append({
-            **base,
-            "content": t.content,
-            "priority": _PRIORITY_LABEL.get(t.priority, "P4"),
-            "duration_minutes": t.duration_minutes,
-            "labels": t.labels,
-            "deadline": t.deadline,
-        })
+        base = enriched_map.get(
+            t.id,
+            {
+                "task_id": t.id,
+                "cognitive_load": "medium",
+                "energy_requirement": "moderate",
+                "suggested_block": "afternoon",
+                "can_be_split": False,
+                "scheduling_flags": ["never-schedule"] if "waiting" in t.labels else [],
+            },
+        )
+        enriched_with_details.append(
+            {
+                **base,
+                "content": t.content,
+                "priority": _PRIORITY_LABEL.get(t.priority, "P4"),
+                "duration_minutes": t.duration_minutes,
+                "labels": t.labels,
+                "deadline": t.deadline,
+            }
+        )
 
     print(f"\n[LLM] Step 2 — Generating schedule order with {SCHEDULE_MODEL}…")
     heuristics = prod_science.get("scheduling_heuristics_summary", {})
@@ -428,7 +535,9 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
     llm_pushed = schedule.get("pushed", [])
     flagged = schedule.get("flagged", [])
     reasoning_summary = schedule.get("reasoning_summary", "")
-    print(f"[LLM] {len(ordered_tasks)} task(s) ordered, {len(llm_pushed)} pushed by LLM")
+    print(
+        f"[LLM] {len(ordered_tasks)} task(s) ordered, {len(llm_pushed)} pushed by LLM"
+    )
 
     # ── STEP E: pack_schedule — Python handles all clock math ─────────────────
     print("[Scheduler] Packing schedule into free windows…")
@@ -447,7 +556,15 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
 
     print(f"[Scheduler] {len(blocks)} block(s) placed, {len(llm_pushed)} total pushed")
 
-    _display_schedule(blocks, llm_pushed, flagged, reasoning_summary, task_map, target_date)
+    _display_schedule(
+        blocks,
+        llm_pushed,
+        flagged,
+        reasoning_summary,
+        task_map,
+        target_date,
+        already_scheduled,
+    )
 
     # ── STEP F: Confirm and write back ────────────────────────────────────────
     try:
@@ -526,8 +643,11 @@ def main() -> None:
         description="AI Scheduling Agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--check", action="store_true",
-                        help="Validate data pipeline end-to-end (no LLM)")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate data pipeline end-to-end (no LLM)",
+    )
     parser.add_argument(
         "--plan-day",
         nargs="?",
@@ -539,10 +659,12 @@ def main() -> None:
             "Optional date: tomorrow | monday | 2026-04-07 (default: today)"
         ),
     )
-    parser.add_argument("--review", action="store_true",
-                        help="Review pushed/flagged tasks (Phase 2+)")
-    parser.add_argument("--add-task", type=str, metavar="TASK",
-                        help="Add a task to Todoist inbox")
+    parser.add_argument(
+        "--review", action="store_true", help="Review pushed/flagged tasks (Phase 2+)"
+    )
+    parser.add_argument(
+        "--add-task", type=str, metavar="TASK", help="Add a task to Todoist inbox"
+    )
     args = parser.parse_args()
 
     context = _load_config()

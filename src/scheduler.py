@@ -5,7 +5,11 @@ Algorithm:
 1. Determine effective day start: wake + buffer, clamped by first_task_not_before
    and weekend rule. Late-night-prior adds 90min penalty.
 2. Day ends at no_tasks_after (default 23:00).
-3. Build blocked intervals: morning block + per-event blocks with color-based buffers.
+3. Build blocked intervals from four sources, all treated identically:
+   a. Morning buffer block
+   b. GCal events with color-based buffers
+   c. daily_blocks from context.json (meals, personal fixed blocks)
+   d. Already-scheduled Todoist tasks (due_datetime on target_date)
 4. Merge overlapping blocked intervals.
 5. Find free gaps between merged intervals within [effective_start, day_end].
 6. Tag each gap with a descriptive block_type.
@@ -15,9 +19,10 @@ pack_schedule() owns all break insertion and ultradian cycle enforcement.
 """
 
 from datetime import date, datetime, timedelta
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-from src.models import CalendarEvent, FreeWindow, ScheduledBlock
+from src.models import CalendarEvent, FreeWindow, ScheduledBlock, TodoistTask
 
 # A single schedulable block should not exceed one ultradian cycle (90 min per BRAC).
 # Longer uninterrupted stretches are split with a mandatory break so the scheduler
@@ -40,6 +45,26 @@ def _parse_time(time_str: str, target_date: date, tz: ZoneInfo) -> datetime:
     """Parse 'HH:MM' into a timezone-aware datetime on target_date."""
     h, m = map(int, time_str.split(":"))
     return datetime(target_date.year, target_date.month, target_date.day, h, m, 0, tzinfo=tz)
+
+
+def _applies_on_day(days_spec, day_name: str) -> bool:
+    """Return True if a daily_block's 'days' field covers the given day.
+
+    days_spec values:
+      "all"      → every day
+      "weekdays" → Mon–Fri
+      "weekends" → Sat–Sun (standard definition, independent of user's weekend_days)
+      list       → e.g. ["monday", "friday"]
+    """
+    if days_spec == "all":
+        return True
+    if days_spec == "weekdays":
+        return day_name in {"monday", "tuesday", "wednesday", "thursday", "friday"}
+    if days_spec == "weekends":
+        return day_name in {"saturday", "sunday"}
+    if isinstance(days_spec, list):
+        return day_name in {d.lower() for d in days_spec}
+    return False
 
 
 def _get_event_buffers(event: CalendarEvent, context: dict) -> tuple[int, int]:
@@ -81,6 +106,7 @@ def compute_free_windows(
     target_date: date,
     context: dict,
     late_night_prior: bool = False,
+    scheduled_tasks: Optional[list[TodoistTask]] = None,
 ) -> list[FreeWindow]:
     """
     Compute schedulable free windows for target_date.
@@ -90,6 +116,9 @@ def compute_free_windows(
         target_date:      The date to compute windows for.
         context:          Parsed context.json dict.
         late_night_prior: True if previous day had an event ending after 23:00.
+        scheduled_tasks:  Todoist tasks already given a due_datetime on target_date.
+                          Their occupied time is blocked identically to GCal events
+                          (no color-based buffers) to prevent double-booking.
 
     Returns:
         Sorted list of FreeWindow objects.
@@ -149,6 +178,37 @@ def compute_free_windows(
         block_end = min(event.end + timedelta(minutes=buf_after), end_of_day)
         if block_start < block_end:
             blocked.append((block_start, block_end))
+
+    # daily_blocks from context.json (meals, personal fixed blocks)
+    for db in context.get("daily_blocks", []):
+        if not _applies_on_day(db.get("days", "all"), day_name):
+            continue
+        buf_before = db.get("buffer_before_minutes", 0)
+        buf_after = db.get("buffer_after_minutes", 0)
+        block_start = max(_parse_time(db["start"], target_date, tz) - timedelta(minutes=buf_before), midnight)
+        block_end = min(_parse_time(db["end"], target_date, tz) + timedelta(minutes=buf_after), end_of_day)
+        if block_start < block_end:
+            blocked.append((block_start, block_end))
+
+    # Already-scheduled Todoist tasks — block their time to prevent double-booking
+    if scheduled_tasks:
+        for task in scheduled_tasks:
+            if task.due_datetime is None or task.duration_minutes is None:
+                continue
+            # Normalize to local tz if aware, or treat as local if naive
+            task_start = task.due_datetime
+            if task_start.tzinfo is None:
+                task_start = task_start.replace(tzinfo=tz)
+            else:
+                task_start = task_start.astimezone(tz)
+            # Only block if this task is on target_date
+            if task_start.date() != target_date:
+                continue
+            task_end = task_start + timedelta(minutes=task.duration_minutes)
+            block_start = max(task_start, midnight)
+            block_end = min(task_end, end_of_day)
+            if block_start < block_end:
+                blocked.append((block_start, block_end))
 
     merged = _merge_intervals(blocked)
 

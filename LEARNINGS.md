@@ -75,6 +75,28 @@ data wins — always read from `calendar_rules` in code.
 
 ---
 
+## Phase 0 — Foundation (continued)
+
+### GCal: query all calendars, not just "primary" (2026-04-06)
+
+**What happened:** Events on non-primary calendars (work, shared, family, sports, etc.)
+were silently missing. The code queried only `calendarId="primary"`, so any event on
+another calendar was never fetched and never blocked in free window computation.
+
+**Fix:** Call `service.calendarList().list()` first to get all calendar IDs the user
+has access to, then query each one with the same `timeMin`/`timeMax` bounds. Merge
+results and deduplicate by `event_id` (same event can appear in multiple calendars if
+shared). Skip calendars that raise exceptions (permission denied, etc.).
+
+**Pattern in `_get_all_calendar_ids(service)`:** Paginates `calendarList` until
+`nextPageToken` is exhausted. Filters out `deleted` calendars.
+
+**Impact:** Without this fix, large shared events (a dinner from 6:45pm–10:30pm on a
+secondary calendar) were completely invisible to the scheduler and tasks were placed
+directly over them.
+
+---
+
 ## Phase 1 — LLM Chain (2026-04-05)
 
 ### Duration is read from labels, not Todoist's native field
@@ -133,6 +155,25 @@ When writing priority back to Todoist via `PATCH /api/v1/tasks/{task_id}`:
 {"priority": 4}   // sets P1
 {"priority": 1}   // sets P4 (default)
 ```
+
+---
+
+### LLM Step 2 must never push tasks for capacity reasons (2026-04-06)
+
+**What happened:** The Step 2 prompt had an instruction saying "tasks that cannot fit
+today or are lower priority given capacity → put in pushed[]". The LLM was deciding
+what fits based on `total_available_minutes` and window types, but it cannot do accurate
+cursor math across windows with breaks, ultradian resets, and split logic. It was
+pushing P1 tasks (120min) into tomorrow when a 180min window was available, while
+scheduling P2 tasks instead.
+
+**Rule:** The LLM's only jobs in Step 2 are:
+1. **Order** tasks: ALL P1 before ANY P2. ALL P2 before ANY P3. No exceptions.
+2. **Match** tasks to window types (deep work → morning, admin → afternoon).
+3. **Push only** tasks with `never-schedule` flag (i.e. `@waiting` tasks).
+
+Everything else stays in `ordered_tasks`. `pack_schedule` is the sole authority on
+whether a task fits. If it overflows, pack_schedule pushes it to tomorrow — not the LLM.
 
 ---
 
@@ -253,8 +294,12 @@ Fields:
 
 The `--plan-day` pipeline runs in this exact order:
 
-1. **Filter** — split tasks into `schedulable` (has duration label) and `skipped` (no label).
-   Only schedulable tasks continue. Skipped tasks are listed with a hint to add a label.
+1. **Filter** — split tasks into three buckets:
+   - `already_scheduled`: has `duration_minutes` AND `due_datetime` on `target_date`.
+     Passed to `compute_free_windows(scheduled_tasks=...)` to block their time.
+     Shown in ALREADY SCHEDULED display section. NOT passed to LLM.
+   - `schedulable`: has `duration_minutes`, not already scheduled. Passed to LLM.
+   - `skipped`: no `duration_minutes`. Listed with hint to add a duration label.
 
 2. **Enrich** (LLM Step 1) — run only on schedulable tasks. For any task with
    `priority == 1` (P4/unset), the model additionally returns `suggested_priority`
@@ -263,8 +308,52 @@ The `--plan-day` pipeline runs in this exact order:
 3. **Confirm priorities** — if any enriched task has `suggested_priority`, display
    suggestions interactively. User types `y` (accept all) or `1=P3,2=P2` (overrides).
    Accepted priorities are written to Todoist immediately via
-   `PATCH /api/v1/tasks/{task_id}` and updated in-memory before Step 2.
+   `POST /api/v1/tasks/{task_id}` and updated in-memory before Step 2.
 
 4. **Schedule** (LLM Step 2) — runs on schedulable tasks with confirmed priorities only.
+
+---
+
+### daily_blocks from context.json block fixed personal time (2026-04-05)
+
+`compute_free_windows()` reads `context["daily_blocks"]` and treats each entry as a
+fixed blocked interval. Fields: `name`, `start` (HH:MM), `end` (HH:MM), `days`
+("all"/"weekdays"/"weekends"/list), `buffer_before_minutes`, `buffer_after_minutes`.
+
+The `_applies_on_day(days_spec, day_name)` helper handles day filtering. Note:
+`"weekends"` in `_applies_on_day` is always Sat/Sun — independent of `sleep.weekend_days`.
+
+**Gotcha:** A weekdays-only block at 07:00 on a Saturday won't affect output if
+`weekend_nothing_before` already pushes effective_start past the block — the test must
+use a context with no weekend penalty to make the absence of the block observable.
+
+---
+
+### Tasks with due_datetime already set must never be re-processed (2026-04-06)
+
+**What happened:** The filter `"!date | today | overdue"` fetches tasks whose due_datetime
+is set to any date (past or future). If a task was previously confirmed and given a
+due_datetime for a different day (e.g., tomorrow), it shows up in the current day's run
+as "overdue" or matches `!date`. The old bucket logic only checked `due_datetime.date()
+== target_date`, so tasks pinned to other days fell into `schedulable` — and the LLM
+or pack_schedule could push them, overwriting the existing scheduled time.
+
+**Rule:** Four buckets, not three:
+- `already_scheduled`: `due_datetime` on target_date + `duration_minutes` → block time, show, skip LLM
+- `pinned_other_day`: `due_datetime` on any other date + `duration_minutes` → show with date, skip LLM entirely
+- `schedulable`: `duration_minutes` but no `due_datetime` → pass to LLM
+- `skipped`: no `duration_minutes` → list with label hint
+
+---
+
+### Pre-scheduled Todoist tasks block time in compute_free_windows (2026-04-05)
+
+Tasks with `due_datetime` set on `target_date` and a `duration_minutes` are treated as
+pseudo-events. They are passed via `scheduled_tasks=` argument and converted to blocked
+intervals `[due_datetime, due_datetime + duration_minutes)` — no color-based buffers.
+
+Timezone normalization: task `due_datetime` from the Todoist API is UTC-aware
+(suffix `+00:00`). Convert to local tz via `.astimezone(tz)` before comparing `.date()`
+to `target_date`.
 
 ---

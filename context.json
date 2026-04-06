@@ -3,6 +3,9 @@
     "name": "Paurav",
     "timezone": "PST/Vancouver"
   },
+  "calendar_ids": [
+    "73fb9da3246639171359863526423a983616ea5201bd958e31bcc5be9054a837@group.calendar.google.com"
+  ],
   "sleep": {
     "default_sleep_time": "01:00",
     "default_wake_time": "09:00",
@@ -41,6 +44,35 @@
     "xxl": [300, 480]
     }
   },
+  "daily_blocks": [
+  {
+    "name": "Lunch",
+    "start": "13:00",
+    "end": "14:00",
+    "days": "all",
+    "movable": false,
+    "buffer_before_minutes": 0,
+    "buffer_after_minutes": 0
+  },
+  {
+    "name": "Evening snack",
+    "start": "17:00",
+    "end": "17:45",
+    "days": "all",
+    "movable": false,
+    "buffer_before_minutes": 0,
+    "buffer_after_minutes": 0
+  },
+  {
+    "name": "Dinner",
+    "start": "21:00",
+    "end": "22:00",
+    "days": "all",
+    "movable": false,
+    "buffer_before_minutes": 0,
+    "buffer_after_minutes": 0
+  }
+],
   "label_vocabulary": {
     "@deep-work": "Task requires sustained focus and uninterrupted concentration. Never schedule back-to-back with another deep-work task without a real break.",
     "@admin": "Low-cognitive overhead task. Emails, updates, coordination, filing.",

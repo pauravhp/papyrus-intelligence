@@ -5,3 +5,6 @@ token.json
 *.db
 __pycache__/
 .DS_Store
+snapshots/
+test_gcal.py
+test_groq.py
