@@ -9,12 +9,21 @@ Algorithm:
 4. Merge overlapping blocked intervals.
 5. Find free gaps between merged intervals within [effective_start, day_end].
 6. Tag each gap with a descriptive block_type.
+
+Windows are returned as raw continuous blocks — NOT pre-chunked.
+pack_schedule() owns all break insertion and ultradian cycle enforcement.
 """
 
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from src.models import CalendarEvent, FreeWindow
+from src.models import CalendarEvent, FreeWindow, ScheduledBlock
+
+# A single schedulable block should not exceed one ultradian cycle (90 min per BRAC).
+# Longer uninterrupted stretches are split with a mandatory break so the scheduler
+# reflects realistic human capacity rather than handing the LLM a 10-hour open canvas.
+MAX_WINDOW_MINUTES = 90
+BREAK_BETWEEN_WINDOWS_MINUTES = 15
 
 _TIMEZONE_ALIASES = {
     "PST": "America/Vancouver",
@@ -177,3 +186,216 @@ def compute_free_windows(
             ))
 
     return free_windows
+
+
+# ── pack_schedule ───────────────────────────────────────────────────────────────
+
+_MIN_SPLIT_MINUTES = 30  # minimum chunk size to bother splitting a task
+
+
+def pack_schedule(
+    ordered_tasks: list[dict],
+    free_windows: list[FreeWindow],
+    context: dict,
+    target_date: date | None = None,
+) -> tuple[list[ScheduledBlock], list[dict]]:
+    """
+    Cursor-based time assignment. The LLM defines task order; this function
+    handles all clock math: slot finding, forced ultradian breaks, and splits.
+
+    Args:
+        ordered_tasks:  LLM-ordered task dicts with duration_minutes, can_be_split,
+                        break_after_minutes, block_label, placement_reason,
+                        scheduling_flags.
+        free_windows:   Pre-computed schedulable windows (from compute_free_windows).
+        context:        Parsed context.json dict (not currently used but kept for
+                        future constraint injection).
+        target_date:    Date being scheduled (defaults to today; injectable for tests).
+
+    Returns:
+        (scheduled_blocks, auto_pushed) — blocks placed on the calendar and tasks
+        that couldn't fit and were pushed to the next day.
+    """
+    if not ordered_tasks or not free_windows:
+        return [], []
+
+    _target = target_date or date.today()
+    tomorrow = (_target + timedelta(days=1)).isoformat()
+
+    blocks: list[ScheduledBlock] = []
+    auto_pushed: list[dict] = []
+
+    # Mutable cursor state (captured by the nested helper via nonlocal)
+    window_idx = 0
+    cursor = free_windows[0].start
+    continuous_minutes = 0
+
+    def _advance() -> bool:
+        """Advance cursor and window_idx to the next schedulable position.
+        Moves cursor to the window's start if it's still before it.
+        Returns False when no windows remain."""
+        nonlocal cursor, window_idx
+        while window_idx < len(free_windows):
+            w = free_windows[window_idx]
+            if cursor <= w.start:
+                cursor = w.start
+                return True
+            if cursor < w.end:
+                return True
+            window_idx += 1
+        return False
+
+    for task in ordered_tasks:
+        task_id = task.get("task_id", "")
+        task_name = task.get("task_name", task.get("content", ""))
+        duration = task.get("duration_minutes") or 30
+        can_be_split = task.get("can_be_split", False)
+        break_after = task.get("break_after_minutes") or 0
+        block_label = task.get("block_label", "")
+        placement_reason = task.get("placement_reason", "")
+        flags = task.get("scheduling_flags", [])
+
+        # @waiting and similar tasks are never auto-scheduled
+        if "never-schedule" in flags:
+            auto_pushed.append({
+                "task_id": task_id,
+                "task_name": task_name,
+                "reason": "@waiting — never auto-scheduled",
+                "suggested_date": "",
+            })
+            continue
+
+        # Enforce ultradian break if continuous work hit the cap
+        if continuous_minutes >= MAX_WINDOW_MINUTES:
+            cursor += timedelta(minutes=BREAK_BETWEEN_WINDOWS_MINUTES)
+            continuous_minutes = 0
+
+        # Find a valid slot
+        if not _advance():
+            auto_pushed.append({
+                "task_id": task_id,
+                "task_name": task_name,
+                "reason": "No more free windows today",
+                "suggested_date": tomorrow,
+            })
+            continue
+
+        current_window = free_windows[window_idx]
+        remaining = int((current_window.end - cursor).total_seconds() / 60)
+
+        if duration <= remaining:
+            # ── Happy path: task fits in the current window ──────────────────
+            end_time = cursor + timedelta(minutes=duration)
+            blocks.append(ScheduledBlock(
+                task_id=task_id,
+                task_name=task_name,
+                start_time=cursor,
+                end_time=end_time,
+                duration_minutes=duration,
+                work_block=block_label,
+                placement_reason=placement_reason,
+            ))
+            cursor = end_time
+            continuous_minutes += duration
+
+        elif can_be_split and remaining >= _MIN_SPLIT_MINUTES:
+            # ── Split: part 1 fills current window, part 2 goes to next ─────
+            part1_dur = remaining
+            part2_dur = duration - part1_dur
+            part1_end = current_window.end
+
+            blocks.append(ScheduledBlock(
+                task_id=task_id,
+                task_name=task_name,
+                start_time=cursor,
+                end_time=part1_end,
+                duration_minutes=part1_dur,
+                work_block=block_label,
+                placement_reason=placement_reason,
+                split_session=True,
+                split_part=1,
+            ))
+            continuous_minutes += part1_dur
+
+            # Move past this window; the gap between windows is the break
+            cursor = part1_end
+            window_idx += 1
+            continuous_minutes = 0
+
+            if _advance():
+                part2_start = cursor
+                part2_end = part2_start + timedelta(minutes=part2_dur)
+                # Clip to window boundary if necessary
+                if part2_end > free_windows[window_idx].end:
+                    part2_end = free_windows[window_idx].end
+                    part2_dur = int((part2_end - part2_start).total_seconds() / 60)
+
+                blocks.append(ScheduledBlock(
+                    task_id=task_id,
+                    task_name=task_name,
+                    start_time=part2_start,
+                    end_time=part2_end,
+                    duration_minutes=part2_dur,
+                    work_block=block_label,
+                    placement_reason="Continuation from earlier session",
+                    split_session=True,
+                    split_part=2,
+                ))
+                cursor = part2_end
+                continuous_minutes = part2_dur
+            else:
+                auto_pushed.append({
+                    "task_id": task_id,
+                    "task_name": task_name + " (remainder)",
+                    "reason": (
+                        f"First {part1_dur}min session scheduled; "
+                        f"{part2_dur}min remainder has no window today"
+                    ),
+                    "suggested_date": tomorrow,
+                })
+
+        else:
+            # ── Task doesn't fit and can't split: try the next window ────────
+            cursor = current_window.end
+            window_idx += 1
+            continuous_minutes = 0
+
+            if _advance():
+                next_window = free_windows[window_idx]
+                next_remaining = int((next_window.end - cursor).total_seconds() / 60)
+                if duration <= next_remaining:
+                    end_time = cursor + timedelta(minutes=duration)
+                    blocks.append(ScheduledBlock(
+                        task_id=task_id,
+                        task_name=task_name,
+                        start_time=cursor,
+                        end_time=end_time,
+                        duration_minutes=duration,
+                        work_block=block_label,
+                        placement_reason=placement_reason,
+                    ))
+                    cursor = end_time
+                    continuous_minutes = duration
+                else:
+                    auto_pushed.append({
+                        "task_id": task_id,
+                        "task_name": task_name,
+                        "reason": (
+                            f"Needs {duration}min — doesn't fit in any remaining window today"
+                        ),
+                        "suggested_date": tomorrow,
+                    })
+            else:
+                auto_pushed.append({
+                    "task_id": task_id,
+                    "task_name": task_name,
+                    "reason": "No more free windows today",
+                    "suggested_date": tomorrow,
+                })
+
+        # Apply any explicit post-task break preference
+        if break_after > 0:
+            cursor += timedelta(minutes=break_after)
+            continuous_minutes = 0
+
+    return blocks, auto_pushed

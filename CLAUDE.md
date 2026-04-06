@@ -262,14 +262,23 @@ confirmed (bool), confirmed_at, diff_json
 
 ## 11. Todoist API Reference
 
-- REST v2: `https://api.todoist.com/rest/v2/`
-- Sync v9: `https://api.todoist.com/sync/v9/sync`
-- Activity: `https://api.todoist.com/sync/v9/activity/get`
-- Duration: requires both `duration` (int) AND `duration_unit` (`"minute"`)
-- Deadline: separate from `due` — use `deadline` key in REST v2
-- Due datetime: `due.datetime` in ISO 8601 format
-- Comments: `POST https://api.todoist.com/rest/v2/comments`
-- Reminders: `POST https://api.todoist.com/rest/v2/reminders` (Pro only)
+**All reads and writes use REST API v1 base URL:** `https://api.todoist.com/api/v1/`
+
+- Reads: `GET /api/v1/tasks?filter=<string>` (paginated — use `_get_all_pages()`)
+- Writes: `POST /api/v1/tasks/{id}` with partial JSON body for individual task updates
+- Comments: `POST /api/v1/comments`
+- Activity: `GET https://api.todoist.com/sync/v9/activity/get`
+- Reminders: `POST /api/v1/reminders` (Pro only)
+
+**Due datetime:** Pass as `"due_datetime": "<ISO 8601 with tz offset>"` — e.g. `"2026-04-07T13:00:00-07:00"`. Use `datetime.isoformat()` on a tz-aware datetime object.
+
+**Duration:** `"duration": <int>` + `"duration_unit": "minute"` — both required.
+
+**Deadline:** `"deadline": {"date": "YYYY-MM-DD"}` — separate field from `due`.
+
+**DEPRECATED — do not use:**
+- ~~`https://api.todoist.com/rest/v2/`~~ — 410 Gone
+- ~~`https://api.todoist.com/sync/v9/sync`~~ — 410 Gone (see LEARNINGS.md)
 
 ### Google Calendar colorId Reference
 
@@ -282,12 +291,12 @@ Verify real values on first run by printing `colorId` + `summary` for all events
 
 ## 12. Current Build Phase
 
-> **Phase 0–1: Foundation + Read-only intelligence.**
+> **Phase 2: Write-back + date targeting.**
 
-- DO NOT implement write-back yet
+- Write-back to Todoist is implemented (individual REST v1 POST calls)
+- `--plan-day` accepts optional date argument (today/tomorrow/monday/YYYY-MM-DD)
 - DO NOT implement webhooks yet
 - DO NOT implement reminders yet
-- Build and validate: fetch → compute free windows → LLM propose → display
 
 ---
 

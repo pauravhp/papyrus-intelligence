@@ -42,3 +42,6 @@ class ScheduledBlock:
     end_time: datetime
     duration_minutes: int
     work_block: str
+    placement_reason: str = ""
+    split_session: bool = False
+    split_part: int = 0  # 0 = not split, 1 = first part, 2 = second part
