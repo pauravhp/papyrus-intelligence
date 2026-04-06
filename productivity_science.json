@@ -1,0 +1,154 @@
+{
+  "_meta": {
+    "purpose": "Pre-compiled productivity and chronobiology research for LLM scheduling decisions. Loaded once at startup. Never re-fetched at runtime. Inject relevant sections into scheduling prompts as static context.",
+    "usage_instruction": "When generating a schedule, read the applicable sections below and use them to justify task placement. Cite the principle by name in your placement_reason field (e.g. 'Placed here per post-lunch-dip principle — low-cognitive task during trough window').",
+    "last_compiled": "2026-04"
+  },
+  "circadian_rhythm": {
+    "overview": "The human body follows a ~24-hour biological clock driven by the suprachiasmatic nucleus (SCN). Core body temperature, cortisol, melatonin, and cognitive performance all follow predictable daily curves. These rhythms are relatively stable across individuals, though chronotype (morningness/eveningness) shifts the entire curve earlier or later by 1-3 hours.",
+    "alertness_curve": {
+      "description": "Average alertness and cognitive performance across the day for a neutral chronotype (wake ~7-8am). Adjust all windows by +1-2h for a night-owl profile (user sleeps at midnight, adjust slightly later).",
+      "windows": [
+        {
+          "name": "Post-wake grogginess",
+          "typical_time": "wake to wake+90min",
+          "alertness": "low",
+          "notes": "Sleep inertia. Adenosine still clearing. Do not schedule cognitively demanding tasks. Light physical activity, breakfast, and routine admin are appropriate. This is why the 90-minute morning buffer rule exists."
+        },
+        {
+          "name": "Morning peak",
+          "typical_time": "wake+90min to wake+4h (approx 9:30am-1pm for this user)",
+          "alertness": "peak",
+          "notes": "Cortisol peaks in the first 30-45 minutes of the peak window. Body temperature rising. Working memory, analytical reasoning, and focus are at daily maximum. Best window for: thesis writing, deep technical work, complex problem solving, creative synthesis, anything requiring sustained concentration. Cal Newport calls this the 'deep work window'. Protect this time aggressively."
+        },
+        {
+          "name": "Post-lunch dip (circadian trough)",
+          "typical_time": "approx 1pm-3pm",
+          "alertness": "low",
+          "notes": "A biologically hardwired trough unrelated to food consumption — it occurs even when lunch is skipped. Core body temperature dips slightly. Reaction time slows. This is the highest-accident period of the day in occupational research. Best for: administrative tasks, email, short meetings, filing, rote work. Avoid scheduling: new learning, critical decisions, complex writing."
+        },
+        {
+          "name": "Afternoon secondary peak",
+          "typical_time": "approx 3pm-6pm",
+          "alertness": "moderate-high",
+          "notes": "A secondary alertness peak. Not as strong as the morning peak but solid. Good for: collaborative work, meetings that require social cognition, task review, moderately complex work. Body temperature peaks around 5-6pm — reaction time and coordination are actually best at this point. Good for tasks requiring speed and coordination."
+        },
+        {
+          "name": "Evening wind-down",
+          "typical_time": "approx 7pm-9pm",
+          "alertness": "declining",
+          "notes": "Melatonin begins rising. Alertness declines. Appropriate for: light review, reading, low-stakes correspondence, planning tomorrow. Avoid: starting new complex tasks, anything requiring peak focus. Hard stop at 9pm for this user."
+        }
+      ]
+    },
+    "chronotype_adjustment": {
+      "user_profile": "Night owl — default sleep 12am, wake 8am. Shift all above windows approximately +30 to +60 minutes later than the average values shown. Morning peak is closer to 10am-2pm than 9:30am-1pm. Post-lunch dip is closer to 2pm-4pm.",
+      "weekend_note": "On days with highly variable sleep (Fri/Sat/Sun), the entire curve resets relative to actual wake time. Do not apply fixed clock times — apply the wake-relative windows instead."
+    }
+  },
+  "cognitive_load_theory": {
+    "overview": "Cognitive load theory (Sweller, 1988) holds that working memory has a finite capacity. Tasks that exceed this capacity degrade performance. The scheduling implication: high-load tasks require peak cognitive windows; low-load tasks can absorb trough periods without performance loss.",
+    "load_categories": [
+      {
+        "level": "high",
+        "description": "Tasks requiring active construction of new understanding, synthesis, or creative output. Examples: writing original content, debugging novel code, learning new concepts, strategic planning, analysis.",
+        "scheduling_rule": "Schedule exclusively in morning peak or afternoon secondary peak windows. Never in trough. Never as the 4th+ consecutive high-load task — performance degrades sharply after 90-120 minutes of sustained high-load work.",
+        "max_continuous_minutes": 90,
+        "recovery_needed_after": "10-15 minute break minimum"
+      },
+      {
+        "level": "medium",
+        "description": "Tasks requiring attention but not novel thinking. Examples: editing existing work, responding to complex emails, reviewing and commenting, moderate problem solving.",
+        "scheduling_rule": "Can go in morning peak or afternoon secondary peak. Acceptable in early trough (1-2pm) for short durations. Not ideal for late evening.",
+        "max_continuous_minutes": 120
+      },
+      {
+        "level": "low",
+        "description": "Routine, procedural tasks. Examples: filing, data entry, scheduling, simple correspondence, administrative tasks, form completion.",
+        "scheduling_rule": "Ideal for trough periods (1-3pm). Good for transition slots between major blocks. Can be batched effectively.",
+        "max_continuous_minutes": "unlimited (limited by boredom, not cognitive load)"
+      }
+    ],
+    "context_switching_penalty": {
+      "description": "Switching between cognitively distinct task types (e.g., creative writing → email → data analysis) incurs a 'resumption lag' of 15-23 minutes per switch (Gloria Mark, UC Irvine research). Each switch costs attentional residue.",
+      "scheduling_implication": "Batch similar task types together. Do not interleave deep work with quick admin tasks. If a quick task must happen mid-deep-work, it is better to batch 3-4 quick tasks at the end of the deep work block rather than interrupt twice.",
+      "transition_buffer": "Allow minimum 10 minutes between cognitively distinct blocks. The 10-minute gap rule in context.json serves this purpose."
+    }
+  },
+  "deep_work_theory": {
+    "source": "Cal Newport, Deep Work (2016), and supporting academic literature",
+    "core_principles": [
+      {
+        "principle": "Minimum viable deep work session",
+        "detail": "Sessions shorter than 60 minutes rarely produce meaningful output on complex tasks. The first 15-20 minutes are often spent entering flow state. Optimal sessions are 90-120 minutes. Scheduling a 2-hour deep work task in a 45-minute slot will produce less value than rescheduling it to a proper window."
+      },
+      {
+        "principle": "Flow state and uninterrupted conditions",
+        "detail": "Deep work requires freedom from interruption. A single interruption can cost 20+ minutes of recovery. Tasks labeled @deep-work must not be scheduled in windows immediately adjacent to meetings without a 30-minute buffer. Never schedule @deep-work in the final 30 minutes before a Flamingo event."
+      },
+      {
+        "principle": "Depth budget",
+        "detail": "Most people have a hard ceiling of 3-4 hours of genuine deep work per day. Beyond that, output quality degrades even if the person remains at their desk. Do not schedule more than 4 hours of high-load tasks in a single day. After 4 hours of deep work total, only medium or low-load tasks should be scheduled."
+      },
+      {
+        "principle": "Morning primacy",
+        "detail": "Deep work completed in the morning persists better in memory and produces higher quality output than the same task done in the afternoon. When possible, the single most important task of the day (usually P1) goes into the first available peak window."
+      }
+    ]
+  },
+  "task_momentum_and_sequencing": {
+    "overview": "The order in which tasks are tackled affects psychological state, motivation, and actual output. Research on task sequencing (Teresa Amabile, Harvard; BJ Fogg, Stanford) identifies patterns that either build or drain momentum.",
+    "principles": [
+      {
+        "principle": "Progress principle",
+        "source": "Teresa Amabile, The Progress Principle (2011)",
+        "detail": "Small wins early in the day create positive affect and motivation that carries forward. Starting with a small, completable task before the major P1 task can improve focus and output on the harder task. Consider inserting one @quick task at the very start of a deep work block as a warm-up."
+      },
+      {
+        "principle": "Hardest first (MIT — Most Important Task)",
+        "detail": "For high-stakes deadline work, doing the most important task first (after warm-up) produces the best outcomes. Willpower and decision-making quality decline across the day. Tackle the task that matters most during peak cognitive window, not the task that is easiest."
+      },
+      {
+        "principle": "Avoid cold-starting on the hardest task of the day",
+        "detail": "Starting a 3-hour thesis writing session as the absolute first act of the day (with no warm-up) often produces resistance and slow ramp-up. A 10-15 minute lighter task immediately before — reviewing notes, reading yesterday's output, replying to one low-stakes email — dramatically reduces startup friction."
+      },
+      {
+        "principle": "Batch similar cognitive modes",
+        "detail": "Group all email/communication tasks together. Group all reading/review tasks together. Group all writing tasks together. The brain builds momentum within a cognitive mode; switching modes costs time and energy. Admin tasks should be batched into one dedicated window, not scattered throughout the day."
+      },
+      {
+        "principle": "End with a clear stopping point",
+        "detail": "Zeigarnik effect: incomplete tasks occupy working memory. Ending the day with clearly captured incomplete tasks (and a plan for when they will be addressed) reduces cognitive residue and improves sleep quality. The end-of-day review flow exists for this reason."
+      }
+    ],
+    "within_block_sequencing_heuristic": "For a deep work block containing multiple tasks: (1) Start with one @quick or warm-up task if available, (2) Tackle the highest-priority / highest-cognitive-load task while peak focus is active, (3) As energy within the block wanes, move to medium-load tasks, (4) End with any admin or review tasks that close out the block cleanly."
+  },
+  "energy_management": {
+    "overview": "Beyond cognitive load, physical and emotional energy affect scheduling. Tony Schwartz (The Power of Full Engagement) and research on ultradian rhythms suggest that humans naturally cycle between higher and lower energy states every 90-120 minutes.",
+    "ultradian_rhythm": {
+      "description": "The body moves through 90-120 minute cycles of relatively higher and lower arousal throughout the day (Basic Rest-Activity Cycle, BRAC). At the end of each cycle, the body signals a need for rest — yawning, difficulty concentrating, desire to stretch.",
+      "scheduling_implication": "Design work blocks around the natural 90-minute cycle. A 90-minute deep work block followed by a 10-15 minute break aligns with biology. Trying to force 3 continuous hours of deep work fights the BRAC and produces diminishing returns after the first 90-120 minutes."
+    },
+    "decision_fatigue": {
+      "description": "Decision-making quality degrades with the number of decisions made (Baumeister, 1998; Danziger et al., 2011 parole board study). Complex decisions late in the day are systematically worse than the same decisions made in the morning.",
+      "scheduling_implication": "Schedule any task requiring significant judgment (strategic decisions, complex writing, evaluating options) in the morning peak window. Routine decisions (which email to answer, admin tasks) are fine for afternoon. Never schedule a major decision task as the last item of the day."
+    }
+  },
+  "scheduling_heuristics_summary": {
+    "description": "Quick-reference rules synthesized from all research above. Apply these when generating a schedule.",
+    "rules": [
+      "Morning peak window: P1 tasks and high cognitive load tasks only. This is the most valuable time of day.",
+      "Post-lunch trough (approx 1-3pm for this user, adjusted for night-owl chronotype): admin, email, @quick tasks, low-stakes meetings.",
+      "Afternoon secondary peak: P2 medium-load tasks, collaborative work, review tasks.",
+      "Evening (after 7pm): light review only. No new deep work. Hard stop at 9pm.",
+      "Never schedule @deep-work tasks in the 30 minutes before a Flamingo (meeting) event.",
+      "Maximum 4 hours of high-load tasks per day. After that, only medium or low load.",
+      "Deep work sessions should be 60-120 minutes minimum. Never schedule a 3-hour task in a 45-minute slot — push it to a proper window.",
+      "Batch admin tasks together. Do not scatter @quick tasks across deep work blocks.",
+      "Insert one small completable task at the start of a deep work block as a warm-up when possible.",
+      "Respect the 90-minute ultradian cycle: design blocks of ~90 minutes, not 3+ continuous hours.",
+      "When multiple P1 tasks exist, sequence the most cognitively demanding one first within the peak window.",
+      "Always justify placement using one of the named principles above in the placement_reason field."
+    ]
+  }
+}

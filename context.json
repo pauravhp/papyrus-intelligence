@@ -1,0 +1,74 @@
+{
+  "user": {
+    "name": "Paurav",
+    "timezone": "PST/Vancouver"
+  },
+  "sleep": {
+    "default_sleep_time": "01:00",
+    "default_wake_time": "09:00",
+    "morning_buffer_minutes": 90,
+    "first_task_not_before": "10:30",
+    "weekend_days": ["friday", "saturday", "sunday"],
+    "weekend_nothing_before": "13:00",
+    "late_night_threshold": "00:30",
+    "no_tasks_after": "23:00"
+  },
+  "calendar_rules": {
+    "flamingo": {
+      "color_id": "4",
+      "type": "meeting_call",
+      "buffer_before_minutes": 15,
+      "buffer_after_minutes": 15,
+      "movable": false
+    },
+    "banana": {
+      "color_id": "5",
+      "type": "event",
+      "buffer_before_minutes": 30,
+      "buffer_after_minutes": 30,
+      "movable": false
+    }
+  },
+  "scheduling": {
+    "min_gap_between_tasks_minutes": 5,
+    "max_tasks_per_day": 10,
+    "duration_bands_minutes": {
+      "xs": [5, 15],
+      "s": [30, 60],
+      "m": [60, 90],
+      "l": [120, 180],
+      "xl": [180, 300],
+    "xxl": [300, 480]
+    }
+  },
+  "label_vocabulary": {
+    "@deep-work": "Task requires sustained focus and uninterrupted concentration. Never schedule back-to-back with another deep-work task without a real break.",
+    "@admin": "Low-cognitive overhead task. Emails, updates, coordination, filing.",
+    "@waiting": "Blocked on someone else. Never schedule automatically. Only surface in weekly review.",
+    "@quick": "Under 15 minutes. Batch into transition gaps between larger blocks.",
+    "@focus": "Requires uninterrupted environment — no scheduling near meetings or noisy transitions.",
+    "@in-progress": "Partially completed. Has remaining duration already updated. Treat as higher urgency than unstarted tasks of same priority.",
+    "@recurring-review": "Weekly review task. Do not schedule into daily plan unless explicitly requested."
+  },
+  "projects": [
+    { "todoist_name": "Masters Research", "keywords": ["thesis", "chapter", "supervisor", "literature", "paper", "citation", "draft"] },
+    { "todoist_name": "Co-op", "keywords": ["co-op", "application", "resume", "recruiter", "interview", "job"] },
+    { "todoist_name": "Network", "keywords": ["linkedin", "community", "event", "volunteer", "meeting", "newsletter", "reach out", "hackathon"] },
+    { "todoist_name": "Admin", "keywords": ["marketplace", "groceries", "family", "friend", "gym", "book", "errand"] }
+  ],
+  "rules_plaintext": [
+    "Never schedule anything during the 90-minute morning buffer after wake",
+    "Meetings, calls, and events are immovable — task blocks always move around them",
+    "Always add 30-minute buffer before and after Flamingo (meeting/call) events",
+    "Always add 30-minute buffer before and after Banana (event) events",
+    "Never schedule tasks after 11pm",
+    "Minimum 5-minute gap between any two task blocks",
+    "P1 tasks get the first available deep work block",
+    "On weekends (Fri/Sat/Sun), nothing before noon regardless of calendar",
+    "If a task has been pushed 3+ times, flag it as at-risk",
+    "Tasks labeled @waiting are never scheduled automatically",
+    "Tasks labeled @quick are batched into transition gaps, not given their own blocks",
+    "Tasks labeled @deep-work are never placed adjacent to meetings without buffer",
+    "Tasks labeled @in-progress are treated as higher urgency than unstarted tasks of the same priority level"
+  ]
+}
