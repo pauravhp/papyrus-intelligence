@@ -357,3 +357,228 @@ Timezone normalization: task `due_datetime` from the Todoist API is UTC-aware
 to `target_date`.
 
 ---
+
+## Phase 2 — Review (2026-04-06)
+
+### --review flow and partial completion bands
+
+**Flow:**
+1. Query `task_history` for today's unreviewed rows (`actual_duration_mins IS NULL AND completed_at IS NULL`). Use `substr(scheduled_at, 1, 10)` for safe date comparison against ISO-with-offset strings.
+2. Call `is_task_completed(task_id)` for each row. Todoist removes completed tasks from the active list → `GET /api/v1/tasks/{id}` returns 404 for completed tasks → treat as completed.
+3. Mark completed tasks in DB (`mark_task_completed`). Print ✅.
+4. For each incomplete task: show 5-option prompt — didn't start / ~25% / ~50% / ~75% / done.
+5. Collect (row, remaining_minutes, status) for all non-done tasks.
+6. For each, search up to 7 days ahead: compute_free_windows for each candidate day (including already-scheduled Todoist tasks to avoid double-booking), find first window that fits `remaining_minutes`. Track session placements with a `TodoistTask` placeholder to prevent collisions within the same review session.
+7. Show proposals, ask for confirmation. If y: `clear_task_schedule` → `schedule_task` → `add_comment` → insert new `task_history` row.
+
+**Partial completion percentage bands:**
+- [1] Didn't start → remaining = estimated, no @in-progress label
+- [2] ~25% done → done = round(est × 0.25, 5min), remaining = est − done, rounded to 15min, add @in-progress
+- [3] ~50% done → done = round(est × 0.50, 5min), remaining = est − done, add @in-progress
+- [4] ~75% done → done = round(est × 0.75, 5min), remaining = est − done, add @in-progress
+- [5] Actually done → mark completed, no reschedule
+
+**Key gotcha:** `add_in_progress_label` must fetch raw task labels from Todoist (not use `_parse_task` output) because `_parse_task` strips the duration label. Posting back `task.labels` (already stripped) would permanently remove the duration label from Todoist.
+
+---
+
+## Phase 2 — --review Rewrite + DB Upsert (2026-04-06)
+
+### SQLite UNIQUE migration fails on existing duplicate rows
+
+**What happened:** Adding `CREATE UNIQUE INDEX IF NOT EXISTS` to `setup_database()` threw
+`sqlite3.IntegrityError: UNIQUE constraint failed: task_history.task_id` on the existing
+database, which had multiple rows per task_id from repeated `--plan-day` runs.
+
+**Fix:** Deduplicate before creating the index:
+```sql
+DELETE FROM task_history
+WHERE id NOT IN (SELECT MAX(id) FROM task_history GROUP BY task_id);
+```
+Run this unconditionally in `setup_database()` before the `CREATE UNIQUE INDEX` call.
+It's a no-op on clean databases, safe on dirty ones.
+
+**Rule for future migrations:** Always clean data before adding constraints — never
+assume the existing DB is already valid.
+
+---
+
+### task_history upsert — only update scheduling fields, never touch completion fields
+
+The `INSERT ... ON CONFLICT DO UPDATE` pattern in `insert_task_history()` deliberately
+does NOT update `actual_duration_mins` or `completed_at`. Those are set exclusively by
+`upsert_task_completed()` during `--review`. If `insert_task_history` overwrote them,
+re-running `--plan-day` on a day that was already reviewed would erase the review data.
+
+The CASE expression for `reschedule_count` only increments when `scheduled_at` actually
+changes — not on every `--plan-day` run. This distinguishes "confirmed re-plan" from
+"re-run same plan".
+
+---
+
+### --review: Todoist as primary source of truth, not task_history
+
+**Old approach:** `get_todays_task_history()` (DB rows) → check each via `is_task_completed()`
+(individual GET requests per task). Problem: required N API calls, only knew about tasks
+the agent had scheduled, missed tasks completed outside the agent.
+
+**New approach:**
+1. `get_todays_scheduled_tasks(today)` — one filtered fetch of active timed tasks for today
+2. `get_todays_completed_tasks(today)` — activity log fetch for completed events
+3. Orphan detection: any `task_history` row for today NOT in `incomplete ∪ completed` →
+   auto-mark complete (task was done outside agent flow)
+
+This is N=2 API calls regardless of task count, and catches completions from any source.
+
+---
+
+### Todoist activity/get endpoint — still alive on sync/v9
+
+`GET https://api.todoist.com/sync/v9/activity/get` works despite `sync/v9/sync` being
+deprecated. Use params `event_type=completed`, `since`, `until` to filter by date.
+Returns `{"events": [...]}` where each event has `object_id` (task_id), `extra_data.content`
+(task name), and `extra_data.duration` (duration in minutes if set).
+
+**Implementation note:** `get_todays_completed_tasks()` handles graceful failure — returns
+`[]` on any non-200 response, never crashes `--review`. The activity log is best-effort;
+the interactive prompt handles gaps.
+
+---
+
+### Reschedule loop now uses get_todays_scheduled_tasks instead of get_tasks filter
+
+The reschedule loop in `_cmd_review` previously called `client.get_tasks(f"due: {date}")` then
+filtered client-side for timed tasks. Replaced with `client.get_todays_scheduled_tasks(candidate)`
+which does the same filtering internally. Consistent with the Step 1 fetch pattern.
+
+---
+
+## Phase 2 — --review Fixes Round 2 (2026-04-06)
+
+### "today & completed" Todoist filter returns active tasks too
+
+**What happened:** `GET /api/v1/tasks?filter=today+%26+completed` returns BOTH active
+tasks due today AND completed tasks due today. The 6 active incomplete tasks appeared
+in the completed list because Todoist's filter expands to include them.
+
+**Evidence:** Checking task IDs — all 6 incomplete task IDs were also present in the
+completed list returned by "today & completed".
+
+**Fix:** In `_cmd_review`, deduplicate after fetching:
+```python
+incomplete_ids = {t.id for t in incomplete}
+completed = [t for t in completed if t.id not in incomplete_ids]
+```
+Always apply this dedup when using "today & completed" alongside an active task fetch.
+
+---
+
+### activity/get fallback was returning stale completion events — removed
+
+**What happened:** The original `get_todays_completed_tasks` used `sync/v9/activity/get`
+as a fallback. This returned 12 events (matching today's date) even for tasks still active
+in Todoist. These were old completion events from recurring task instances, creating
+false positives in Step 2 (auto-marking active tasks as completed).
+
+**Fix:** Removed the activity/get fallback entirely. `get_todays_completed_tasks` now
+uses only the "today & completed" filter. If that returns empty, the result is [].
+Orphan detection in Step 5 handles tasks completed outside the agent flow.
+
+**Rule:** The `sync/v9/activity/get` endpoint is reserved for Phase 7 habit tracking
+(historical analysis), not real-time review. It includes stale events that predate the
+current session.
+
+---
+
+### Step 2 and Step 3: prefer task_history estimated_duration_mins over Todoist duration
+
+The Todoist API duration field stores the duration at the time of scheduling. The
+`task_history.estimated_duration_mins` is the value set at `--plan-day` time, which is
+the authoritative estimate. In Step 2 (auto-complete) and Step 3 (interactive prompt),
+the lookup now is:
+```python
+hist = get_task_history_row(task.id)
+est = hist["estimated_duration_mins"] if hist and hist.get("estimated_duration_mins") else (task.duration_minutes or 30)
+```
+
+---
+
+### Step 3: reschedule_count context display
+
+Tasks rescheduled more than once now show "(rescheduled X times)" next to their name
+in the prompt. The condition is `reschedule_count > 1` (not `>= 1`) to avoid noise
+on first reschedule. The count comes from `task_history.reschedule_count`.
+
+---
+
+## Phase 2 — --review Critical Fix: Hybrid Source of Truth (2026-04-06)
+
+### --review source of truth: task_history for WHICH, Todoist for STATUS
+
+**Problem with Todoist-as-primary-source approach:** Fetching tasks from Todoist directly
+(via `get_todays_scheduled_tasks` and `get_todays_completed_tasks`) pulled in tasks that
+were never scheduled via --plan-day. The "today & completed" filter returned tasks from
+recurring instances with the same name, causing the same task to appear as both completed
+and incomplete. Fundamentally unreliable as a review source.
+
+**New architecture (hybrid):**
+- **WHICH tasks to review:** `get_todays_task_history(target_str)` — these are exactly
+  the tasks `--plan-day` confirmed and wrote to task_history. Authoritative list.
+- **STATUS of each task:** `get_task_by_id(task_id)` — one API call per task.
+  - None returned → completed (Todoist removes completed tasks from active list)
+  - Found, due_datetime ≠ target_date → externally rescheduled by user in Todoist
+  - Found, due_datetime = target_date → still incomplete
+
+**Removed:** `get_todays_completed_tasks()` from todoist_client.py — no longer needed.
+**Removed:** orphan detection step — task_history IS the authoritative list now; there
+are no orphans since we only look at what was planned.
+
+---
+
+### "today & completed" Todoist filter was unreliable — abandoned
+
+The `GET /api/v1/tasks?filter=today+%26+completed` endpoint returned both active AND
+completed tasks with today's due date (including recurring instance duplicates). All 6
+active task IDs also appeared in the "completed" list. This made it impossible to cleanly
+separate what was done vs what wasn't.
+
+**Resolution:** Scrapped entirely. See "hybrid source of truth" above.
+
+---
+
+### Reschedule proposals must use task_history to prevent double-booking
+
+**Problem:** The reschedule loop was calling `client.get_todays_scheduled_tasks(candidate)`
+to find already-blocked time on future dates. This only knew about tasks that still had a
+Todoist due_datetime set — it missed any tasks that had been cleared or modified since
+`--plan-day` wrote them.
+
+**Fix:** Load task_history rows for each candidate date via `get_todays_task_history(candidate_str)`,
+convert to `TodoistTask`-like objects (using `scheduled_at` as `due_datetime` and
+`estimated_duration_mins` as `duration_minutes`), and pass them to `compute_free_windows`
+as `scheduled_tasks`. This is the same pattern `--plan-day` uses and is the authoritative
+record of what's been planned.
+
+```python
+db_rows = get_todays_task_history(candidate_str)
+db_blocked = [TodoistTask(id=r["task_id"], ..., due_datetime=datetime.fromisoformat(r["scheduled_at"]).astimezone(tz), duration_minutes=r["estimated_duration_mins"] or 30, ...) for r in db_rows if r.get("scheduled_at")]
+windows = compute_free_windows(events, candidate, context, scheduled_tasks=db_blocked + session_tasks)
+```
+
+---
+
+### --review now accepts optional DATE argument (same pattern as --plan-day)
+
+`argparse` change: `action="store_true"` → `nargs="?", const="", default=None`.
+- `--review` alone → `args.review = ""` → resolves to today
+- `--review tomorrow` → resolves to tomorrow's date
+- not passed → `args.review = None` → detected via `is not None`
+
+`_cmd_review(context, target_date)` now takes an explicit `date` parameter. Call site:
+```python
+elif args.review is not None:
+    target_date = _resolve_target_date(args.review)
+    _cmd_review(context, target_date)
+```
+
+---

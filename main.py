@@ -638,6 +638,345 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
         )
 
 
+def _cmd_review(context: dict, target_date: "date") -> None:
+    """
+    --review [DATE]: hybrid source of truth.
+
+    task_history tells us WHICH tasks to review (only tasks scheduled via --plan-day).
+    Todoist (get_task_by_id) tells us the STATUS of each task.
+
+    Step 1: Load unreviewed task_history rows for target_date.
+    Step 2: Check each task's status via Todoist — completed / externally rescheduled / incomplete.
+    Step 3: Interactive [1-5] prompt for incomplete tasks.
+    Step 4: Reschedule proposals using task_history (not Todoist) for double-booking prevention.
+    """
+    from datetime import date, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from src.calendar_client import get_events
+    from src.db import (
+        get_todays_task_history,
+        insert_task_history,
+        mark_task_partial,
+        mark_task_rescheduled_externally,
+        setup_database,
+        upsert_task_completed,
+    )
+    from src.models import TodoistTask
+    from src.scheduler import compute_free_windows
+    from src.todoist_client import TodoistClient
+
+    setup_database()
+
+    _tz_aliases = {
+        "PST": "America/Vancouver",
+        "PST/Vancouver": "America/Vancouver",
+        "Vancouver": "America/Vancouver",
+    }
+    tz_str = context.get("user", {}).get("timezone", "America/Vancouver")
+    tz_str_norm = _tz_aliases.get(tz_str, tz_str)
+    tz = ZoneInfo(tz_str_norm)
+    extra_cal_ids = context.get("calendar_ids", [])
+
+    today = date.today()
+    target_str = target_date.isoformat()
+    now_iso = datetime.now(tz).isoformat()
+
+    api_token = os.getenv("TODOIST_API_TOKEN")
+    client = TodoistClient(api_token)
+
+    # ── Step 1: Load from task_history ────────────────────────────────────────
+    print(f"\n[Review] Loading tasks for {target_str} from task_history...")
+    rows = get_todays_task_history(target_str)
+    if not rows:
+        print(f"  No tasks were scheduled via --plan-day for {target_str}.")
+        print(f"  Run: python main.py --plan-day {target_str}")
+        return
+
+    print(f"  {len(rows)} planned task(s) found\n")
+
+    # ── Step 2: Check each task status via Todoist ────────────────────────────
+    # A) task is None → completed (Todoist removes completed tasks from active list)
+    # B) task found + due_datetime not on target_date → externally rescheduled
+    # C) task found + due_datetime on target_date → still incomplete
+    n_auto_completed = 0
+    n_external = 0
+    incomplete: list[tuple[dict, TodoistTask]] = []  # (row, task)
+
+    for row in rows:
+        task = client.get_task_by_id(row["task_id"])
+
+        if task is None:
+            # A) Completed
+            upsert_task_completed(
+                task_id=row["task_id"],
+                task_name=row["task_name"],
+                project_id=row.get("project_id", ""),
+                estimated_duration_mins=row.get("estimated_duration_mins") or 30,
+                actual_duration_mins=row.get("estimated_duration_mins") or 30,
+                completed_at=now_iso,
+                scheduled_at=row.get("scheduled_at"),
+                day_of_week=row.get("day_of_week"),
+            )
+            print(f"  \u2705 {row['task_name']} (completed)")
+            n_auto_completed += 1
+
+        elif task.due_datetime and task.due_datetime.astimezone(tz).date() != target_date:
+            # B) Externally rescheduled
+            new_date = task.due_datetime.astimezone(tz).date()
+            print(f"  \U0001f4c5 {row['task_name']} (rescheduled externally to {new_date}) \u2014 skipping")
+            mark_task_rescheduled_externally(row["task_id"])
+            n_external += 1
+
+        else:
+            # C) Still incomplete and on target_date
+            incomplete.append((row, task))
+
+    if not incomplete:
+        _W = 47
+        print(f"\n{'=' * _W}")
+        print(f"  REVIEW COMPLETE \u2014 {target_str}")
+        print(f"{'=' * _W}")
+        print(f"  Completed:    {n_auto_completed} task(s)")
+        if n_external:
+            print(f"  Ext. moved:   {n_external} task(s) (rescheduled in Todoist directly)")
+        print(f"  Rescheduled:  0 task(s)")
+        print(f"{'=' * _W}\n")
+        return
+
+    # ── Step 3: Interactive prompt for incomplete tasks ───────────────────────
+    def _r5(n: int) -> int:
+        return max(5, round(n / 5) * 5)
+
+    def _r15(n: int) -> int:
+        return max(15, round(n / 15) * 15)
+
+    # (row, task, remaining_minutes, status: "not_started" | "partial" | "done")
+    incomplete_with_remaining: list[tuple[dict, TodoistTask, int, str]] = []
+
+    for row, task in incomplete:
+        est = row.get("estimated_duration_mins") or 30
+        reschedule_count = row.get("reschedule_count") or 0
+        p_str = _PRIORITY_LABEL.get(task.priority, "P?")
+
+        bands = [(0.25, "~25%"), (0.50, "~50%"), (0.75, "~75%")]
+
+        reschedule_ctx = f"  (rescheduled {reschedule_count} times)" if reschedule_count > 1 else ""
+        print(f'  \u274c "{row["task_name"]}"  (estimated: {est}min, {p_str}{reschedule_ctx})')
+        print("     How far did you get?")
+        print("     [1] Didn't start")
+        for i, (pct, label) in enumerate(bands, 2):
+            done = _r5(int(est * pct))
+            left = _r5(max(5, est - done))
+            print(f"     [{i}] {label} done  (~{done}min done, ~{left}min remaining)")
+        print("     [5] Actually done \u2713")
+
+        try:
+            choice = input("     > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            choice = "1"
+
+        if choice == "5":
+            print("     \u2705 Marked complete.\n")
+            upsert_task_completed(
+                task_id=row["task_id"],
+                task_name=row["task_name"],
+                project_id=row.get("project_id", ""),
+                estimated_duration_mins=est,
+                actual_duration_mins=est,
+                completed_at=now_iso,
+                scheduled_at=row.get("scheduled_at"),
+                day_of_week=row.get("day_of_week"),
+            )
+            incomplete_with_remaining.append((row, task, 0, "done"))
+
+        elif choice == "1":
+            print()
+            incomplete_with_remaining.append((row, task, est, "not_started"))
+
+        elif choice in ("2", "3", "4"):
+            pct = bands[int(choice) - 2][0]
+            done = _r15(int(est * pct))
+            remaining = max(15, est - done)
+            try:
+                client.add_in_progress_label(row["task_id"])
+            except Exception as exc:
+                print(f"     [WARN] Could not add @in-progress label: {exc}")
+            mark_task_partial(row["task_id"], target_str, done)
+            print()
+            incomplete_with_remaining.append((row, task, remaining, "partial"))
+
+        else:
+            print()
+            incomplete_with_remaining.append((row, task, est, "not_started"))
+
+    # ── Step 4: Reschedule incomplete tasks ───────────────────────────────────
+    to_reschedule = [
+        (row, task, rem, st)
+        for row, task, rem, st in incomplete_with_remaining
+        if st != "done"
+    ]
+
+    # (row, remaining, candidate_date|None, slot_start|None, slot_end|None)
+    proposals: list[tuple[dict, int, "date | None", "datetime | None", "datetime | None"]] = []
+    # Tracks tasks placed this session to avoid inter-task collisions
+    session_tasks_by_day: dict["date", list[TodoistTask]] = {}
+
+    if to_reschedule:
+        print(f"  {chr(9472) * 51}")
+        print("  RESCHEDULING INCOMPLETE TASKS")
+        print(f"  {chr(9472) * 51}")
+
+        for row, task, remaining, _status in to_reschedule:
+            placed = False
+            for days_ahead in range(1, 8):
+                candidate = today + timedelta(days=days_ahead)
+                candidate_str_inner = candidate.isoformat()
+
+                try:
+                    events = get_events(candidate, tz_str, extra_calendar_ids=extra_cal_ids)
+                except Exception:
+                    events = []
+
+                # Use task_history as the source of already-blocked time.
+                # This prevents proposing slots that --plan-day has already filled.
+                db_rows = get_todays_task_history(candidate_str_inner)
+                db_blocked: list[TodoistTask] = []
+                for db_row in db_rows:
+                    if db_row.get("scheduled_at"):
+                        try:
+                            sched_dt = datetime.fromisoformat(db_row["scheduled_at"]).astimezone(tz)
+                            db_blocked.append(
+                                TodoistTask(
+                                    id=db_row["task_id"],
+                                    content=db_row["task_name"],
+                                    project_id=db_row.get("project_id", ""),
+                                    priority=1,
+                                    due_datetime=sched_dt,
+                                    deadline=None,
+                                    duration_minutes=db_row.get("estimated_duration_mins") or 30,
+                                    labels=[],
+                                    is_inbox=False,
+                                )
+                            )
+                        except Exception:
+                            pass
+
+                session_tasks = session_tasks_by_day.get(candidate, [])
+                windows = compute_free_windows(
+                    events, candidate, context,
+                    scheduled_tasks=db_blocked + session_tasks,
+                )
+
+                for window in windows:
+                    if window.duration_minutes >= remaining:
+                        slot_start = window.start
+                        slot_end = slot_start + timedelta(minutes=remaining)
+                        proposals.append((row, remaining, candidate, slot_start, slot_end))
+
+                        # Reserve this slot for subsequent tasks in this session
+                        placeholder = TodoistTask(
+                            id=row["task_id"] + "_placeholder",
+                            content=row["task_name"],
+                            project_id=row.get("project_id", ""),
+                            priority=1,
+                            due_datetime=slot_start,
+                            deadline=None,
+                            duration_minutes=remaining,
+                            labels=[],
+                            is_inbox=False,
+                        )
+                        session_tasks_by_day.setdefault(candidate, []).append(placeholder)
+                        placed = True
+                        break
+
+                if placed:
+                    break
+
+            if not placed:
+                proposals.append((row, remaining, None, None, None))
+
+        for row, remaining, cand_date, slot_start, slot_end in proposals:
+            if cand_date is None:
+                print(f"\n  \u26a0\ufe0f  {row['task_name']} \u2192 needs manual scheduling")
+            else:
+                day_label = (
+                    "Tomorrow"
+                    if cand_date == today + timedelta(days=1)
+                    else cand_date.strftime("%A %b %d")
+                )
+                print(
+                    f"\n  \u2192  {row['task_name']}"
+                    f" \u2192 {day_label} {slot_start.strftime('%H:%M')}\u2013{slot_end.strftime('%H:%M')}"
+                    f"  ({remaining}min)"
+                )
+
+        try:
+            confirm = input("\n  Confirm reschedule? [y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            confirm = "n"
+
+        n_rescheduled = 0
+        n_needs_attention = 0
+
+        if confirm == "y":
+            for row, remaining, cand_date, slot_start, slot_end in proposals:
+                if cand_date is None:
+                    n_needs_attention += 1
+                    continue
+                try:
+                    client.clear_task_schedule(row["task_id"])
+                    client.schedule_task(row["task_id"], slot_start, remaining)
+
+                    orig_at = row.get("scheduled_at", "")
+                    try:
+                        orig_str = datetime.fromisoformat(orig_at).strftime("%Y-%m-%d %H:%M") if orig_at else "unknown"
+                    except Exception:
+                        orig_str = orig_at or "unknown"
+                    comment = (
+                        f"Rescheduled from {orig_str}. "
+                        f"Reason: incomplete \u2014 rescheduled via --review."
+                    )
+                    client.add_comment(row["task_id"], comment)
+
+                    insert_task_history(
+                        task_id=row["task_id"],
+                        task_name=row["task_name"],
+                        project_id=row.get("project_id", ""),
+                        estimated_duration_mins=remaining,
+                        scheduled_at=slot_start.isoformat(),
+                        day_of_week=cand_date.strftime("%A"),
+                        was_rescheduled=True,
+                        cognitive_load_label=row.get("cognitive_load_label"),
+                    )
+                    n_rescheduled += 1
+                except Exception as exc:
+                    print(f"  [WARN] Could not reschedule '{row['task_name']}': {exc}")
+        else:
+            n_rescheduled = 0
+            n_needs_attention = sum(1 for _, _, d, _, _ in proposals if d is None)
+    else:
+        n_rescheduled = 0
+        n_needs_attention = 0
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    _W = 47
+    n_completed_total = n_auto_completed + sum(
+        1 for _, _, _, st in incomplete_with_remaining if st == "done"
+    )
+    print(f"\n{'=' * _W}")
+    print(f"  REVIEW COMPLETE \u2014 {target_str}")
+    print(f"{'=' * _W}")
+    print(f"  Completed:    {n_completed_total} task(s)")
+    if n_external:
+        print(f"  Ext. moved:   {n_external} task(s) (rescheduled in Todoist directly)")
+    print(f"  Rescheduled:  {n_rescheduled} task(s)")
+    if n_needs_attention:
+        print(f"  Needs attention: {n_needs_attention} task(s) \u2014 schedule manually")
+    print(f"{'=' * _W}\n")
+
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="AI Scheduling Agent",
@@ -660,7 +999,12 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--review", action="store_true", help="Review pushed/flagged tasks (Phase 2+)"
+        "--review",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DATE",
+        help="Review today's scheduled tasks. Optional date: tomorrow | 2026-04-07 (default: today)",
     )
     parser.add_argument(
         "--add-task", type=str, metavar="TASK", help="Add a task to Todoist inbox"
@@ -674,9 +1018,9 @@ def main() -> None:
     elif args.plan_day is not None:
         target_date = _resolve_target_date(args.plan_day)
         _cmd_plan_day(context, target_date)
-    elif args.review:
-        print("[ERROR] --review not yet implemented (Phase 2)")
-        sys.exit(1)
+    elif args.review is not None:
+        target_date = _resolve_target_date(args.review)
+        _cmd_review(context, target_date)
     elif args.add_task:
         print("[ERROR] --add-task not yet implemented")
         sys.exit(1)

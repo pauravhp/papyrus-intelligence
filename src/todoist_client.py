@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 import requests
@@ -142,6 +142,85 @@ class TodoistClient:
             raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
         resp.raise_for_status()
 
+    def get_task_by_id(self, task_id: str) -> Optional[TodoistTask]:
+        """
+        Fetch a single active task by ID.
+        Returns None if the task is not found — Todoist removes completed tasks
+        from the active task list, so 404 reliably means completed or deleted.
+        """
+        resp = requests.get(
+            f"{TODOIST_BASE}/tasks/{task_id}",
+            headers=self.headers,
+        )
+        if resp.status_code == 404:
+            return None
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+        inbox_id = self._get_inbox_project_id()
+        return self._parse_task(resp.json(), inbox_id)
+
+    def is_task_completed(self, task_id: str) -> bool:
+        """
+        Returns True if the task has been completed (or deleted).
+        Todoist removes completed tasks from the active task list, so
+        a 404 on GET /tasks/{id} means completed/deleted.
+        """
+        return self.get_task_by_id(task_id) is None
+
+    def clear_task_schedule(self, task_id: str) -> None:
+        """
+        Clear due_datetime and duration from a task.
+        Used before writing a new reschedule slot.
+        """
+        resp = requests.post(
+            f"{TODOIST_BASE}/tasks/{task_id}",
+            headers=self.headers,
+            json={"due_datetime": None, "duration": None},
+        )
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+
+    def add_in_progress_label(self, task_id: str) -> None:
+        """
+        Add the 'in-progress' label to a task without removing existing labels.
+        Fetches raw task labels (including the duration label that _parse_task strips)
+        to avoid accidentally removing it.
+        """
+        resp = requests.get(f"{TODOIST_BASE}/tasks/{task_id}", headers=self.headers)
+        if resp.status_code == 404:
+            return  # task gone — nothing to label
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+        labels = list(resp.json().get("labels", []))
+        if "in-progress" not in labels:
+            labels.append("in-progress")
+            update = requests.post(
+                f"{TODOIST_BASE}/tasks/{task_id}",
+                headers=self.headers,
+                json={"labels": labels},
+            )
+            if update.status_code == 401:
+                raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+            update.raise_for_status()
+
+    def schedule_task(self, task_id: str, start_dt: "datetime", duration_minutes: int) -> None:
+        """Set due_datetime + duration on a task (used for reschedule write-back)."""
+        resp = requests.post(
+            f"{TODOIST_BASE}/tasks/{task_id}",
+            headers=self.headers,
+            json={
+                "due_datetime": start_dt.isoformat(),
+                "duration": duration_minutes,
+                "duration_unit": "minute",
+            },
+        )
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+
     def get_inbox_tasks(self) -> list[TodoistTask]:
         inbox_id = self._get_inbox_project_id()
         raw = self._get_all_pages(
@@ -149,6 +228,20 @@ class TodoistClient:
             {"project_id": inbox_id},
         )
         return [self._parse_task(item, inbox_id) for item in raw]
+
+    def get_todays_scheduled_tasks(self, target_date: date) -> list[TodoistTask]:
+        """
+        Return active tasks due on target_date that have a specific due_datetime
+        (not just a date) and a duration set — i.e. tasks the agent scheduled.
+        """
+        today = date.today()
+        filter_str = "today" if target_date == today else f"due: {target_date.isoformat()}"
+        tasks = self.get_tasks(filter_str)
+        return [
+            t for t in tasks
+            if t.due_datetime is not None and t.duration_minutes is not None
+        ]
+
 
 
 _WRITEBACK_TIMEZONE_ALIASES = {
