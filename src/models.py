@@ -24,6 +24,7 @@ class TodoistTask:
     duration_minutes: Optional[int]
     labels: list[str]
     is_inbox: bool
+    is_budget_task: bool = False
 
 
 @dataclass

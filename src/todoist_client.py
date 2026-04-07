@@ -221,6 +221,74 @@ class TodoistClient:
             raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
         resp.raise_for_status()
 
+    def create_task(
+        self,
+        content: str,
+        priority: int = 3,
+        deadline: str | None = None,
+        labels: list[str] | None = None,
+    ) -> str:
+        """
+        Create a new Todoist task. Returns the new task_id.
+        priority: 4=P1, 3=P2, 2=P3, 1=P4
+        deadline: ISO date string e.g. "2026-04-20"
+        """
+        body: dict = {"content": content, "priority": priority}
+        if deadline:
+            body["deadline"] = {"date": deadline}
+        if labels:
+            body["labels"] = labels
+        resp = requests.post(
+            f"{TODOIST_BASE}/tasks",
+            headers=self.headers,
+            json=body,
+        )
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+    def close_task(self, task_id: str) -> None:
+        """Mark a task as completed."""
+        resp = requests.post(
+            f"{TODOIST_BASE}/tasks/{task_id}/close",
+            headers=self.headers,
+        )
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+
+    def clear_task_due(self, task_id: str) -> None:
+        """
+        Fully clear a task's due date + duration, returning it to unscheduled state.
+        Uses "due_string": "no date" which is the Todoist-documented way to remove
+        the entire due object (date + datetime).  "due": null is NOT a valid API field
+        and is silently ignored — do not use it.
+        Returns silently on 404 (task deleted externally).
+        """
+        resp = requests.post(
+            f"{TODOIST_BASE}/tasks/{task_id}",
+            headers=self.headers,
+            json={"due_string": "no date", "duration": None, "duration_unit": None},
+        )
+        if resp.status_code == 404:
+            return  # deleted externally — nothing to clear
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+
+    def delete_task(self, task_id: str) -> None:
+        """Permanently delete a task from Todoist. Returns silently on 404."""
+        resp = requests.delete(
+            f"{TODOIST_BASE}/tasks/{task_id}",
+            headers=self.headers,
+        )
+        if resp.status_code == 404:
+            return  # already gone
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+
     def get_inbox_tasks(self) -> list[TodoistTask]:
         inbox_id = self._get_inbox_project_id()
         raw = self._get_all_pages(

@@ -20,7 +20,7 @@ The agent is the intelligence layer. Todoist is the interface the user already l
 - SQLite via the built-in `sqlite3` module (`data/schedule.db`)
 - Google Calendar API (`google-api-python-client`)
 - Todoist REST API v2 + Sync API v9
-- Groq API (`groq` Python SDK). Model for Step 1 Enrich: `llama-3.3-70b-versatile`. Model for Step 2 Schedule: `llama-3.3-70b-versatile`.
+- Groq API (`groq` Python SDK). Model for Step 1 Enrich: `meta-llama/llama-4-scout-17b-16e-instruct`. Model for Step 2 Schedule: `meta-llama/llama-4-scout-17b-16e-instruct`.
 - `python-dotenv` for secrets
 - CLI via `argparse` — flags: `--plan-day`, `--review`, `--add-task`, `--check`
 - `productivity_science.json` — pre-compiled research reference (see Section 9)

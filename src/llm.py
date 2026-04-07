@@ -1,10 +1,10 @@
 """
 Two-step LLM scheduling chain using Groq.
 
-Step 1 — enrich_tasks():   llama-3.3-70b-versatile
+Step 1 — enrich_tasks():   meta-llama/llama-4-scout-17b-16e-instruct
   Assesses cognitive load, energy requirement, and scheduling flags per task.
 
-Step 2 — generate_schedule():  llama-3.3-70b-versatile
+Step 2 — generate_schedule():  meta-llama/llama-4-scout-17b-16e-instruct
   Assigns enriched tasks to free windows using productivity science reasoning.
 
 Both steps: JSON-only output, retry once on parse failure, log full prompt
@@ -19,8 +19,8 @@ from groq import Groq
 
 from src.models import FreeWindow, TodoistTask
 
-ENRICH_MODEL = "llama-3.3-70b-versatile"
-SCHEDULE_MODEL = "llama-3.3-70b-versatile"
+ENRICH_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+SCHEDULE_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 _PRIORITY_LABEL = {4: "P1", 3: "P2", 2: "P3", 1: "P4"}
 
@@ -267,7 +267,9 @@ def _build_schedule_prompt(
     heuristics_summary: dict,
     target_date: str,
 ) -> list[dict]:
-    rules = context.get("rules_plaintext", [])
+    rules_cfg = context.get("rules", {})
+    hard_rules = rules_cfg.get("hard", context.get("rules_plaintext", []))
+    soft_rules = rules_cfg.get("soft", [])
 
     system = (
         "You are a scheduling assistant. You decide the ORDER of tasks and their "
@@ -287,8 +289,13 @@ Do NOT output any clock times — times will be computed separately by the syste
 
 ---
 
-## Hard Rules — NEVER VIOLATE THESE
-{json.dumps(rules, indent=2)}
+## Hard Rules — NEVER VIOLATE THESE (enforced in code)
+{json.dumps(hard_rules, indent=2)}
+
+---
+
+## Soft Rules — Productivity Preferences (use judgment, not absolute)
+{json.dumps(soft_rules, indent=2)}
 
 ---
 
