@@ -124,6 +124,8 @@ def compute_free_windows(
     context: dict,
     late_night_prior: bool = False,
     scheduled_tasks: Optional[list[TodoistTask]] = None,
+    start_override: Optional[datetime] = None,
+    now_override: Optional[datetime] = None,
 ) -> list[FreeWindow]:
     """
     Compute schedulable free windows for target_date.
@@ -136,6 +138,11 @@ def compute_free_windows(
         scheduled_tasks:  Todoist tasks already given a due_datetime on target_date.
                           Their occupied time is blocked identically to GCal events
                           (no color-based buffers) to prevent double-booking.
+        start_override:   When provided, skip all wake/buffer/weekend calculations
+                          and use this datetime directly as effective_start.
+                          Used by --add-task to replan from the current time.
+        now_override:     When provided, used as "current time" for mid-day detection
+                          instead of datetime.now(). Useful for testing.
 
     Returns:
         Sorted list of FreeWindow objects.
@@ -166,6 +173,29 @@ def compute_free_windows(
     day_name = target_date.strftime("%A").lower()
     if day_name in weekend_days:
         effective_start = max(effective_start, _parse_time(weekend_start_str, target_date, tz))
+
+    # Mid-day check: if planning for today and the current time has already passed the
+    # computed morning start, advance effective_start to now (ceiled to next 5-min boundary).
+    # Only applies when start_override is not set — --add-task uses start_override directly.
+    if start_override is None and target_date == date.today():
+        effective_now = (
+            now_override if now_override is not None else datetime.now(tz=tz)
+        )
+        if effective_now.tzinfo is None:
+            effective_now = effective_now.replace(tzinfo=tz)
+        else:
+            effective_now = effective_now.astimezone(tz)
+        if effective_now > effective_start:
+            extra = (5 - effective_now.minute % 5) % 5
+            if extra == 0 and (effective_now.second > 0 or effective_now.microsecond > 0):
+                extra = 5
+            effective_start = (effective_now + timedelta(minutes=extra)).replace(
+                second=0, microsecond=0
+            )
+
+    # When replanning mid-day, skip morning rules and start from now
+    if start_override is not None:
+        effective_start = start_override
 
     # Supports "HH:MM next day" for windows that extend past midnight
     day_end = _parse_time_extended(no_tasks_after_str, target_date, tz)
@@ -552,5 +582,17 @@ def pack_schedule(
         if break_after > 0:
             cursor += timedelta(minutes=break_after)
             continuous_minutes = 0
+
+    # Post-process: compute back_to_back for each placed block.
+    # Sort chronologically (handles out-of-band DW late-night placements correctly),
+    # then flag any block whose start is within 10 min of the previous block's end.
+    if blocks:
+        blocks_sorted = sorted(blocks, key=lambda b: b.start_time)
+        blocks_sorted[0].back_to_back = False
+        for i in range(1, len(blocks_sorted)):
+            prev = blocks_sorted[i - 1]
+            curr = blocks_sorted[i]
+            gap_mins = int((curr.start_time - prev.end_time).total_seconds() / 60)
+            curr.back_to_back = 0 <= gap_mins < 10
 
     return blocks, auto_pushed

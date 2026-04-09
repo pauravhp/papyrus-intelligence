@@ -289,6 +289,12 @@ class TodoistClient:
             raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
         resp.raise_for_status()
 
+    def get_all_tasks(self) -> list[TodoistTask]:
+        """Fetch all active tasks with no filter (searches entire Todoist workspace)."""
+        inbox_id = self._get_inbox_project_id()
+        raw = self._get_all_pages(f"{TODOIST_BASE}/tasks", {})
+        return [self._parse_task(item, inbox_id) for item in raw]
+
     def get_inbox_tasks(self) -> list[TodoistTask]:
         inbox_id = self._get_inbox_project_id()
         raw = self._get_all_pages(

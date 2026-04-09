@@ -46,3 +46,4 @@ class ScheduledBlock:
     placement_reason: str = ""
     split_session: bool = False
     split_part: int = 0  # 0 = not split, 1 = first part, 2 = second part
+    back_to_back: bool = False  # True if gap to previous block's end < 10 min

@@ -40,6 +40,22 @@ def _late_night_threshold_dt(base_date: date, context: dict, tz: ZoneInfo) -> da
     return datetime(ref.year, ref.month, ref.day, h, m, tzinfo=tz)
 
 
+def _has_pre_meeting(block, events: list, context: dict) -> bool:
+    """Return True if a Flamingo GCal event starts within 45 min after block.end_time."""
+    flamingo_color = (
+        context.get("calendar_rules", {})
+        .get("flamingo", {})
+        .get("color_id", "4")
+    )
+    for ev in events:
+        if ev.is_all_day or ev.color_id != flamingo_color:
+            continue
+        gap_mins = int((ev.start - block.end_time).total_seconds() / 60)
+        if 0 <= gap_mins <= 45:
+            return True
+    return False
+
+
 def _load_config() -> dict:
     """Load .env and context.json. Exit immediately if anything is missing."""
     load_dotenv()
@@ -534,6 +550,11 @@ def _cmd_unplan(context: dict, target_date: "date", task_filter: str | None) -> 
     single_task_mode = task_filter is not None
     if single_task_mode:
         needle = task_filter.lower()
+        # Budget tasks are stored in task_history as "Project Name" (without the
+        # "[Budget] " prefix that appears in Todoist). Strip it so that searching
+        # for "[Budget] PM Accelerator JAA 1" matches "PM Accelerator JAA 1".
+        if needle.startswith("[budget] "):
+            needle = needle[len("[budget] "):]
         matched = [r for r in rows if needle in r["task_name"].lower()]
         if not matched:
             print(
@@ -741,6 +762,605 @@ def _cmd_reset_project(context: dict, args) -> None:
     print("     Run --plan-day to schedule a fresh session.")
 
 
+def _handle_no_room(
+    client,
+    new_task,
+    target_date: "date",
+    context: dict,
+    tz,
+    events: list,
+    tz_str: str,
+) -> None:
+    """Offer options when the urgent task doesn't fit anywhere today."""
+    from src.calendar_client import get_events as _get_events
+    from src.scheduler import compute_free_windows
+
+    tomorrow = target_date + timedelta(days=1)
+
+    print("  Options:")
+    print("  [1] Schedule it first thing tomorrow instead")
+    print("  [2] Cancel (I'll handle it manually)")
+    try:
+        choice = input("  > ").strip()
+    except (EOFError, KeyboardInterrupt):
+        choice = "2"
+
+    if choice != "1":
+        print("Cancelled — no changes made.")
+        return
+
+    tomorrow_events = []
+    try:
+        tomorrow_events = _get_events(
+            tomorrow, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+        )
+    except Exception:
+        pass
+
+    tom_windows = compute_free_windows(tomorrow_events, tomorrow, context)
+    if not tom_windows:
+        print(f"No free windows found for {tomorrow}. Please schedule manually.")
+        return
+
+    slot = None
+    for w in tom_windows:
+        if w.duration_minutes >= new_task.duration_minutes:
+            slot = w.start
+            break
+    if slot is None:
+        slot = tom_windows[0].start
+
+    try:
+        client.schedule_task(new_task.id, slot, new_task.duration_minutes)
+        print(
+            f"✅ '{new_task.content}' scheduled for {tomorrow.strftime('%a %b %d')} "
+            f"at {slot.strftime('%H:%M')}."
+        )
+    except Exception as exc:
+        print(f"[ERROR] Could not schedule: {exc}")
+
+
+def _cmd_add_task(context: dict, search_text: str, target_date: "date") -> None:
+    """--add-task SEARCH_TEXT [--date DATE]: insert urgent task, replan rest of day."""
+    from src.calendar_client import get_events
+    from src.db import (
+        compute_deadline_pressure,
+        delete_task_history_row,
+        get_all_active_budgets,
+        get_budget_by_task_id,
+        get_task_history_for_replan,
+        insert_schedule_log,
+        insert_task_history,
+    )
+    from src.llm import enrich_tasks, generate_schedule
+    from src.models import TodoistTask as _TodoistTask
+    from src.scheduler import compute_free_windows, pack_schedule
+    from src.todoist_client import TodoistClient
+    from zoneinfo import ZoneInfo
+
+    _PL = {4: "P1", 3: "P2", 2: "P3", 1: "P4"}
+    _tz_aliases = {
+        "PST": "America/Vancouver",
+        "PST/Vancouver": "America/Vancouver",
+        "Vancouver": "America/Vancouver",
+    }
+    tz_str = context.get("user", {}).get("timezone", "America/Vancouver")
+    tz_str_norm = _tz_aliases.get(tz_str, tz_str)
+    tz = ZoneInfo(tz_str_norm)
+    today_str = target_date.isoformat()
+
+    client = TodoistClient(os.getenv("TODOIST_API_TOKEN"))
+
+    # ── STEP 1: Find the task ─────────────────────────────────────────────────
+    print(f"[Todoist] Searching all tasks for '{search_text}'…")
+    all_tasks = client.get_all_tasks()
+    query = search_text.lower()
+
+    candidates = []
+    for t in all_tasks:
+        if query not in t.content.lower():
+            continue
+        # Warn and skip if already scheduled today
+        if t.due_datetime is not None:
+            dt = t.due_datetime
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+            else:
+                dt = dt.astimezone(tz)
+            if dt.date() == target_date:
+                print(
+                    f"Task already scheduled today: '{t.content}'\n"
+                    f"Use --unplan --task to remove it first, then re-add."
+                )
+                return
+        candidates.append(t)
+
+    if not candidates:
+        print(
+            f"No task found matching '{search_text}'.\n"
+            f"Check the task exists in Todoist and has no scheduled time yet."
+        )
+        return
+
+    if len(candidates) == 1:
+        new_task = candidates[0]
+        dur_str = f"{new_task.duration_minutes}min" if new_task.duration_minutes else "no duration"
+        print(f"Found: '{new_task.content}' ({_PL.get(new_task.priority, 'P4')}, {dur_str})")
+    else:
+        print(f"Multiple tasks match '{search_text}':")
+        for i, t in enumerate(candidates, 1):
+            dur_str = f"{t.duration_minutes}min" if t.duration_minutes else "no duration"
+            print(f"  [{i}] {t.content} ({_PL.get(t.priority, 'P4')}, {dur_str})")
+        try:
+            raw = input("Pick one (or 0 to cancel): ").strip()
+            choice = int(raw)
+        except (ValueError, EOFError):
+            print("Cancelled.")
+            return
+        if choice == 0:
+            print("Cancelled.")
+            return
+        if not 1 <= choice <= len(candidates):
+            print("Invalid selection.")
+            return
+        new_task = candidates[choice - 1]
+
+    # ── STEP 2: Validate ──────────────────────────────────────────────────────
+    if new_task.duration_minutes is None:
+        print(
+            "Task found but has no duration label.\n"
+            "Add @15min / @30min / @60min etc. in Todoist first."
+        )
+        return
+
+    # ── STEP 3: Build replan window ───────────────────────────────────────────
+    now_dt = datetime.now(tz=tz)
+    extra_mins = (5 - now_dt.minute % 5) % 5
+    if extra_mins == 0 and (now_dt.second > 0 or now_dt.microsecond > 0):
+        extra_mins = 5
+    replan_from = (now_dt + timedelta(minutes=extra_mins)).replace(
+        second=0, microsecond=0
+    )
+
+    already_done, to_replan = get_task_history_for_replan(today_str, replan_from.isoformat())
+
+    if not already_done and not to_replan:
+        print("No confirmed plan for today — scheduling in next available window only.")
+
+    print(f"\nReplanning from {replan_from.strftime('%H:%M')} onwards.")
+    print(f"Already done or in progress ({len(already_done)} task(s)): kept as-is")
+    print(f"To replan ({len(to_replan)} task(s)): will be rescheduled")
+
+    # ── STEP 4: Recompute free windows ────────────────────────────────────────
+    print("\n[GCal] Fetching events…")
+    events = []
+    try:
+        events = get_events(
+            target_date, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+        )
+        print(f"[GCal] {len(events)} event(s)")
+    except Exception as exc:
+        print(f"[WARN] GCal fetch failed: {exc}")
+
+    # Convert already_done rows to blocked tasks (treat as in-flight even if not confirmed done)
+    blocked_tasks: list[_TodoistTask] = []
+    for row in already_done:
+        if row.get("scheduled_at") and row.get("estimated_duration_mins"):
+            try:
+                dt = datetime.fromisoformat(row["scheduled_at"])
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=tz)
+            except ValueError:
+                continue
+            blocked_tasks.append(
+                _TodoistTask(
+                    id=row["task_id"],
+                    content=row.get("task_name", ""),
+                    project_id="",
+                    priority=1,
+                    due_datetime=dt,
+                    deadline=None,
+                    duration_minutes=row["estimated_duration_mins"],
+                    labels=[],
+                    is_inbox=False,
+                )
+            )
+
+    windows = compute_free_windows(
+        events,
+        target_date,
+        context,
+        scheduled_tasks=blocked_tasks,
+        start_override=replan_from,
+    )
+    total_free = sum(w.duration_minutes for w in windows)
+    print(
+        f"[Scheduler] {len(windows)} free window(s): "
+        + (
+            ", ".join(
+                f"{w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')}"
+                for w in windows
+            )
+            or "none"
+        )
+    )
+
+    # ── STEP 5: Build task list ───────────────────────────────────────────────
+    # Fetch to_replan tasks from Todoist for current state
+    replan_tasks: list[_TodoistTask] = []
+    for row in to_replan:
+        t = client.get_task_by_id(row["task_id"])
+        if t is not None:
+            replan_tasks.append(t)
+
+    # Re-inject budget sessions that were in to_replan
+    budgets_list = get_all_active_budgets()
+    budget_ids = {b["todoist_task_id"] for b in budgets_list}
+    budgets_map = {b["todoist_task_id"]: b for b in budgets_list}
+    budget_in_replan = [t for t in replan_tasks if t.id in budget_ids]
+    replan_tasks = [t for t in replan_tasks if t.id not in budget_ids]
+
+    if windows and budget_in_replan:
+        dw_windows = [w for w in windows if w.block_type in ("morning", "late night")]
+        largest_dw = max((w.duration_minutes for w in dw_windows), default=0)
+        largest_any = max((w.duration_minutes for w in windows), default=0)
+        largest_w = largest_dw or largest_any
+        for bt in budget_in_replan:
+            b = budgets_map.get(bt.id)
+            if not b:
+                continue
+            smin, smax = b["session_min_minutes"], b["session_max_minutes"]
+            session_dur = min(smax, largest_w) if largest_w > 0 else smin
+            replan_tasks.append(
+                _TodoistTask(
+                    id=bt.id,
+                    content=b["project_name"],
+                    project_id="",
+                    priority=b.get("priority", 3),
+                    due_datetime=None,
+                    deadline=b.get("deadline"),
+                    duration_minutes=session_dur,
+                    labels=["deep-work"],
+                    is_inbox=False,
+                    is_budget_task=True,
+                )
+            )
+
+    # Urgent task goes first
+    all_schedulable = [new_task] + replan_tasks
+
+    # ── STEP 6: LLM chain ─────────────────────────────────────────────────────
+    if not windows:
+        print(
+            f"\n⚠️  Not enough time today for '{new_task.content}' ({new_task.duration_minutes}min)."
+        )
+        print(f"   Remaining free time: 0min across 0 windows.")
+        _handle_no_room(client, new_task, target_date, context, tz, events, tz_str)
+        return
+
+    prod_science_path = Path(__file__).parent / "productivity_science.json"
+    prod_science = {}
+    if prod_science_path.exists():
+        with open(prod_science_path) as f:
+            prod_science = json.load(f)
+
+    print(f"\n[LLM] Step 1 — Enriching {len(all_schedulable)} task(s)…")
+    enriched = enrich_tasks(all_schedulable, context, prod_science)
+
+    # Force urgent-insert flag on the new task's enrichment
+    for e in enriched:
+        if e.get("task_id") == new_task.id:
+            flags = e.get("scheduling_flags", [])
+            if "urgent-insert" not in flags:
+                flags.insert(0, "urgent-insert")
+            e["scheduling_flags"] = flags
+            e["suggested_block"] = "First available slot — emergency insertion"
+            break
+
+    enriched_map = {e["task_id"]: e for e in enriched}
+    enriched_with_details = []
+    for t in all_schedulable:
+        base = enriched_map.get(
+            t.id,
+            {
+                "task_id": t.id,
+                "cognitive_load": "medium",
+                "energy_requirement": "moderate",
+                "suggested_block": "afternoon",
+                "can_be_split": False,
+                "scheduling_flags": [],
+            },
+        )
+        enriched_with_details.append(
+            {
+                **base,
+                "content": t.content,
+                "priority": _PL.get(t.priority, "P4"),
+                "duration_minutes": t.duration_minutes,
+                "labels": t.labels,
+                "deadline": t.deadline,
+            }
+        )
+
+    # Inject urgent-insert hard rule into context for Step 2
+    replan_context = dict(context)
+    replan_context["rules"] = {
+        "hard": list(context.get("rules", {}).get("hard", []))
+        + [
+            f"The first task in this list is an emergency insertion (flag: urgent-insert). "
+            f"It MUST be the first task in ordered_tasks and scheduled in the first available "
+            f"slot from {replan_from.strftime('%H:%M')}. No exceptions."
+        ],
+        "soft": list(context.get("rules", {}).get("soft", [])),
+    }
+
+    print("[LLM] Step 2 — Generating replan schedule order…")
+    heuristics = prod_science.get("scheduling_heuristics_summary", {})
+    schedule_result = generate_schedule(
+        enriched_tasks=enriched_with_details,
+        free_windows=windows,
+        context=replan_context,
+        heuristics_summary=heuristics,
+        target_date=target_date.isoformat(),
+    )
+    ordered_tasks = schedule_result.get("ordered_tasks", [])
+    llm_pushed = schedule_result.get("pushed", [])
+    print(f"[LLM] {len(ordered_tasks)} task(s) ordered, {len(llm_pushed)} pushed by LLM")
+
+    # Enforce urgent task first regardless of LLM ordering
+    urgent_first = [t for t in ordered_tasks if t.get("task_id") == new_task.id]
+    rest_ordered = [t for t in ordered_tasks if t.get("task_id") != new_task.id]
+    ordered_tasks = urgent_first + rest_ordered
+
+    # Carry over LLM-pushed never-schedule tasks
+    ordered_ids = {t.get("task_id") for t in ordered_tasks}
+    for p in llm_pushed:
+        if p.get("task_id") not in ordered_ids:
+            ordered_tasks.append(
+                {
+                    "task_id": p.get("task_id", ""),
+                    "task_name": p.get("task_name", ""),
+                    "duration_minutes": 30,
+                    "break_after_minutes": 0,
+                    "can_be_split": False,
+                    "block_label": "",
+                    "placement_reason": p.get("reason", ""),
+                    "scheduling_flags": ["never-schedule"],
+                }
+            )
+
+    print("[Scheduler] Packing replan schedule…")
+    blocks, auto_pushed = pack_schedule(
+        ordered_tasks=ordered_tasks,
+        free_windows=windows,
+        context=context,
+        target_date=target_date,
+    )
+    print(f"[Scheduler] {len(blocks)} block(s) placed, {len(auto_pushed)} pushed")
+
+    # ── STEP 7: Display with diff ─────────────────────────────────────────────
+    task_map = {t.id: t for t in all_schedulable}
+    original_by_id = {row["task_id"]: row for row in to_replan}
+    new_by_id = {b.task_id: b for b in blocks}
+    pushed_ids = {p["task_id"] for p in auto_pushed}
+
+    print()
+    print("═" * 57)
+    print(f"  UPDATED SCHEDULE — from {replan_from.strftime('%H:%M')} onwards")
+    print("═" * 57)
+
+    if blocks:
+        print()
+        print("  ─────────────────────────────────────────────────────")
+        print("  SCHEDULED")
+        print("  ─────────────────────────────────────────────────────")
+        for b in sorted(blocks, key=lambda x: x.start_time):
+            t = task_map.get(b.task_id)
+            p_lbl = _PL.get(t.priority, "P?") if t else "P?"
+            split_note = f" [part {b.split_part}]" if b.split_session else ""
+            print(
+                f"\n  {b.start_time.strftime('%H:%M')} – {b.end_time.strftime('%H:%M')}   "
+                f"{b.task_name}{split_note}  ({b.duration_minutes}min, {p_lbl})"
+            )
+            if b.placement_reason:
+                reason = textwrap.fill(
+                    b.placement_reason, width=50, subsequent_indent="                  "
+                )
+                print(f"                └─ {reason}")
+
+    if any(
+        p.get("reason") != "@waiting — never auto-scheduled" for p in auto_pushed
+    ):
+        print()
+        print("  ─────────────────────────────────────────────────────")
+        print("  PUSHED TO LATER")
+        print("  ─────────────────────────────────────────────────────")
+        for p in auto_pushed:
+            if p.get("reason") == "@waiting — never auto-scheduled":
+                continue
+            suggested = p.get("suggested_date", "")
+            date_note = f" → {suggested}:" if suggested else ":"
+            print(f"  •  {p['task_name']}{date_note}  {p.get('reason', '')[:60]}")
+
+    # Diff section
+    print()
+    print("  ─────────────────────────────────────────────────────")
+    print("  WHAT CHANGED")
+    print("  ─────────────────────────────────────────────────────")
+
+    new_urgent_block = new_by_id.get(new_task.id)
+    if new_urgent_block:
+        print(f"\n  ➕ ADDED (urgent):")
+        print(
+            f"     {new_urgent_block.start_time.strftime('%H:%M')}–"
+            f"{new_urgent_block.end_time.strftime('%H:%M')}  "
+            f"{new_task.content}  "
+            f"({new_urgent_block.duration_minutes}min, {_PL.get(new_task.priority, 'P?')})"
+        )
+
+    moved_entries = []
+    for task_id, orig_row in original_by_id.items():
+        if task_id == new_task.id:
+            continue
+        orig_sched = orig_row.get("scheduled_at")
+        if not orig_sched:
+            continue
+        nb = new_by_id.get(task_id)
+        if nb is None:
+            continue
+        try:
+            orig_dt = datetime.fromisoformat(orig_sched)
+            if orig_dt.tzinfo is None:
+                orig_dt = orig_dt.replace(tzinfo=tz)
+            else:
+                orig_dt = orig_dt.astimezone(tz)
+        except ValueError:
+            continue
+        delta = int((nb.start_time - orig_dt).total_seconds() / 60)
+        if abs(delta) > 1:
+            moved_entries.append(
+                (orig_row.get("task_name", task_id), orig_dt, nb.start_time, delta)
+            )
+
+    if moved_entries:
+        print(f"\n  ↔  MOVED:")
+        for tname, orig_dt, new_dt, delta in moved_entries:
+            direction = f"+{delta}min" if delta > 0 else f"{delta}min"
+            print(
+                f"     '{tname}'  {orig_dt.strftime('%H:%M')} → "
+                f"{new_dt.strftime('%H:%M')}  ({direction})"
+            )
+
+    pushed_from_today = [
+        p
+        for p in auto_pushed
+        if p["task_id"] in original_by_id
+        and p.get("reason") != "@waiting — never auto-scheduled"
+    ]
+    if pushed_from_today:
+        print(f"\n  ➡  PUSHED TO TOMORROW:")
+        for p in pushed_from_today:
+            t = task_map.get(p["task_id"])
+            dur = t.duration_minutes if t else "?"
+            print(f"     '{p['task_name']}'  ({dur}min needed, no room)")
+
+    print()
+    print("═" * 57)
+
+    # ── Edge case: urgent task itself didn't fit ──────────────────────────────
+    if new_task.id in pushed_ids:
+        print(
+            f"\n⚠️  Not enough time today for '{new_task.content}' ({new_task.duration_minutes}min)."
+        )
+        print(f"   Remaining free time: {total_free}min across {len(windows)} window(s).")
+        _handle_no_room(client, new_task, target_date, context, tz, events, tz_str)
+        return
+
+    # ── STEP 8: Confirmation ──────────────────────────────────────────────────
+    try:
+        confirm = input("\nConfirm updated schedule? [y/n]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        confirm = "n"
+
+    if confirm != "y":
+        print("Schedule discarded — no changes made.")
+        return
+
+    today_dow = target_date.strftime("%A")
+
+    # A) New urgent task
+    if new_urgent_block:
+        try:
+            client.schedule_task(
+                new_task.id, new_urgent_block.start_time, new_urgent_block.duration_minutes
+            )
+        except Exception as exc:
+            print(f"[WARN] Could not schedule '{new_task.content}': {exc}")
+        insert_task_history(
+            task_id=new_task.id,
+            task_name=new_task.content,
+            project_id=new_task.project_id,
+            estimated_duration_mins=new_urgent_block.duration_minutes,
+            scheduled_at=new_urgent_block.start_time.isoformat(),
+            day_of_week=today_dow,
+        )
+
+    # B) Moved tasks
+    n_moved = 0
+    for task_id, orig_row in original_by_id.items():
+        if task_id == new_task.id:
+            continue
+        nb = new_by_id.get(task_id)
+        if nb is None:
+            continue
+        try:
+            client.schedule_task(task_id, nb.start_time, nb.duration_minutes)
+        except Exception as exc:
+            print(f"[WARN] Could not update '{orig_row.get('task_name', task_id)}': {exc}")
+        t = task_map.get(task_id)
+        insert_task_history(
+            task_id=task_id,
+            task_name=orig_row.get("task_name", ""),
+            project_id=t.project_id if t else "",
+            estimated_duration_mins=nb.duration_minutes,
+            scheduled_at=nb.start_time.isoformat(),
+            day_of_week=today_dow,
+        )
+        n_moved += 1
+
+    # C) Pushed to tomorrow
+    n_pushed_tomorrow = 0
+    for p in pushed_from_today:
+        task_id = p["task_id"]
+        try:
+            client.clear_task_due(task_id)
+        except Exception as exc:
+            print(f"[WARN] Could not clear due for '{p.get('task_name', task_id)}': {exc}")
+        try:
+            client.add_comment(
+                task_id,
+                f"Pushed from {target_date.strftime('%a %b %d')} by emergency insert: {new_task.content}",
+            )
+        except Exception:
+            pass
+        delete_task_history_row(task_id, today_str)
+        n_pushed_tomorrow += 1
+
+    # D) schedule_log
+    insert_schedule_log(
+        schedule_date=today_str,
+        proposed_json={
+            "scheduled": [
+                {
+                    "task_id": b.task_id,
+                    "task_name": b.task_name,
+                    "start_time": b.start_time.isoformat(),
+                    "duration_minutes": b.duration_minutes,
+                }
+                for b in blocks
+            ],
+            "pushed": [
+                {"task_id": p["task_id"], "task_name": p["task_name"]}
+                for p in auto_pushed
+            ],
+        },
+        confirmed=True,
+        confirmed_at=datetime.now().isoformat(),
+        replan_trigger="--add-task",
+    )
+
+    print(f"\n✅ Schedule updated.")
+    if new_urgent_block:
+        print(
+            f"   {new_task.content}: scheduled "
+            f"{new_urgent_block.start_time.strftime('%H:%M')}–{new_urgent_block.end_time.strftime('%H:%M')}"
+        )
+    if n_moved:
+        print(f"   {n_moved} task(s) moved")
+    if n_pushed_tomorrow:
+        print(f"   {n_pushed_tomorrow} task(s) pushed to tomorrow")
+
+
 def _print_help() -> None:
     """Custom --help display."""
     print(
@@ -771,6 +1391,25 @@ DAILY WORKFLOW
       DATE examples:  (default: today)
         --review yesterday
         --review 2026-04-06
+
+  python main.py --sync [DATE]
+      Reconcile task_history against Todoist (drift detection).
+      Detects manually moved/completed tasks and updates the local DB.
+      Called automatically at the start of --review and --plan-day (re-run).
+
+      DATE examples:  (default: today)
+        --sync yesterday
+        --sync 2026-04-08
+
+  python main.py --add-task "SEARCH TEXT" [--date DATE]
+      Insert an urgent task into an already-confirmed plan.
+      Searches Todoist for a task matching the text, replans
+      everything from the current time forward, and writes back.
+      Task must exist in Todoist with a duration label (@30min etc.)
+
+      --date  Target date (default: today)
+        --add-task "deploy hotfix"
+        --add-task "call with" --date tomorrow
 
 PROJECT BUDGETS (long-running work)
 ────────────────────────────────────
@@ -830,11 +1469,11 @@ PRIORITY
     )
 
 
-def _resolve_target_date(date_arg: str) -> date:
+def _resolve_target_date(date_arg: str, prefer: str = "future") -> date:
     """
-    Resolve the optional --plan-day date argument to a concrete date.
-    Accepts: "" (today), "tomorrow", "monday", "next friday", "2026-04-07", etc.
-    Uses dateparser to handle natural language. Exits with an error if unparseable.
+    Resolve an optional date argument to a concrete date.
+    Accepts: "" (today), "yesterday", "tomorrow", "monday", "2026-04-07", etc.
+    prefer: "future" for --plan-day, "past" for --sync / --review.
     """
     if not date_arg:
         return date.today()
@@ -844,16 +1483,271 @@ def _resolve_target_date(date_arg: str) -> date:
     parsed = dateparser.parse(
         date_arg,
         settings={
-            "PREFER_DATES_FROM": "future",
+            "PREFER_DATES_FROM": prefer,
             "RETURN_AS_TIMEZONE_AWARE": False,
         },
     )
     if parsed is None:
         print(f"[ERROR] Could not parse date: '{date_arg}'")
-        print("  Examples: tomorrow, monday, next friday, 2026-04-07")
+        print("  Examples: yesterday, tomorrow, monday, 2026-04-07")
         sys.exit(1)
 
     return parsed.date()
+
+
+def _cmd_sync(context: dict, target_date: date, *, silent: bool = False) -> dict:
+    """
+    --sync [DATE]: drift detection — reconcile task_history against Todoist.
+
+    Reads Todoist, writes only to local SQLite. No LLM, no Todoist writes.
+
+    Cases:
+      A: time moved, same day  → update scheduled_at + reschedule_count
+      B: moved to different day (or due cleared) → was_agent_scheduled = 0
+      C: 404 (completed/deleted outside --review) → set completed_at
+      D: no drift → no-op
+
+    Returns: {"moved": int, "completed_outside": int, "injected": int, "unchanged": int}
+
+    silent=True (auto-called from --review / --plan-day):
+      - No changes → print "[Sync] no drift detected"
+      - Changes → print per-task lines + one summary line
+    silent=False (direct --sync):
+      - Always print "[Sync] date — checking N tasks..."
+      - No changes → print "[Sync] no drift detected"
+      - Changes → print per-task lines + summary
+    """
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed as futures_as_completed
+
+    import requests as _requests
+
+    from src.db import (
+        append_sync_diff,
+        get_task_history_for_sync,
+        get_task_ids_for_date,
+        setup_database,
+        sync_apply_case_a,
+        sync_apply_case_b,
+        sync_apply_case_c,
+        sync_inject_task,
+    )
+    from src.todoist_client import TodoistClient
+
+    setup_database()
+
+    api_token = os.getenv("TODOIST_API_TOKEN")
+    target_str = target_date.isoformat()
+    date_label = target_date.strftime("%a %b %-d")
+
+    _tz_aliases = {
+        "PST": "America/Vancouver",
+        "PST/Vancouver": "America/Vancouver",
+        "Vancouver": "America/Vancouver",
+    }
+    tz_str = context.get("user", {}).get("timezone", "America/Vancouver")
+    tz_str_norm = _tz_aliases.get(tz_str, tz_str)
+    tz = ZoneInfo(tz_str_norm)
+
+    # ── Step 1: Ground truth from task_history ────────────────────────────────
+    rows = get_task_history_for_sync(target_str)
+    client = TodoistClient(api_token)
+
+    if rows and not silent:
+        print(f"[Sync] {date_label} — checking {len(rows)} task(s)...")
+
+    # ── Steps 2-3: Batch fetch + classify (only when rows exist) ────────────
+    fetched: list[tuple[dict, object]] = []
+
+    def _fetch_one(row: dict) -> tuple[dict, "TodoistTask | None | str"]:
+        """Returns (row, task|None|'error'|'rate_limited')."""
+        for attempt in range(2):
+            try:
+                task = client.get_task_by_id(row["task_id"])
+                return row, task
+            except _requests.exceptions.HTTPError as exc:
+                if (
+                    exc.response is not None
+                    and exc.response.status_code == 429
+                    and attempt == 0
+                ):
+                    time.sleep(1)
+                    continue
+                if (
+                    exc.response is not None
+                    and exc.response.status_code == 429
+                ):
+                    print(
+                        f"  [Sync][WARN] rate limited on"
+                        f" '{row.get('task_name', row['task_id'])}', skipping"
+                    )
+                    return row, "rate_limited"
+                return row, "error"
+            except Exception:
+                return row, "error"
+        return row, "error"
+
+    if rows:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            fs = [executor.submit(_fetch_one, row) for row in rows]
+            for future in futures_as_completed(fs):
+                fetched.append(future.result())
+
+    # ── Step 3: Classify into Cases A / B / C / D ────────────────────────────
+    n_moved = 0
+    n_completed_outside = 0
+    n_unchanged = 0
+    diff_changes: list[dict] = []
+
+    for row, result in fetched:
+        task_name = row.get("task_name") or row["task_id"]
+        scheduled_at = row.get("scheduled_at")
+
+        if result in ("error", "rate_limited"):
+            continue  # warning already printed in _fetch_one
+
+        # Already reviewed (completed_at set by --review) — treat as D
+        if row.get("completed_at") is not None:
+            n_unchanged += 1
+            continue
+
+        if result is None:
+            # Case C: 404 → completed or deleted outside --review
+            completed_now = datetime.now(tz).isoformat()
+            sync_apply_case_c(row["task_id"], target_str, completed_now)
+            print(f"  \u2713  {task_name}: completed outside review (duration unknown)")
+            n_completed_outside += 1
+            diff_changes.append({"task_id": row["task_id"], "case": "C", "task_name": task_name})
+            continue
+
+        # result is a TodoistTask
+        task = result  # type: ignore[assignment]
+        todoist_dt = task.due_datetime  # tz-aware or None
+
+        if todoist_dt is None:
+            # No due_datetime at all → treat as Case B (unscheduled)
+            sync_apply_case_b(row["task_id"], target_str)
+            print(f"  \u2192  {task_name}: due date cleared (unscheduled)")
+            n_moved += 1
+            diff_changes.append({
+                "task_id": row["task_id"], "case": "B",
+                "task_name": task_name, "to": None,
+            })
+            continue
+
+        # Normalise to user's timezone for date/time comparison
+        if todoist_dt.tzinfo is None:
+            todoist_local = todoist_dt.replace(tzinfo=tz)
+        else:
+            todoist_local = todoist_dt.astimezone(tz)
+
+        todoist_date = todoist_local.date()
+
+        if todoist_date != target_date:
+            # Case B: moved to a different day
+            sync_apply_case_b(row["task_id"], target_str)
+            new_date_str = todoist_date.strftime("%a %b %-d")
+            print(f"  \u2192  {task_name}: moved to {new_date_str}")
+            n_moved += 1
+            diff_changes.append({
+                "task_id": row["task_id"], "case": "B",
+                "task_name": task_name, "to": todoist_date.isoformat(),
+            })
+            continue
+
+        # Same day — check 5-minute drift
+        if not scheduled_at:
+            n_unchanged += 1
+            continue
+
+        try:
+            sched_dt = datetime.fromisoformat(scheduled_at)
+            if sched_dt.tzinfo is None:
+                sched_local = sched_dt.replace(tzinfo=tz)
+            else:
+                sched_local = sched_dt.astimezone(tz)
+
+            diff_mins = abs((todoist_local - sched_local).total_seconds() / 60)
+
+            if diff_mins > 5:
+                # Case A: time moved, same day
+                from_str = sched_local.strftime("%H:%M")
+                to_str = todoist_local.strftime("%H:%M")
+                sync_apply_case_a(row["task_id"], target_str, todoist_local.isoformat())
+                print(f"  \u2194  {task_name}: moved {from_str} \u2192 {to_str}")
+                n_moved += 1
+                diff_changes.append({
+                    "task_id": row["task_id"], "case": "A",
+                    "task_name": task_name, "from": from_str, "to": to_str,
+                })
+            else:
+                # Case D: no drift
+                n_unchanged += 1
+        except (ValueError, TypeError):
+            n_unchanged += 1
+
+    # ── Step 4: Detect user-injected tasks ────────────────────────────────────
+    n_injected = 0
+    try:
+        todoist_tasks = client.get_todays_scheduled_tasks(target_date)
+        known_ids = get_task_ids_for_date(target_str)
+
+        for task in todoist_tasks:
+            if task.id in known_ids or task.due_datetime is None:
+                continue
+            scheduled_iso = task.due_datetime.astimezone(tz).isoformat()
+            sync_inject_task(
+                task_id=task.id,
+                task_name=task.content,
+                project_id=task.project_id or "",
+                estimated_duration_mins=task.duration_minutes,
+                scheduled_at=scheduled_iso,
+            )
+            print(
+                f"  +  {task.content}: user-scheduled (not agent-planned),"
+                " added to history"
+            )
+            n_injected += 1
+            diff_changes.append({
+                "task_id": task.id, "case": "inject", "task_name": task.content,
+            })
+    except Exception as exc:
+        print(f"  [Sync][WARN] Could not scan for user-injected tasks: {exc}")
+
+    # ── Step 5: Write audit trail + print summary ─────────────────────────────
+    if diff_changes:
+        try:
+            append_sync_diff(target_str, diff_changes)
+        except Exception:
+            pass  # audit trail write failure is non-fatal
+
+    counts = {
+        "moved": n_moved,
+        "completed_outside": n_completed_outside,
+        "injected": n_injected,
+        "unchanged": n_unchanged,
+    }
+
+    no_drift = n_moved == 0 and n_completed_outside == 0 and n_injected == 0
+
+    if not rows and no_drift:
+        if not silent:
+            print(f"[Sync] No scheduled tasks found for {target_str}.")
+    elif no_drift:
+        print("[Sync] no drift detected")
+    else:
+        parts = []
+        if n_moved:
+            parts.append(f"{n_moved} moved")
+        if n_completed_outside:
+            parts.append(f"{n_completed_outside} completed outside review")
+        if n_injected:
+            parts.append(f"{n_injected} injected")
+        if n_unchanged:
+            parts.append(f"{n_unchanged} unchanged")
+        print(f"[Sync] {', '.join(parts)}")
+
+    return counts
 
 
 def _cmd_plan_day(context: dict, target_date: date) -> None:
@@ -862,7 +1756,12 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
     Read-only except for optional priority writes in Step C and confirmed write-back in Step F.
     """
     from src.calendar_client import get_events
-    from src.db import insert_schedule_log, insert_task_history, setup_database
+    from src.db import (
+        get_task_history_for_sync,
+        insert_schedule_log,
+        insert_task_history,
+        setup_database,
+    )
     from src.llm import enrich_tasks, generate_schedule
     from src.scheduler import compute_free_windows, pack_schedule
     from src.todoist_client import TodoistClient, write_schedule_to_todoist
@@ -876,6 +1775,13 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
         prod_science = json.load(f)
 
     setup_database()
+
+    # Auto-sync if re-running plan-day for a date that already has a schedule
+    _existing_for_sync = get_task_history_for_sync(target_date.isoformat())
+    if _existing_for_sync:
+        print("[Sync] Existing schedule detected — checking for drift...")
+        _cmd_sync(context, target_date, silent=True)
+        print()
 
     day_before = target_date - timedelta(days=1)
     tz_str = context.get("user", {}).get("timezone", "America/Vancouver")
@@ -968,6 +1874,38 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
             f"{w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')}" for w in windows
         )
     )
+
+    # ── Detect mid-day replanning ──────────────────────────────────────────────
+    # When planning today and the morning peak has already passed, the LLM needs
+    # to know so it doesn't propose morning-based placements.
+    schedule_context = context  # default; overridden below if mid-day
+    if target_date == date.today() and windows:
+        _tz_local = ZoneInfo(_tz_str_norm)
+        _now = datetime.now(tz=_tz_local)
+        _ft = context.get("sleep", {}).get("first_task_not_before", "10:30")
+        _fth, _ftm = map(int, _ft.split(":"))
+        _morning_cutoff = datetime(
+            target_date.year, target_date.month, target_date.day, _fth, _ftm,
+            tzinfo=_tz_local,
+        )
+        if _now > _morning_cutoff:
+            hours_passed = (_now - _morning_cutoff).total_seconds() / 3600
+            print(
+                f"[Scheduler] Mid-day plan: starting from {windows[0].start.strftime('%H:%M')} "
+                f"({hours_passed:.1f}h of morning already passed)"
+            )
+            _midday_rule = (
+                f"NOTE: It is currently {_now.strftime('%H:%M')}. The morning peak window has "
+                f"passed. Schedule from the afternoon secondary peak onwards. Do not reference "
+                f"morning productivity windows — they are no longer available."
+            )
+            schedule_context = {
+                **context,
+                "rules": {
+                    "hard": list(context.get("rules", {}).get("hard", [])) + [_midday_rule],
+                    "soft": list(context.get("rules", {}).get("soft", [])),
+                },
+            }
 
     if not tasks:
         print("[INFO] No tasks to schedule. Exiting.")
@@ -1183,7 +2121,7 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
     schedule = generate_schedule(
         enriched_tasks=enriched_with_details,
         free_windows=windows,
-        context=context,
+        context=schedule_context,
         heuristics_summary=heuristics,
         target_date=target_date.isoformat(),
     )
@@ -1275,11 +2213,14 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
 
     # ── Save per-task rows to task_history ────────────────────────────────────
     enriched_by_id = {e.get("task_id", ""): e for e in enriched}
+    _ftb = context.get("sleep", {}).get("first_task_not_before", "10:30")
     for block in blocks:
         if block.split_part == 2:
             continue  # don't double-log split tasks
         original = task_map.get(block.task_id)
         enr = enriched_by_id.get(block.task_id, {})
+        was_dw = int("deep-work" in (original.labels if original else []))
+        pre_mtg = int(_has_pre_meeting(block, events, context))
         insert_task_history(
             task_id=block.task_id,
             task_name=block.task_name,
@@ -1291,6 +2232,12 @@ def _cmd_plan_day(context: dict, target_date: date) -> None:
             reschedule_count=0,
             was_late_night_prior=late_night_prior,
             cognitive_load_label=enr.get("cognitive_load"),
+            was_deep_work=was_dw,
+            back_to_back=int(block.back_to_back),
+            pre_meeting=pre_mtg,
+            sync_source="agent",
+            was_agent_scheduled=1,
+            first_task_not_before=_ftb,
         )
 
 
@@ -1311,11 +2258,14 @@ def _cmd_review(context: dict, target_date: "date") -> None:
 
     from src.calendar_client import get_events
     from src.db import (
+        compute_quality_score,
         get_todays_task_history,
         insert_task_history,
         mark_task_partial,
         mark_task_rescheduled_externally,
+        set_incomplete_reason,
         setup_database,
+        update_quality_score,
         upsert_task_completed,
     )
     from src.models import TodoistTask
@@ -1340,6 +2290,9 @@ def _cmd_review(context: dict, target_date: "date") -> None:
 
     api_token = os.getenv("TODOIST_API_TOKEN")
     client = TodoistClient(api_token)
+
+    # ── Auto-sync: reconcile before review ────────────────────────────────────
+    _cmd_sync(context, target_date, silent=True)
 
     # ── Step 1: Load from task_history ────────────────────────────────────────
     print(f"\n[Review] Loading tasks for {target_str} from task_history...")
@@ -1442,6 +2395,8 @@ def _cmd_review(context: dict, target_date: "date") -> None:
         except (EOFError, KeyboardInterrupt):
             choice = "1"
 
+        _REASON_MAP = {"1": "time", "2": "motivation", "3": "blocked", "4": "skipped"}
+
         if choice == "5":
             print("     \u2705 Marked complete.\n")
             upsert_task_completed(
@@ -1456,25 +2411,41 @@ def _cmd_review(context: dict, target_date: "date") -> None:
             )
             incomplete_with_remaining.append((row, task, 0, "done"))
 
-        elif choice == "1":
-            print()
-            incomplete_with_remaining.append((row, task, est, "not_started"))
-
-        elif choice in ("2", "3", "4"):
-            pct = bands[int(choice) - 2][0]
-            done = _r15(int(est * pct))
-            remaining = max(15, est - done)
-            try:
-                client.add_in_progress_label(row["task_id"])
-            except Exception as exc:
-                print(f"     [WARN] Could not add @in-progress label: {exc}")
-            mark_task_partial(row["task_id"], target_str, done)
-            print()
-            incomplete_with_remaining.append((row, task, remaining, "partial"))
-
         else:
-            print()
-            incomplete_with_remaining.append((row, task, est, "not_started"))
+            # Capture incomplete reason before deciding progress bucket
+            try:
+                print(
+                    "     Why? [1] Ran out of time  [2] Lost motivation  "
+                    "[3] Externally blocked  [4] Didn't attempt"
+                )
+                r_choice = input("     > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                r_choice = ""
+            _reason = _REASON_MAP.get(r_choice)
+            set_incomplete_reason(row["task_id"], _reason)
+
+            if choice == "1" or choice not in ("2", "3", "4"):
+                print()
+                incomplete_with_remaining.append((row, task, est, "not_started"))
+
+            else:  # choice in ("2", "3", "4")
+                pct = bands[int(choice) - 2][0]
+                done = _r15(int(est * pct))
+                remaining = max(15, est - done)
+                try:
+                    client.add_in_progress_label(row["task_id"])
+                except Exception as exc:
+                    print(f"     [WARN] Could not add @in-progress label: {exc}")
+                mark_task_partial(row["task_id"], target_str, done)
+                print()
+                incomplete_with_remaining.append((row, task, remaining, "partial"))
+
+    # ── Quality score — computed HERE, before reschedule writes change scheduled_at ──
+    # Must run after Step 3 (so completed_at is set for done tasks) but before
+    # reschedule writes (which upsert scheduled_at to tomorrow, removing rescheduled
+    # tasks from today's dataset and inflating the score).
+    quality = compute_quality_score(target_str)
+    update_quality_score(target_str, quality)
 
     # ── Step 4: Reschedule incomplete tasks ───────────────────────────────────
     to_reschedule = [
@@ -1498,7 +2469,7 @@ def _cmd_review(context: dict, target_date: "date") -> None:
         for row, task, remaining, _status in to_reschedule:
             placed = False
             for days_ahead in range(1, 8):
-                candidate = today + timedelta(days=days_ahead)
+                candidate = target_date + timedelta(days=days_ahead)
                 candidate_str_inner = candidate.isoformat()
 
                 try:
@@ -1583,11 +2554,12 @@ def _cmd_review(context: dict, target_date: "date") -> None:
                     f"\n  \u26a0\ufe0f  {row['task_name']} \u2192 needs manual scheduling"
                 )
             else:
-                day_label = (
-                    "Tomorrow"
-                    if cand_date == today + timedelta(days=1)
-                    else cand_date.strftime("%A %b %d")
-                )
+                if cand_date == today:
+                    day_label = "Today"
+                elif cand_date == today + timedelta(days=1):
+                    day_label = "Tomorrow"
+                else:
+                    day_label = cand_date.strftime("%a %b %d")
                 print(
                     f"\n  \u2192  {row['task_name']}"
                     f" \u2192 {day_label} {slot_start.strftime('%H:%M')}\u2013{slot_end.strftime('%H:%M')}"
@@ -1706,6 +2678,7 @@ def _cmd_review(context: dict, target_date: "date") -> None:
         print(
             f"  Needs attention: {n_needs_attention} task(s) \u2014 schedule manually"
         )
+    print(f"  Schedule quality: {quality:.0f}/100")
     print(f"{'=' * _W}\n")
 
 
@@ -1724,7 +2697,10 @@ def main() -> None:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--plan-day", nargs="?", const="", default=None, metavar="DATE")
     parser.add_argument("--review", nargs="?", const="", default=None, metavar="DATE")
+    parser.add_argument("--sync", nargs="?", const="", default=None, metavar="DATE")
     parser.add_argument("--add-task", type=str, metavar="TASK")
+    parser.add_argument("--date", type=str, metavar="DATE", default=None,
+                        help="Target date for --add-task (default: today)")
 
     # Project budget commands
     parser.add_argument("--add-project", type=str, metavar="NAME")
@@ -1770,8 +2746,11 @@ def main() -> None:
         target_date = _resolve_target_date(args.plan_day)
         _cmd_plan_day(context, target_date)
     elif args.review is not None:
-        target_date = _resolve_target_date(args.review)
+        target_date = _resolve_target_date(args.review, prefer="past")
         _cmd_review(context, target_date)
+    elif args.sync is not None:
+        target_date = _resolve_target_date(args.sync, prefer="past")
+        _cmd_sync(context, target_date, silent=False)
     elif args.add_project:
         if args.budget is None:
             print("[ERROR] --add-project requires --budget HOURS")
@@ -1789,8 +2768,8 @@ def main() -> None:
     elif args.reset_project:
         _cmd_reset_project(context, args)
     elif args.add_task:
-        print("[ERROR] --add-task not yet implemented")
-        sys.exit(1)
+        add_task_date = _resolve_target_date(args.date) if args.date else date.today()
+        _cmd_add_task(context, args.add_task, add_task_date)
     else:
         _print_help()
 

@@ -12,7 +12,7 @@ Test cases:
 8. Banana buffer — 30min each side
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -574,6 +574,47 @@ def test_weekdays_only_block_skips_saturday():
     )
     assert _hm(windows[0].start) == (10, 30)
     assert _hm(windows[0].end) == (23, 0)
+
+
+# ── Mid-day plan tests ────────────────────────────────────────────────────────
+
+
+def test_midday_plan_today_starts_from_now():
+    """
+    When planning for today and it is currently 14:07, effective_start must
+    ceil to the next 5-min boundary: 14:10.
+    Morning windows (10:30–14:10) are gone and must not appear.
+    """
+    today = date.today()
+    now_at_2pm = datetime(today.year, today.month, today.day, 14, 7, tzinfo=TZ)
+    windows = compute_free_windows([], today, BASE_CONTEXT, now_override=now_at_2pm)
+
+    assert len(windows) >= 1
+    # 14:07 → ceil to next 5-min → 14:10
+    assert _hm(windows[0].start) == (14, 10), (
+        f"Expected first window at 14:10, got {_hm(windows[0].start)}"
+    )
+    # No window should start before the override time
+    for w in windows:
+        assert w.start >= now_at_2pm, f"Window {w.start} predates the override time"
+
+
+def test_midday_plan_tomorrow_unaffected():
+    """
+    When planning for tomorrow (target_date != today), the mid-day check must
+    NOT trigger regardless of the current time — full day from morning buffer.
+    """
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    now_at_2pm = datetime(today.year, today.month, today.day, 14, 7, tzinfo=TZ)
+    windows = compute_free_windows([], tomorrow, BASE_CONTEXT, now_override=now_at_2pm)
+
+    assert len(windows) >= 1
+    # First window must start before 14:10 on tomorrow — mid-day did NOT apply
+    midday_on_tomorrow = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 14, 10, tzinfo=TZ)
+    assert windows[0].start < midday_on_tomorrow, (
+        f"Expected first window before 14:10 tomorrow, got {windows[0].start}"
+    )
 
 
 def test_daily_block_and_gcal_event_both_respected():

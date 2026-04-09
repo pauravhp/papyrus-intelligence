@@ -332,7 +332,15 @@ Minimum 5 test cases:
 5. Overlapping events edge case — two events close together, buffer overlap handled
 
 ```bash
+source venv/bin/activate
 python3 -m pytest tests/
+```
+
+**Always activate the venv first.** Every `python3` or `pytest` command must be preceded by `source venv/bin/activate`. This applies to running `main.py` as well:
+
+```bash
+source venv/bin/activate
+python3 main.py --plan-day
 ```
 
 ---
