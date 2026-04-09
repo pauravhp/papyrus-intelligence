@@ -327,15 +327,6 @@ def pack_schedule(
     _target = target_date or date.today()
     tomorrow = (_target + timedelta(days=1)).isoformat()
 
-    # Peak window: first_task_not_before → first_task_not_before + 5h
-    sleep_cfg = context.get("sleep", {})
-    first_task_str = sleep_cfg.get("first_task_not_before", "10:30")
-    try:
-        _fh, _fm = map(int, first_task_str.split(":"))
-    except (ValueError, AttributeError):
-        _fh, _fm = 10, 30
-    _peak_end_hour = _fh + 5  # e.g. 10 + 5 = 15 (3pm)
-
     blocks: list[ScheduledBlock] = []
     auto_pushed: list[dict] = []
 
@@ -343,12 +334,6 @@ def pack_schedule(
     window_idx = 0
     cursor = free_windows[0].start
     continuous_minutes = 0
-
-    # dw_ln_cursor tracks how much of the late-night window has been consumed by
-    # DW tasks placed "out-of-band" (while the main cursor was still in afternoon).
-    # This allows non-DW tasks to keep using the afternoon window after a DW task
-    # is placed in late night, instead of abandoning the remaining afternoon time.
-    dw_ln_cursor: datetime | None = None
 
     def _advance() -> bool:
         """Advance cursor and window_idx to the next schedulable position.
@@ -400,75 +385,8 @@ def pack_schedule(
             })
             continue
 
-        # If we've entered a late-night window, skip past any portion already
-        # consumed by out-of-band DW task placements.
-        _in_ln = cursor.hour >= 22 or cursor.hour < 6
-        if _in_ln and dw_ln_cursor is not None and cursor < dw_ln_cursor:
-            cursor = dw_ln_cursor
-            if cursor >= free_windows[window_idx].end:
-                window_idx += 1
-                if not _advance():
-                    auto_pushed.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "reason": "No more free windows today",
-                        "suggested_date": tomorrow,
-                    })
-                    continue
-
         current_window = free_windows[window_idx]
         remaining = int((current_window.end - cursor).total_seconds() / 60)
-
-        # @deep-work enforcement: allow peak window (10:30–peak_end) OR late night (22:00+)
-        # Forbidden zone (peak_end–22:00): route out-of-band to late night.
-        # Morning peak but task doesn't fit current window: also route out-of-band so the
-        # current window stays available for shorter tasks that follow.
-        if "needs-deep-work-block" in flags:
-            in_late_night = cursor.hour >= 22 or cursor.hour < 6
-            in_forbidden = cursor.hour >= _peak_end_hour and not in_late_night
-            in_morning_no_fit = cursor.hour < _peak_end_hour and duration > remaining
-            if in_forbidden or in_morning_no_fit:
-                # Find the late-night window (search all windows, not just from window_idx)
-                ln_window = None
-                for w in free_windows:
-                    if w.start.hour >= 22 or w.start.hour < 6:
-                        ln_window = w
-                        break
-                if ln_window is None:
-                    auto_pushed.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "reason": "@deep-work task — no peak or late-night window available today",
-                        "suggested_date": tomorrow,
-                    })
-                    continue
-
-                # Place after any previously out-of-band DW tasks
-                dw_start = dw_ln_cursor if dw_ln_cursor is not None else ln_window.start
-                dw_avail = int((ln_window.end - dw_start).total_seconds() / 60)
-                if duration > dw_avail:
-                    auto_pushed.append({
-                        "task_id": task_id,
-                        "task_name": task_name,
-                        "reason": "@deep-work task — no peak or late-night window available today",
-                        "suggested_date": tomorrow,
-                    })
-                    continue
-
-                dw_end = dw_start + timedelta(minutes=duration)
-                blocks.append(ScheduledBlock(
-                    task_id=task_id,
-                    task_name=task_name,
-                    start_time=dw_start,
-                    end_time=dw_end,
-                    duration_minutes=duration,
-                    work_block=block_label,
-                    placement_reason=placement_reason,
-                ))
-                dw_ln_cursor = dw_end
-                # Main cursor and window_idx intentionally NOT updated — non-DW tasks
-                # continue scheduling from the current morning/afternoon position.
-                continue
 
         if duration <= remaining:
             # ── Happy path: task fits in the current window ──────────────────
@@ -511,43 +429,25 @@ def pack_schedule(
 
             if _advance():
                 part2_start = cursor
-                # Skip past out-of-band DW placements already in the late-night window
-                _in_ln2 = part2_start.hour >= 22 or part2_start.hour < 6
-                if _in_ln2 and dw_ln_cursor is not None and part2_start < dw_ln_cursor:
-                    part2_start = dw_ln_cursor
-                    cursor = dw_ln_cursor
+                part2_end = part2_start + timedelta(minutes=part2_dur)
+                # Clip to window boundary if necessary
+                if part2_end > free_windows[window_idx].end:
+                    part2_end = free_windows[window_idx].end
+                    part2_dur = int((part2_end - part2_start).total_seconds() / 60)
 
-                if part2_start >= free_windows[window_idx].end:
-                    # Late-night window fully consumed by DW tasks; push remainder
-                    auto_pushed.append({
-                        "task_id": task_id,
-                        "task_name": task_name + " (remainder)",
-                        "reason": (
-                            f"First {part1_dur}min session scheduled; "
-                            f"{part2_dur}min remainder has no window today"
-                        ),
-                        "suggested_date": tomorrow,
-                    })
-                else:
-                    part2_end = part2_start + timedelta(minutes=part2_dur)
-                    # Clip to window boundary if necessary
-                    if part2_end > free_windows[window_idx].end:
-                        part2_end = free_windows[window_idx].end
-                        part2_dur = int((part2_end - part2_start).total_seconds() / 60)
-
-                    blocks.append(ScheduledBlock(
-                        task_id=task_id,
-                        task_name=task_name,
-                        start_time=part2_start,
-                        end_time=part2_end,
-                        duration_minutes=part2_dur,
-                        work_block=block_label,
-                        placement_reason="Continuation from earlier session",
-                        split_session=True,
-                        split_part=2,
-                    ))
-                    cursor = part2_end
-                    continuous_minutes = part2_dur
+                blocks.append(ScheduledBlock(
+                    task_id=task_id,
+                    task_name=task_name,
+                    start_time=part2_start,
+                    end_time=part2_end,
+                    duration_minutes=part2_dur,
+                    work_block=block_label,
+                    placement_reason="Continuation from earlier session",
+                    split_session=True,
+                    split_part=2,
+                ))
+                cursor = part2_end
+                continuous_minutes = part2_dur
             else:
                 auto_pushed.append({
                     "task_id": task_id,
@@ -566,20 +466,13 @@ def pack_schedule(
             placed = False
             for look_idx in range(window_idx + 1, len(free_windows)):
                 look_window = free_windows[look_idx]
-                # Skip past out-of-band DW placements in late-night windows
-                look_start = look_window.start
-                _in_ln_look = look_start.hour >= 22 or look_start.hour < 6
-                if _in_ln_look and dw_ln_cursor is not None and look_start < dw_ln_cursor:
-                    look_start = dw_ln_cursor
-                if look_start >= look_window.end:
-                    continue  # window fully consumed by DW tasks
-                look_avail = int((look_window.end - look_start).total_seconds() / 60)
+                look_avail = int((look_window.end - look_window.start).total_seconds() / 60)
                 if duration <= look_avail:
-                    end_time = look_start + timedelta(minutes=duration)
+                    end_time = look_window.start + timedelta(minutes=duration)
                     blocks.append(ScheduledBlock(
                         task_id=task_id,
                         task_name=task_name,
-                        start_time=look_start,
+                        start_time=look_window.start,
                         end_time=end_time,
                         duration_minutes=duration,
                         work_block=block_label,

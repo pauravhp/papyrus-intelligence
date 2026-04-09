@@ -11,7 +11,7 @@
     "default_wake_time": "09:00",
     "morning_buffer_minutes": 90,
     "first_task_not_before": "10:30",
-    "weekend_days": ["friday", "saturday", "sunday"],
+    "weekend_days": ["saturday", "sunday"],
     "weekend_nothing_before": "13:00",
     "late_night_threshold": "01:30 next day",
     "no_tasks_after": "00:30 next day"
@@ -95,7 +95,7 @@
       "Always add 30-minute buffer before and after Banana (event) events",
       "Never schedule tasks after 11pm",
       "Minimum 5-minute gap between any two task blocks",
-      "On weekends (Fri/Sat/Sun), nothing before noon regardless of calendar",
+      "On weekends (Sat/Sun), nothing before 1pm regardless of calendar",
       "Tasks labeled @waiting are never scheduled automatically",
       "Tasks labeled @deep-work must only be placed in peak energy windows (morning through early afternoon) or late night after dinner, never back-to-back without a real break, and not after 1:30am"
     ],
