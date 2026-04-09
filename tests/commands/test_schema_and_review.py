@@ -18,16 +18,15 @@ from pathlib import Path
 import pytest
 
 import src.db as db_module
-from src.db import (
-    _compute_time_bucket,
+from src.db import get_connection, setup_database
+from src.queries import (
     compute_quality_score,
-    get_connection,
     insert_task_history,
     set_incomplete_reason,
-    setup_database,
     update_quality_score,
     upsert_task_completed,
 )
+from src.queries.task_history_writes import _compute_time_bucket
 
 
 # ── Fixture: isolated temp database ───────────────────────────────────────────
@@ -388,7 +387,7 @@ def test_quality_score_not_inflated_after_reschedule():
 
 def test_quality_score_stored_in_schedule_log():
     """update_quality_score() writes to the most recent confirmed schedule_log row."""
-    from src.db import insert_schedule_log
+    from src.queries import insert_schedule_log
 
     insert_schedule_log(
         schedule_date="2026-04-08",

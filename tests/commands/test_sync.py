@@ -1,5 +1,5 @@
 """
-tests/test_sync.py — unit tests for --sync drift detection.
+tests/commands/test_sync.py — unit tests for --sync drift detection.
 
 All tests use a temp SQLite database (no real API calls).
 Todoist client methods are mocked via unittest.mock.patch.
@@ -11,18 +11,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import src.db as db_module
-from src.db import (
+from src.db import setup_database
+from src.models import TodoistTask
+from src.queries import (
     append_sync_diff,
     get_task_history_for_sync,
     get_task_ids_for_date,
     insert_task_history,
-    setup_database,
     sync_apply_case_a,
     sync_apply_case_b,
     sync_apply_case_c,
     sync_inject_task,
 )
-from src.models import TodoistTask
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ def test_sync_inject_task_on_conflict_does_nothing():
 
 
 def test_append_sync_diff_writes_to_schedule_log():
-    from src.db import insert_schedule_log
+    from src.queries import insert_schedule_log
     insert_schedule_log(
         schedule_date=_TODAY_STR,
         proposed_json={"scheduled": []},
@@ -244,7 +244,7 @@ def test_append_sync_diff_noop_when_no_confirmed_row():
     append_sync_diff(_TODAY_STR, [{"task_id": "t1", "case": "A"}])  # should not raise
 
 
-# ── _cmd_sync integration tests ────────────────────────────────────────────────
+# ── run_sync integration tests ────────────────────────────────────────────────
 
 
 def _context():
@@ -267,9 +267,9 @@ def _make_sync_client(tasks_by_id: dict[str, "TodoistTask | None | Exception"]) 
 
 
 def _run_sync(context, target_date, silent=False):
-    """Import and run _cmd_sync within the test process."""
-    import main as main_module
-    return main_module._cmd_sync(context, target_date, silent=silent)
+    """Run run_sync within the test process."""
+    from src.sync_engine import run_sync
+    return run_sync(context, target_date, silent=silent)
 
 
 class TestCaseA:
@@ -280,7 +280,7 @@ class TestCaseA:
         new_dt = datetime(2026, 4, 9, 14, 0, 0)
         mock_task = _make_task("t1", due_datetime=new_dt)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": mock_task})
             result = _run_sync(_context(), _TODAY)
 
@@ -301,7 +301,7 @@ class TestCaseA:
         new_dt = datetime(2026, 4, 9, 10, 33, 0)
         mock_task = _make_task("t1", due_datetime=new_dt)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": mock_task})
             result = _run_sync(_context(), _TODAY)
 
@@ -322,7 +322,7 @@ class TestCaseB:
         tomorrow_dt = datetime(2026, 4, 10, 10, 30, 0)
         mock_task = _make_task("t1", due_datetime=tomorrow_dt)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": mock_task})
             result = _run_sync(_context(), _TODAY)
 
@@ -340,7 +340,7 @@ class TestCaseB:
 
         mock_task = _make_task("t1", due_datetime=None)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": mock_task})
             result = _run_sync(_context(), _TODAY)
 
@@ -354,7 +354,7 @@ class TestCaseC:
         """Case C: 404 → task completed/deleted in Todoist, mark completed_at in DB."""
         _insert_row(task_id="t1")  # completed_at IS NULL
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": None})  # 404
             result = _run_sync(_context(), _TODAY)
 
@@ -375,7 +375,7 @@ class TestCaseC:
         """A task with completed_at already set is treated as Case D — no re-marking."""
         _insert_row(task_id="t1", completed_at="2026-04-09T12:00:00")
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": None})
             result = _run_sync(_context(), _TODAY)
 
@@ -392,7 +392,7 @@ class TestCaseD:
         same_dt = datetime(2026, 4, 9, 10, 30, 0)
         mock_task = _make_task("t1", due_datetime=same_dt)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = _make_sync_client({"t1": mock_task})
             result = _run_sync(_context(), _TODAY)
 
@@ -410,7 +410,7 @@ class TestUserInjected:
         injected_dt = datetime(2026, 4, 9, 15, 0, 0)
         injected_task = _make_task("inject1", content="My manual task", due_datetime=injected_dt)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             mock_client = MagicMock()
             mock_client.get_task_by_id.side_effect = lambda tid: None  # no rows to sync
             mock_client.get_todays_scheduled_tasks.return_value = [injected_task]
@@ -440,7 +440,7 @@ class TestUserInjected:
         same_dt = datetime(2026, 4, 9, 10, 30, 0)
         known_task = _make_task("t1", due_datetime=same_dt)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             mock_client = MagicMock()
             mock_client.get_task_by_id.return_value = known_task
             mock_client.get_todays_scheduled_tasks.return_value = [existing_task]
@@ -453,7 +453,7 @@ class TestUserInjected:
 class TestEmptySchedule:
     def test_empty_schedule_returns_cleanly(self):
         """No task_history rows → returns zero counts, no crash."""
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             MockClient.return_value = MagicMock()
             result = _run_sync(_context(), _TODAY)
 
@@ -481,7 +481,7 @@ class TestRateLimit:
                 raise requests.exceptions.HTTPError(response=resp)
             return good_task
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             mock_client = MagicMock()
             mock_client.get_task_by_id.side_effect = _get_with_429
             mock_client.get_todays_scheduled_tasks.return_value = []
@@ -504,7 +504,7 @@ class TestRateLimit:
             resp.status_code = 429
             raise requests.exceptions.HTTPError(response=resp)
 
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             mock_client = MagicMock()
             mock_client.get_task_by_id.side_effect = _always_429
             mock_client.get_todays_scheduled_tasks.return_value = []
@@ -528,7 +528,7 @@ class TestAutoCallFromReview:
         _insert_row(task_id="t1")  # completed_at = NULL
 
         # Sync: Todoist returns 404 (completed outside review)
-        with patch("src.todoist_client.TodoistClient") as MockClient:
+        with patch("src.sync_engine.TodoistClient") as MockClient:
             mock_client = MagicMock()
             mock_client.get_task_by_id.return_value = None  # 404
             mock_client.get_todays_scheduled_tasks.return_value = []
@@ -537,6 +537,6 @@ class TestAutoCallFromReview:
 
         # After sync: get_todays_task_history should NOT return t1
         # (completed_at is now set, so it's filtered out)
-        from src.db import get_todays_task_history
+        from src.queries import get_todays_task_history
         remaining = get_todays_task_history(_TODAY_STR)
         assert all(r["task_id"] != "t1" for r in remaining)
