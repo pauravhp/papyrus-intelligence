@@ -19,17 +19,20 @@ from src.calendar_client import get_events
 from src.llm import _groq_json_call
 from src.onboard_patterns import build_pattern_summary
 from src.prompts.onboard import build_onboard_prompt
+from src.scheduler import compute_free_windows
 
 ONBOARD_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 DRAFT_PATH = Path(__file__).parent.parent.parent / "context.json.draft"
+TEMPLATE_PATH = Path(__file__).parent.parent.parent / "context.template.json"
 DAYS_TO_SCAN = 14
 
 
 def cmd_onboard(context: dict) -> None:
+    # Scan credentials only — sourced from live context.json, never written to draft
     timezone_str = context.get("user", {}).get("timezone", "America/Vancouver")
     extra_cal_ids = context.get("calendar_ids", [])
 
-    # If a draft already exists and is at Stage 1, skip to Stage 2
+    # If a draft already exists, route to the appropriate stage
     if DRAFT_PATH.exists():
         try:
             with open(DRAFT_PATH) as f:
@@ -39,8 +42,19 @@ def cmd_onboard(context: dict) -> None:
             if stage >= 1 and status == "pending_stage_2_qa":
                 _run_stage_2(existing_draft, DRAFT_PATH)
                 return
+            if stage >= 1 and status == "pending_stage_3_audit":
+                _run_stage_3(existing_draft, DRAFT_PATH, timezone_str, extra_cal_ids)
+                return
         except (json.JSONDecodeError, KeyError):
             pass  # Corrupt draft — re-run Stage 1
+
+    # Stage 1 — load template as draft base
+    try:
+        with open(TEMPLATE_PATH) as f:
+            template = json.load(f)
+    except FileNotFoundError:
+        print(f"[ERROR] {TEMPLATE_PATH.name} not found. Cannot build draft.")
+        return
 
     print("╔══════════════════════════════════════════════════════╗")
     print("║            --onboard  •  Stage 1 of 3               ║")
@@ -100,7 +114,7 @@ def cmd_onboard(context: dict) -> None:
     questions = raw.get("questions_for_stage_2", []) or []
 
     # ── Write draft ───────────────────────────────────────────────────────────
-    draft = _build_draft_context(context, proposed, questions)
+    draft = _build_draft_context(template, proposed, questions)
     with open(DRAFT_PATH, "w") as f:
         json.dump(draft, f, indent=2)
 
@@ -261,13 +275,194 @@ def _set_nested(d: dict, field_path: str, value) -> None:
     # If the leaf doesn't exist, skip silently — don't add unknown fields
 
 
-def _build_draft_context(existing_context: dict, proposed: dict, questions: list) -> dict:
+def _run_stage_3(draft: dict, draft_path: Path, scan_timezone: str, scan_cal_ids: list) -> None:
     """
-    Merge proposed values into a copy of the existing context.
+    Free window audit.
+
+    Strips _onboard_draft, runs compute_free_windows() against today using the
+    draft config, displays the result for user confirmation, then promotes
+    context.json.draft → context.json on approval.
+    """
+    CONTEXT_PATH = draft_path.parent / "context.json"
+    BACKUP_PATH = draft_path.parent / "context.json.bak"
+
+    print("╔══════════════════════════════════════════════════════╗")
+    print("║            --onboard  •  Stage 3 of 3               ║")
+    print("║              Free Window Audit                       ║")
+    print("╚══════════════════════════════════════════════════════╝")
+    print()
+
+    # Build working config: strip metadata, inject timezone if null
+    working = copy.deepcopy(draft)
+    working.pop("_onboard_draft", None)
+    if working.get("user", {}).get("timezone") is None:
+        working.setdefault("user", {})["timezone"] = scan_timezone
+    # calendar_ids: use scan creds if draft has none
+    if not working.get("calendar_ids"):
+        working["calendar_ids"] = scan_cal_ids
+
+    today = date.today()
+
+    # ── Fetch today's events ───────────────────────────────────────────────────
+    events = []
+    try:
+        print(f"[Stage 3] Fetching today's events ({today})...", end=" ", flush=True)
+        events = get_events(
+            target_date=today,
+            timezone_str=scan_timezone,
+            extra_calendar_ids=scan_cal_ids,
+        )
+        print(f"{len(events)} event(s) found.")
+    except Exception as e:
+        print(f"\n  [Warning] Could not fetch events: {e}")
+        print("  Proceeding with empty event list.")
+    print()
+
+    # ── Compute free windows ───────────────────────────────────────────────────
+    try:
+        windows = compute_free_windows(events, today, working)
+    except Exception as e:
+        print(f"[ERROR] compute_free_windows() failed: {e}")
+        print("  Check that sleep times and calendar_rules in the draft are valid.")
+        return
+
+    # ── Display audit ──────────────────────────────────────────────────────────
+    _display_audit(windows, events, working, today)
+
+    # ── Confirm ────────────────────────────────────────────────────────────────
+    try:
+        answer = input('Does this look right? [y / describe an issue]: ').strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        print("\n\n[Stage 3] Interrupted. No changes made.")
+        return
+
+    if answer in ("", "y", "yes"):
+        # ── Promote ───────────────────────────────────────────────────────────
+        clean = copy.deepcopy(draft)
+        clean.pop("_onboard_draft", None)
+
+        if CONTEXT_PATH.exists():
+            import shutil
+            shutil.copy2(CONTEXT_PATH, BACKUP_PATH)
+            print(f"  Backed up existing config → {BACKUP_PATH.name}")
+
+        with open(CONTEXT_PATH, "w") as f:
+            json.dump(clean, f, indent=2)
+
+        draft_path.unlink()
+        print(f"  Config promoted → {CONTEXT_PATH.name}")
+        print(f"  Draft removed   → {draft_path.name}")
+        print()
+        print("  Onboarding complete. Run  python main.py --check  to validate.")
+        print()
+    else:
+        # ── Guidance ──────────────────────────────────────────────────────────
+        print()
+        _print_fix_guidance(answer)
+        print()
+        print("  After editing, re-run:  python main.py --onboard")
+        print()
+
+
+def _display_audit(windows, events, working: dict, today) -> None:
+    from zoneinfo import ZoneInfo
+    from src.scheduler import _normalize_tz  # private but same codebase
+
+    tz_str = _normalize_tz(working.get("user", {}).get("timezone", "America/Vancouver"))
+    tz = ZoneInfo(tz_str)
+
+    sleep = working.get("sleep", {})
+    wake_str = sleep.get("default_wake_time") or "?"
+    first_str = sleep.get("first_task_not_before") or "?"
+
+    print(f"  Effective wake: {wake_str}  |  First task not before: {first_str}")
+    print()
+
+    # Free windows
+    if windows:
+        print("  Free windows:")
+        for w in windows:
+            s = w.start.astimezone(tz)
+            e = w.end.astimezone(tz)
+            h, m = divmod(w.duration_minutes, 60)
+            dur = f"{h}h {m:02d}min" if h else f"{m}min"
+            print(f"    {s.strftime('%H:%M')} → {e.strftime('%H:%M')}   ({dur:10s})   {w.block_type}")
+    else:
+        print("  No free windows found — check sleep config and daily blocks.")
+    print()
+
+    # Events consuming time
+    cal_rules = working.get("calendar_rules", {})
+    timed_events = [ev for ev in events if not ev.is_all_day]
+    daily_blocks = working.get("daily_blocks", [])
+
+    if timed_events or daily_blocks:
+        print("  Events consuming time:")
+
+        for ev in timed_events:
+            buf_before = buf_after = 0
+            rule_label = ""
+            for rule_name, rule in cal_rules.items():
+                if rule.get("color_id") == ev.color_id:
+                    buf_before = rule.get("buffer_before_minutes", 0)
+                    buf_after = rule.get("buffer_after_minutes", 0)
+                    rule_label = f"  (colorId {ev.color_id} → {rule_name})"
+                    break
+            s = ev.start.astimezone(tz).strftime("%H:%M")
+            e = ev.end.astimezone(tz).strftime("%H:%M")
+            buf_str = f"+ {buf_before}min buffer each side" if buf_before or buf_after else "no buffer"
+            print(f"    {ev.summary[:38]:38s}  {s}–{e}  {buf_str}{rule_label}")
+
+        for db in daily_blocks:
+            print(f"    {db['name'][:38]:38s}  {db['start']}–{db['end']}  (fixed daily block)")
+    print()
+
+
+_FIX_HINTS = [
+    (["early", "too early", "first window", "morning start"],
+     "sleep.first_task_not_before  or  sleep.morning_buffer_minutes"),
+    (["wake", "wake time", "wakes"],
+     "sleep.default_wake_time"),
+    (["weekend", "saturday", "sunday"],
+     "sleep.weekend_nothing_before"),
+    (["buffer", "meeting", "call", "flamingo"],
+     "calendar_rules.flamingo.buffer_before_minutes  /  buffer_after_minutes"),
+    (["event", "banana"],
+     "calendar_rules.banana.buffer_before_minutes  /  buffer_after_minutes"),
+    (["color", "colour", "colorid"],
+     "calendar_rules.flamingo.color_id  or  calendar_rules.banana.color_id"),
+    (["lunch", "dinner", "block", "fixed"],
+     "daily_blocks  (add/edit entries in context.json.draft)"),
+    (["late", "night", "cutoff", "after"],
+     "sleep.no_tasks_after"),
+    (["sleep", "bedtime"],
+     "sleep.default_sleep_time"),
+]
+
+
+def _print_fix_guidance(complaint: str) -> None:
+    low = complaint.lower()
+    matched = []
+    for keywords, field_hint in _FIX_HINTS:
+        if any(kw in low for kw in keywords):
+            matched.append(field_hint)
+
+    if matched:
+        print("  Likely fields to edit in context.json.draft:")
+        for hint in matched:
+            print(f"    • {hint}")
+    else:
+        print("  Edit the relevant fields in context.json.draft, then re-run --onboard.")
+        print("  Common fields: sleep.*, calendar_rules.*, daily_blocks")
+
+
+def _build_draft_context(template: dict, proposed: dict, questions: list) -> dict:
+    """
+    Merge proposed values into a deepcopy of context.template.json.
     Only overwrites fields with non-null proposed values.
     Adds _onboard_draft metadata block for Stage 2 to read.
     """
-    draft = copy.deepcopy(existing_context)
+    draft = copy.deepcopy(template)
 
     # Merge sleep fields
     for k, v in (proposed.get("sleep") or {}).items():

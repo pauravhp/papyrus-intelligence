@@ -1,0 +1,76 @@
+{
+  "user": {
+    "name": null,
+    "timezone": null
+  },
+  "calendar_ids": [],
+  "sleep": {
+    "default_sleep_time": null,
+    "default_wake_time": null,
+    "morning_buffer_minutes": 90,
+    "first_task_not_before": null,
+    "weekend_days": ["saturday", "sunday"],
+    "weekend_nothing_before": null,
+    "late_night_threshold": "01:30 next day",
+    "no_tasks_after": "00:30 next day"
+  },
+  "calendar_rules": {
+    "flamingo": {
+      "color_id": null,
+      "type": "meeting_call",
+      "buffer_before_minutes": 15,
+      "buffer_after_minutes": 15,
+      "movable": false
+    },
+    "banana": {
+      "color_id": null,
+      "type": "event",
+      "buffer_before_minutes": 30,
+      "buffer_after_minutes": 30,
+      "movable": false
+    }
+  },
+  "scheduling": {
+    "min_gap_between_tasks_minutes": 5,
+    "max_tasks_per_day": 10,
+    "duration_bands_minutes": {
+      "xs": [5, 15],
+      "s": [30, 60],
+      "m": [60, 90],
+      "l": [120, 180],
+      "xl": [180, 300],
+      "xxl": [300, 480]
+    }
+  },
+  "daily_blocks": [],
+  "label_vocabulary": {
+    "@deep-work": "Task requires sustained focus and uninterrupted concentration. Schedule only in peak energy windows (morning or afternoon primary peak). Never schedule back-to-back without a real break. Can schedule at late night after dinner if no other options, but not after 1:30am.",
+    "@admin": "Low-cognitive overhead task. Emails, updates, coordination, filing.",
+    "@waiting": "Blocked on someone else. Never schedule automatically. Only surface in weekly review.",
+    "@quick": "Under 15 minutes. Batch into transition gaps between larger blocks.",
+    "@in-progress": "Partially completed. Has remaining duration already updated. Treat as higher urgency than unstarted tasks of same priority.",
+    "@recurring-review": "Weekly review task. Do not schedule into daily plan unless explicitly requested."
+  },
+  "projects": [],
+  "rules": {
+    "hard": [
+      "Never schedule anything during the 90-minute morning buffer after wake",
+      "Meetings, calls, and events are immovable — task blocks always move around them",
+      "Always add 15-minute buffer before and after Flamingo (meeting/call) events",
+      "Always add 30-minute buffer before and after Banana (event) events",
+      "Never schedule tasks after 11pm",
+      "Minimum 5-minute gap between any two task blocks",
+      "On weekends (Sat/Sun), nothing before 1pm regardless of calendar",
+      "Tasks labeled @waiting are never scheduled automatically",
+      "Tasks labeled @deep-work must only be placed in peak energy windows (morning through early afternoon) or late night after dinner, never back-to-back without a real break, and not after 1:30am"
+    ],
+    "soft": [
+      "P1 tasks get the first available deep work block",
+      "If a task has been pushed 3+ times, flag it as at-risk",
+      "Tasks labeled @quick are batched into transition gaps, not given their own blocks",
+      "Tasks labeled @in-progress are treated as higher urgency than unstarted tasks of the same priority level",
+      "Deep work tasks (cognitive load: high) should be scheduled in the first half of the working day when possible",
+      "Sequence tasks within a block from smaller to larger to build momentum (Cal Newport momentum principle)"
+    ]
+  }
+}

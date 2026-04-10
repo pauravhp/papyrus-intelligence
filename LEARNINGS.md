@@ -200,6 +200,16 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 
 ---
 
+## --onboard context.template.json (2026-04-10)
+
+**`context.template.json` is the draft base, not `context.json`.** `_build_draft_context` now takes `template` (loaded from `context.template.json`) as its first argument. The live `context.json` is only read for scan credentials (`timezone`, `calendar_ids`) — it never feeds into the draft structure. This means onboarding always starts clean regardless of what the existing user's config contains.
+
+**`timezone` and `calendar_ids` are scan credentials only.** They come from `context.json` (with `"America/Vancouver"` fallback for timezone) and are used solely to call `get_events()`. They do NOT appear in the draft base — the template has `user.timezone: null` and `calendar_ids: []`. The LLM prompt still receives the live context via `build_onboard_prompt(patterns, context)` so it can see current config for reference, but the draft base is always the template.
+
+**Template fields that stay null until Stage 2/3:** `user.name`, `user.timezone`, `calendar_ids`, `sleep.default_wake_time`, `sleep.default_sleep_time`, `sleep.first_task_not_before`, `sleep.weekend_nothing_before`, `calendar_rules.flamingo.color_id`, `calendar_rules.banana.color_id`, `daily_blocks`, `projects`. Fields with universal defaults (`morning_buffer_minutes: 90`, `label_vocabulary`, `rules`, `scheduling`) are pre-populated.
+
+---
+
 ## --onboard Stage 2 (2026-04-10)
 
 **Stage 2 applies answers directly to the draft — no LLM call.** `_set_nested(draft, field_path, value)` traverses the draft dict using dot-notation (e.g. `sleep.default_wake_time`, `calendar_rules.flamingo.buffer_before_minutes`) and writes the value in-place. Stage 1's LLM already produced the best-guess inference; Stage 2 just lets the user confirm or correct it. Stage 3 is the right place for any final consistency audit.
@@ -213,3 +223,19 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 **KeyboardInterrupt / EOFError exits without saving.** Caught at the `input()` call; prints a clear message and returns immediately. The draft file is never opened for writing unless all questions complete normally.
 
 **`import copy` must be at module level, not inside `_run_stage_2`.** The function uses `copy.deepcopy` on the incoming draft dict to avoid mutating the caller's reference. The top-level `import copy` covers this — a second `import copy` inside the function is redundant and was removed.
+
+---
+
+## --onboard Stage 3 (2026-04-10)
+
+**Template draft has `user.timezone: null` — inject scan_timezone before calling `compute_free_windows()`.** `compute_free_windows` reads `context.get("user", {}).get("timezone", "America/Vancouver")`. A null value coerces to a string `"None"` which `ZoneInfo` rejects. Fix: `_run_stage_3` injects `scan_timezone` into the working copy's `user.timezone` when the draft value is null.
+
+**Timezone and `tz = ZoneInfo(...)` must be computed before both the windows block and the events block in `_display_audit`.** An early version defined `tz` only inside `if windows:` then referenced it again in the `if timed_events or daily_blocks:` block. If no windows exist, `tz` is undefined and the events display crashes. Fix: hoist both to the top of `_display_audit`.
+
+**`_normalize_tz` is importable within the same codebase despite its underscore prefix.** Used in `_display_audit` to convert `"PST/Vancouver"` → `"America/Vancouver"` before passing to `ZoneInfo`. Same convention as `_groq_json_call` in Stage 1 — private to the module's public API, fine to import internally.
+
+**Template load must come after draft status routing, not before.** If `TEMPLATE_PATH` is missing and the load raises `FileNotFoundError`, an early return blocks Stage 2 and Stage 3 (which don't need the template). Fix: moved the `json.load(TEMPLATE_PATH)` to after the draft status check, inside Stage 1's code path only.
+
+**Promotion strips `_onboard_draft` and removes `context.json.draft`.** `draft_path.unlink()` removes the draft file after a clean write to `context.json`. `shutil.copy2` (not `shutil.copy`) is used for backup — it preserves file metadata. `context.json.bak` is overwritten on each onboard run so there's always at most one backup.
+
+**`shutil` is imported inside `_run_stage_3` (not at module level).** It is only needed for the backup step and `shutil` is stdlib — lazy import keeps the module top level clean.

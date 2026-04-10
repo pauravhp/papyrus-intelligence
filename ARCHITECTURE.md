@@ -40,7 +40,7 @@ Token-efficient file map for new sessions. Read this before touching any code.
 
 **`sync.py`** — Thin wrapper around `run_sync` from `src.sync_engine`. Exposes `cmd_sync(context, target_date, silent)`.
 
-**`onboard.py`** — `cmd_onboard(context)`. Two-stage flow. Stage 1: scans 14 days of GCal, runs pattern detection via `src/onboard_patterns.py`, calls LLM to propose a draft config, writes `context.json.draft` with `_onboard_draft.status = "pending_stage_2_qa"`. Stage 2 (auto-detected on re-run): `_run_stage_2()` reads `_onboard_draft.questions_for_stage_2`, presents each Q interactively, applies answers via `_set_nested()` (dot-notation path traversal), writes draft back with `status = "pending_stage_3_audit"`. Never touches `context.json` directly.
+**`onboard.py`** — `cmd_onboard(context)`. Three-stage flow, auto-routed on each re-run by `_onboard_draft.status`. Stage 1 (`pending_stage_2_qa`): scans 14 days of GCal, pattern detection, LLM proposes draft config from `context.template.json` base, writes `context.json.draft`. Stage 2 (`pending_stage_3_audit`): `_run_stage_2()` presents questions interactively, applies answers via `_set_nested()` (dot-notation path). Stage 3 (promote): `_run_stage_3()` fetches today's GCal events, calls `compute_free_windows()` with the draft config, displays free windows + buffered events for visual confirmation, then on "y" strips `_onboard_draft`, backs up `context.json` → `context.json.bak`, writes clean draft as `context.json`, and removes the draft file. Never writes to GCal or Todoist.
 
 **`check.py`** — `cmd_check(context)`. Validates the full data pipeline (GCal + Todoist + scheduler) without calling the LLM. Safe to run any time.
 
@@ -90,7 +90,9 @@ Token-efficient file map for new sessions. Read this before touching any code.
 
 ## Config & Data Files
 
-**`context.json`** — Authoritative source for personal scheduling rules: sleep hours, weekend cutoffs, morning buffer, Flamingo/Banana colorId buffer sizes, daily fixed blocks, label vocabulary. Read at startup; passed to LLM and `compute_free_windows`.
+**`context.json`** — Authoritative source for personal scheduling rules: sleep hours, weekend cutoffs, morning buffer, Flamingo/Banana colorId buffer sizes, daily fixed blocks, label vocabulary. Read at startup; passed to LLM and `compute_free_windows`. During `--onboard`, only `user.timezone` and `calendar_ids` are read from this file (scan credentials); the draft base comes from `context.template.json`.
+
+**`context.template.json`** — Committed to git. Minimal schema with nulls for all user-specific fields (`user.name`, `user.timezone`, `calendar_ids`, sleep times, colorIds, `daily_blocks`, `projects`) and universal defaults for everything else (`label_vocabulary`, `rules`, `scheduling`, buffer minutes). Used as the deepcopy base in `_build_draft_context()` so every new user's onboarding draft starts clean.
 
 **`productivity_science.json`** — Pre-compiled circadian/cognitive research. Loaded once at startup, injected into LLM prompts. Never re-fetched at runtime.
 
