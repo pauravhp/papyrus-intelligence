@@ -101,3 +101,20 @@ Token-efficient file map for new sessions. Read this before touching any code.
 **`data/schedule.db`** — SQLite database (gitignored). Created/migrated automatically by `setup_database()`.
 
 **`snapshots/latest.json`** — Last confirmed schedule. Diff'd against new proposals before any Todoist write-back (gitignored).
+
+---
+
+## Supabase (multi-user web product — future)
+
+**`supabase/migrations/001_initial.sql`** — Full Postgres schema for the web product. Four tables:
+
+- **`users`** — extends `auth.users` (uuid FK). Stores `name`, `timezone`, encrypted `todoist_api_key`, `groq_api_key`, `google_credentials` (pgcrypto AES), and `config` (jsonb — contents of `context.json` per user). Auto-populated by `handle_new_user()` trigger on Supabase auth signup.
+- **`task_history`** — mirrors SQLite schema with `user_id` added. `UNIQUE(user_id, task_id)`. All SQLite types mapped: `INTEGER→bigint`, `TEXT→text`, `REAL→numeric`.
+- **`schedule_log`** — mirrors SQLite schema with `user_id` added. Indexed on `(user_id, schedule_date)`.
+- **`project_budgets`** — mirrors SQLite schema with `user_id` added. `UNIQUE(user_id, todoist_task_id)`.
+
+**RLS** enabled on all four tables — policies enforce `user_id = auth.uid()` (or `id = auth.uid()` for `users`).
+
+**Encryption pattern:** `encrypt_field(text) → text` and `decrypt_field(text) → text` SQL functions wrap `pgp_sym_encrypt/decrypt`. The passphrase is injected per-session by the FastAPI backend via `SET app.encryption_key = '<secret>'` sourced from Supabase Vault — never hardcoded.
+
+**CLI is unaffected** — continues to use `data/schedule.db` (SQLite). No `user_id` column in SQLite; all per-user scoping is implicit. See `supabase/SETUP.md` for how to apply the migration once a Supabase project exists.

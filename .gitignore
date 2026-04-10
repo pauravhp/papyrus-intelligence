@@ -8,3 +8,4 @@ __pycache__/
 snapshots/
 test_gcal.py
 test_groq.py
+supabase/.temp/
