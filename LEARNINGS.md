@@ -181,3 +181,19 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 **`src/commands/plan.py` contains all local helpers needed by `--plan-day`.** Private helpers (`_late_night_threshold_dt`, `_has_pre_meeting`, `_display_schedule`) and constants (`ENRICH_MODEL`, `SCHEDULE_MODEL`, `_PRIORITY_LABEL`, `_PRIORITY_API`, `_WIDTH`) live in `plan.py`, not in shared modules. They are only used by this one command and promoting them to shared scope would be premature abstraction.
 
 **Old test files must be deleted after refactor, not updated in place.** After `src/db.py` was slimmed down, the original `tests/test_schema_and_review.py` and `tests/test_sync.py` still imported functions from `src.db` that had moved to `src/queries/`. Rather than updating both the old tests and the new ones, the old files were deleted. Keeping them would have caused pytest to collect both, producing duplicate test IDs and stale import failures.
+
+---
+
+## --onboard Stage 1 (2026-04-10)
+
+**`get_events()` fetches one day at a time — 14 sequential API calls for the scan window.** This takes ~5-10 seconds. Each call returns only events for that single date. Batching is not supported by the existing API; use a loop with `end="\r"` progress indicator to avoid appearing frozen.
+
+**`_groq_json_call` is importable from `src.llm` within the project.** The underscore prefix signals it's not part of the public API surface — but within the same codebase it is fine to import directly. The onboard command uses it to get the JSON retry + logging behaviour without duplicating the code.
+
+**LLM correctly identifies colorId semantics from event names alone.** Even without explicit buffer/type hints, the model correctly mapped colorId 4 (short ~42min events with "Lab Meeting", "call" in names) → meeting_or_call and colorId 5 (long ~170min events) → focus_block_or_event.
+
+**The `_onboard_draft` key in `context.json.draft` is the Stage 2 handoff.** Stage 2 reads `_onboard_draft.questions_for_stage_2` and `_onboard_draft.status`. The key MUST be preserved through any draft edits. Stage 2 checks `status == "pending_stage_2_qa"` to detect a valid Stage 1 draft.
+
+**Draft collision detection: if Stage 1 draft exists with `pending_stage_2_qa` status, skip re-scan.** This prevents accidentally wiping an answered Q&A draft by re-running `--onboard`. To force a re-scan, user must delete `context.json.draft` first.
+
+**Architecture decision (2026-04-10): multi-user ownership model → Supabase, not per-user files.** The project is heading toward a FastAPI + Supabase (Postgres + auth) + Next.js web product. Users bring their own Todoist and Groq API keys. The CLI stays intact for local dev. The `_onboard_draft` metadata block in context.json maps directly to the `config` JSON column in the future `users` Supabase table — no schema change needed at handoff.

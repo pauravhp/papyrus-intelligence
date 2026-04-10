@@ -149,6 +149,16 @@ UTILITY COMMANDS
 
 VALIDATION
 ──────────
+  python main.py --onboard
+      Set up your scheduling config from your calendar.
+      Stage 1: Scans 14 days of Google Calendar, detects patterns
+               (wake time, color semantics, recurring blocks), and
+               proposes a draft context.json via LLM.
+      Stage 2: Interactive Q&A to refine uncertain values.
+      Stage 3: Schedule audit — review and object to placements.
+
+VALIDATION
+──────────
   python main.py --check
       Validate the full data pipeline (GCal + Todoist + scheduler)
       without calling the LLM. Safe to run any time.
@@ -186,6 +196,7 @@ def main() -> None:
         add_help=False,
     )
     parser.add_argument("--help", "-h", action="store_true", help="Show help")
+    parser.add_argument("--onboard", action="store_true")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--plan-day", nargs="?", const="", default=None, metavar="DATE")
     parser.add_argument("--review", nargs="?", const="", default=None, metavar="DATE")
@@ -233,7 +244,10 @@ def main() -> None:
 
     context = _load_config()
 
-    if args.check:
+    if args.onboard:
+        from src.commands.onboard import cmd_onboard
+        cmd_onboard(context)
+    elif args.check:
         from src.commands.check import cmd_check
         cmd_check(context)
     elif args.plan_day is not None:
