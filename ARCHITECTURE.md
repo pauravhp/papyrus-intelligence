@@ -40,6 +40,8 @@ Token-efficient file map for new sessions. Read this before touching any code.
 
 **`sync.py`** — Thin wrapper around `run_sync` from `src.sync_engine`. Exposes `cmd_sync(context, target_date, silent)`.
 
+**`onboard.py`** — `cmd_onboard(context)`. Two-stage flow. Stage 1: scans 14 days of GCal, runs pattern detection via `src/onboard_patterns.py`, calls LLM to propose a draft config, writes `context.json.draft` with `_onboard_draft.status = "pending_stage_2_qa"`. Stage 2 (auto-detected on re-run): `_run_stage_2()` reads `_onboard_draft.questions_for_stage_2`, presents each Q interactively, applies answers via `_set_nested()` (dot-notation path traversal), writes draft back with `status = "pending_stage_3_audit"`. Never touches `context.json` directly.
+
 **`check.py`** — `cmd_check(context)`. Validates the full data pipeline (GCal + Todoist + scheduler) without calling the LLM. Safe to run any time.
 
 **`status.py`** — `cmd_status(context)`. Displays today's confirmed schedule and task history state.
@@ -55,6 +57,8 @@ Token-efficient file map for new sessions. Read this before touching any code.
 **`enrich.py`** — Prompt template for Step 1 (task enrichment). `build_enrich_prompt(tasks, label_vocab, context, science_json)` returns the full system + user prompt string.
 
 **`schedule.py`** — Prompt template for Step 2 (schedule generation). `build_schedule_prompt(enriched_tasks, free_windows, date_str, context, science_summary)` returns the full system + user prompt string.
+
+**`onboard.py`** — Prompt template for `--onboard` Stage 1. `build_onboard_prompt(patterns, existing_context)` returns messages for the LLM to produce `proposed_config` + `questions_for_stage_2`. The `field` values in questions use dot-notation paths into the draft (e.g. `sleep.default_wake_time`).
 
 ---
 

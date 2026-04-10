@@ -37,13 +37,7 @@ def cmd_onboard(context: dict) -> None:
             stage = existing_draft.get("_onboard_draft", {}).get("stage", 0)
             status = existing_draft.get("_onboard_draft", {}).get("status", "")
             if stage >= 1 and status == "pending_stage_2_qa":
-                print("╔══════════════════════════════════════════════════════╗")
-                print("║            --onboard  •  Stage 1 of 3               ║")
-                print("╚══════════════════════════════════════════════════════╝")
-                print()
-                print(f"[Stage 1] Draft already exists: {DRAFT_PATH.name}")
-                print("  Stage 2 (Q&A) is not yet implemented.")
-                print("  To re-run Stage 1: delete context.json.draft and run --onboard again.")
+                _run_stage_2(existing_draft, DRAFT_PATH)
                 return
         except (json.JSONDecodeError, KeyError):
             pass  # Corrupt draft — re-run Stage 1
@@ -164,6 +158,107 @@ def _print_patterns(patterns: dict) -> None:
         print(f"  Late nights: {late_count} event(s) ending after 10pm")
 
     print()
+
+
+def _run_stage_2(draft: dict, draft_path: Path) -> None:
+    """
+    Interactive Q&A loop.
+
+    Reads _onboard_draft.questions_for_stage_2, presents each question, captures
+    user answers, applies them to the draft using dot-notation field paths, then
+    writes the draft back with status = "pending_stage_3_audit".
+    """
+    draft = copy.deepcopy(draft)
+    questions = draft.get("_onboard_draft", {}).get("questions_for_stage_2", [])
+
+    print("╔══════════════════════════════════════════════════════╗")
+    print("║            --onboard  •  Stage 2 of 3               ║")
+    print("║              Interactive Q&A                         ║")
+    print("╚══════════════════════════════════════════════════════╝")
+    print()
+
+    if not questions:
+        print("[Stage 2] No questions from Stage 1. Advancing to Stage 3.")
+        draft["_onboard_draft"]["status"] = "pending_stage_3_audit"
+        with open(draft_path, "w") as f:
+            json.dump(draft, f, indent=2)
+        print(f"  Draft updated: {draft_path.name}")
+        return
+
+    n = len(questions)
+    print(f"  {n} question{'s' if n > 1 else ''} to answer. Press Enter to accept the inference.\n")
+
+    answered = 0
+    for i, q in enumerate(questions, 1):
+        field = q.get("field", "?")
+        question_text = q.get("question", "")
+        inference = q.get("current_inference", "")
+        confidence = q.get("confidence", "?")
+
+        conf_tag = {"high": "[high]", "medium": "[med] ", "low": "[low] "}.get(confidence, f"[{confidence}]")
+
+        print(f"── Q{i}/{n}  {conf_tag}  {field}")
+        print(f"   {question_text}")
+        if inference not in (None, "", "null"):
+            prompt_str = f"   Your answer [{inference}]: "
+        else:
+            prompt_str = "   Your answer: "
+
+        try:
+            raw = input(prompt_str).strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n\n[Stage 2] Interrupted. Draft NOT saved.")
+            return
+
+        # Empty → keep inference
+        value = raw if raw else inference
+
+        # Coerce numeric fields
+        if value not in (None, "", "null"):
+            if field.endswith("_minutes") or field.endswith("_min"):
+                try:
+                    value = int(value)
+                except ValueError:
+                    pass
+
+        _set_nested(draft, field, value)
+        answered += 1
+        print()
+
+    # Update metadata
+    draft["_onboard_draft"]["status"] = "pending_stage_3_audit"
+    draft["_onboard_draft"]["stage_2_completed_at"] = datetime.now().isoformat()
+    draft["_onboard_draft"]["stage_2_answers_applied"] = answered
+
+    with open(draft_path, "w") as f:
+        json.dump(draft, f, indent=2)
+
+    print(f"── {answered}/{n} answers applied ─────────────────────────────────")
+    print(f"  Draft updated: {draft_path.name}")
+    print()
+    print("── Next ────────────────────────────────────────────────")
+    print(f"  Review draft:  cat {draft_path.name}")
+    print("  Continue:      python main.py --onboard  (Stage 3 — Audit & Promote)")
+    print()
+
+
+def _set_nested(d: dict, field_path: str, value) -> None:
+    """
+    Apply `value` to `d` at the dot-notation `field_path`.
+    Creates intermediate dicts if missing. Skips if the leaf key doesn't
+    exist in the original structure (avoids injecting unknown fields).
+    """
+    keys = field_path.split(".")
+    node = d
+    for key in keys[:-1]:
+        if key not in node or not isinstance(node[key], dict):
+            # Don't create structure that doesn't exist in the draft
+            return
+        node = node[key]
+    leaf = keys[-1]
+    if leaf in node:
+        node[leaf] = value
+    # If the leaf doesn't exist, skip silently — don't add unknown fields
 
 
 def _build_draft_context(existing_context: dict, proposed: dict, questions: list) -> dict:

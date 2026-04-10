@@ -197,3 +197,19 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 **Draft collision detection: if Stage 1 draft exists with `pending_stage_2_qa` status, skip re-scan.** This prevents accidentally wiping an answered Q&A draft by re-running `--onboard`. To force a re-scan, user must delete `context.json.draft` first.
 
 **Architecture decision (2026-04-10): multi-user ownership model → Supabase, not per-user files.** The project is heading toward a FastAPI + Supabase (Postgres + auth) + Next.js web product. Users bring their own Todoist and Groq API keys. The CLI stays intact for local dev. The `_onboard_draft` metadata block in context.json maps directly to the `config` JSON column in the future `users` Supabase table — no schema change needed at handoff.
+
+---
+
+## --onboard Stage 2 (2026-04-10)
+
+**Stage 2 applies answers directly to the draft — no LLM call.** `_set_nested(draft, field_path, value)` traverses the draft dict using dot-notation (e.g. `sleep.default_wake_time`, `calendar_rules.flamingo.buffer_before_minutes`) and writes the value in-place. Stage 1's LLM already produced the best-guess inference; Stage 2 just lets the user confirm or correct it. Stage 3 is the right place for any final consistency audit.
+
+**`_set_nested` silently skips unknown paths.** If the LLM produces a `field` like `current_sleep_config.no_tasks_after` that doesn't match the draft structure, `_set_nested` returns without writing anything. This is intentional — never inject unknown keys into the draft.
+
+**Numeric coercion for `_minutes` / `_min` fields.** If the field path ends with `_minutes` or `_min` and the answer string parses as an integer, it is stored as `int` (not string). This keeps the draft type-consistent with context.json.
+
+**Enter with no input keeps the Stage 1 inference.** `value = raw if raw else inference`. If the inference itself is `None`, `""`, or `"null"`, the prompt shows no brackets and no value is written on empty input.
+
+**KeyboardInterrupt / EOFError exits without saving.** Caught at the `input()` call; prints a clear message and returns immediately. The draft file is never opened for writing unless all questions complete normally.
+
+**`import copy` must be at module level, not inside `_run_stage_2`.** The function uses `copy.deepcopy` on the incoming draft dict to avoid mutating the caller's reference. The top-level `import copy` covers this — a second `import copy` inside the function is redundant and was removed.
