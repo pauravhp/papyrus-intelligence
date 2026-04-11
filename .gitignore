@@ -12,3 +12,4 @@ supabase/.temp/
 .agents/
 context.json.bak
 skills-lock.json
+frontend/package-lock.json

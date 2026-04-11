@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
+import LandingClient from "@/components/LandingClient";
 
 export default async function HomePage() {
   const cookieStore = await cookies();
@@ -9,7 +10,7 @@ export default async function HomePage() {
 
   if (data?.claims) {
     redirect("/dashboard");
-  } else {
-    redirect("/login");
   }
+
+  return <LandingClient />;
 }

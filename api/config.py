@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_SECRET_KEY: str   # sb_secret_... from Settings → API Keys
     ENCRYPTION_KEY: str
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
 
     model_config = SettingsConfigDict(
         env_file=".env",

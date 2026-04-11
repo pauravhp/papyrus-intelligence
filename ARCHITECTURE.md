@@ -134,9 +134,29 @@ Token-efficient file map for new sessions. Read this before touching any code.
 
 `getSession()` on the server reads the cookie as-is — no JWT validation, spoofable. `getClaims()` verifies the JWT against the project's JWKS keys (RS256/ES256); falls back to `getUser()` for symmetric-key projects. The FastAPI backend uses the same JWKS pattern in `api/auth.py`. Return type from `getClaims()`: `{ data: { claims, header, signature } | null, error }` — check `data?.claims`.
 
+**`app/onboard/page.tsx`** — Static placeholder. The `/auth/google/callback` backend redirects here after storing credentials. Will be reworked into the full onboarding UI in a future session.
+
+**`app/dashboard/ConnectGoogleButton.tsx`** — Client Component. Reads the current Supabase session access token, then navigates `window.location.href` to `http://localhost:8000/auth/google?token=<access_token>`. Browser navigation (not fetch) is required because the backend must issue a 302 redirect to Google, which only works as a real browser request.
+
 ### CORS
 
 `api/main.py` adds `CORSMiddleware` allowing `http://localhost:3000` with credentials.
+
+---
+
+## `api/routes/google_auth.py`
+
+Two unauthenticated-by-header routes (browser can't send Bearer on redirects):
+
+**`GET /auth/google`** — Accepts `?token=<supabase_jwt>`. Validates via `verify_token()`, signs `user_id + timestamp` into an HMAC-SHA256 state param, builds a `google_auth_oauthlib.Flow` from settings (no file read), redirects to Google consent with `access_type=offline, prompt=consent`.
+
+**`GET /auth/google/callback`** — Receives `?code=&state=` from Google. Verifies HMAC state (tamper + expiry check), calls `flow.fetch_token(code=)`, stores `json.loads(credentials.to_json())` into `users.google_credentials` (plain jsonb for now — pgcrypto migration pending), redirects to `http://localhost:3000/onboard`.
+
+**State format:** `user_id:unix_timestamp:sha256_hex` — all three segments are colon-free so `split(":")` gives exactly 3 parts. TTL 600 s. `hmac.compare_digest` prevents timing attacks.
+
+**`verify_token(token: str)`** in `api/auth.py` — extracted from `get_current_user` so it can be called with a query-param token (not just a Bearer header). `get_current_user` is now a thin `Depends` wrapper around it.
+
+**`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`** added to `api/config.py` Settings and loaded from `.env`. Values come from `credentials.json` (project root, gitignored).
 
 ---
 

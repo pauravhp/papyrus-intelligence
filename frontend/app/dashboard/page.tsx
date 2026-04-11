@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
+import ConnectGoogleButton from "./ConnectGoogleButton";
 import SignOutButton from "./SignOutButton";
 
 export default async function DashboardPage() {
@@ -22,6 +23,7 @@ export default async function DashboardPage() {
           Logged in as{" "}
           <span className="font-medium text-gray-900">{email}</span>
         </p>
+        <ConnectGoogleButton />
         <SignOutButton />
       </div>
     </div>

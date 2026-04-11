@@ -184,6 +184,24 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 
 ---
 
+## Google OAuth Flow (2026-04-11)
+
+**Browser-initiated OAuth can't use Bearer headers — pass JWT as `?token=` query param.** When the frontend navigates `window.location.href = /auth/google?token=<jwt>`, no custom headers travel with the request. The route validates the JWT via JWKS immediately, signs the user_id into a HMAC state param, and drops the token. The JWT never touches Google.
+
+**HMAC state format: `user_id:timestamp:sha256_hex`.** UUID contains only hex+hyphens (no colons), timestamp is digits, HMAC hex is 0-9a-f. `split(":")` gives exactly 3 parts cleanly. Timestamp lets the backend reject stale states (>10 min). `hmac.compare_digest` prevents timing attacks on the signature check.
+
+**`prompt="consent"` on the authorization URL forces a new refresh_token every grant.** Without it, Google only returns a refresh_token on the very first grant. Subsequent grants return only an access_token, breaking token refresh after expiry.
+
+**`Credentials.from_authorized_user_info(creds_dict)` + override client credentials.** `to_json()` embeds client_id/secret in the stored JSON. On load, we override `creds._client_id` and `creds._client_secret` from settings to ensure config changes propagate without re-auth. The private attribute names are `_client_id` and `_client_secret` (google-auth 2.x).
+
+**`google_credentials` stored as plain jsonb for now.** The column is `jsonb` in the Supabase schema. pgcrypto `encrypt_field()` returns a base64 text string which is not valid JSON — the column would need to be changed to `text` for encrypted storage. Deferred; treat as a pending migration.
+
+**`get_events()` accepts an optional `service` arg — CLI path unchanged.** `service=None` falls back to `_get_calendar_service()` which reads `token.json`. All existing CLI commands, tests, and the `--check` command are unaffected. API path passes a pre-built service built from Supabase-stored credentials.
+
+**`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` added to Settings.** Pulled from `credentials.json` at the project root. Both are required at startup. Add to `.env` before running the API.
+
+---
+
 ## Frontend Auth Setup (2026-04-10)
 
 **`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` replaces `NEXT_PUBLIC_SUPABASE_ANON_KEY`.** The old anon key was a long-lived JWT tied to the project's JWT secret — rotating the secret could cause app-wide downtime. The new publishable key (`sb_publishable_...`) is non-JWT and can be rotated independently. Both work during the transition period; always use `PUBLISHABLE_KEY` for new projects.
@@ -255,3 +273,21 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 **Promotion strips `_onboard_draft` and removes `context.json.draft`.** `draft_path.unlink()` removes the draft file after a clean write to `context.json`. `shutil.copy2` (not `shutil.copy`) is used for backup — it preserves file metadata. `context.json.bak` is overwritten on each onboard run so there's always at most one backup.
 
 **`shutil` is imported inside `_run_stage_3` (not at module level).** It is only needed for the backup step and `shutil` is stdlib — lazy import keeps the module top level clean.
+
+---
+
+## Landing Page + 3D Visual System (2026-04-11)
+
+**Cal Sans is not on Google Fonts — load via `@font-face` CDN.** The spec says "Cal Sans (Google Fonts)" but Cal Sans is a Cal.com proprietary font, not available via `next/font/google`. It's loaded via `@font-face` in `globals.css` from the calcom GitHub CDN (`raw.githubusercontent.com/calcom/font/main/fonts/CalSans-SemiBold.woff2`). For production, the woff2 should be copied into `public/fonts/` and referenced locally to avoid external CDN dependency.
+
+**Tailwind v4 has no `tailwind.config.js` — customise in `globals.css`.** Adding custom colors requires: (1) define CSS vars in `:root`, (2) register them as design tokens in `@theme inline { --color-* }`. Custom utilities (`font-display`, etc.) go in `@layer utilities`. No JS config file exists or is needed.
+
+**`@react-three/fiber` v9 + React 19 requires `--legacy-peer-deps`.** R3F v9 declares `react: ^18` in peer deps but works with React 19. Install with `--legacy-peer-deps` to bypass the peer check. Same applies to `@react-three/drei`.
+
+**`framer-motion-3d` is deprecated.** npm warns "Package no longer supported" for `framer-motion-3d`. 3D animations for this project use `@react-three/drei`'s `<Float>` component instead; `framer-motion` is only used for 2D scroll animations (`whileInView`, `initial/animate`). `framer-motion-3d` was installed per spec but is effectively unused.
+
+**OrbField must be `dynamic`-imported with `ssr: false` even though the file has `'use client'`.** The `'use client'` directive prevents SSR of the component tree, but Next.js will still attempt to import the module at build time to extract metadata. `@react-three/fiber`'s `Canvas` references browser globals (`window`, `WebGLRenderingContext`) that cause build errors if the module is evaluated server-side. Fix: in `LandingClient.tsx`, `const OrbField = dynamic(() => import('./OrbField'), { ssr: false })`.
+
+**Deterministic RNG keeps orb positions stable across re-renders.** Using `Math.random()` inside `useMemo` means positions change on every hot-reload. A seeded LCG (`seed * 16807 % 2147483647`) produces identical orb layouts every run. Pass `seed=42`; results are visually varied but reproducible.
+
+**Camera parallax inside R3F: pass a plain object ref, not `React.RefObject<T>`.** `useFrame` runs inside the Canvas renderer, outside React's commit phase. Passing a `mouseRef` created by `useRef<{x,y}>({x:0,y:0})` works correctly — it's a mutable object shared between the event listener (outer component) and `useFrame` (inner renderer). Type the prop as `{ current: { x: number; y: number } }` (not `React.RefObject<T>`) to avoid the readonly constraint TypeScript places on `RefObject.current`.

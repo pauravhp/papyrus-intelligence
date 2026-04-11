@@ -53,14 +53,14 @@ def _get_jwks() -> dict:
 # ── Dependency ────────────────────────────────────────────────────────────────
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-) -> dict:
+def verify_token(token: str) -> dict:
     """
-    Verify the Supabase JWT against the project's JWKS public keys (RS256).
-    Returns the decoded payload on success. Raises HTTP 401 on any failure.
+    Verify a raw Supabase JWT string against the project's JWKS public keys.
+    Returns the decoded payload on success. Raises HTTP 401 on failure.
+
+    Used directly by routes that receive the token as a query param
+    (e.g. browser-initiated OAuth redirects where a Bearer header is not possible).
     """
-    token = credentials.credentials
     try:
         jwks = _get_jwks()
         payload = jwt.decode(
@@ -76,3 +76,13 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
     return payload
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> dict:
+    """
+    Verify the Supabase JWT from the Authorization: Bearer header.
+    Thin wrapper around verify_token for use as a FastAPI Depends.
+    """
+    return verify_token(credentials.credentials)

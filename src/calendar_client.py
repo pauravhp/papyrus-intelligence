@@ -48,6 +48,7 @@ def get_events(
     target_date: date,
     timezone_str: str = "America/Vancouver",
     extra_calendar_ids: list[str] | None = None,
+    service=None,
 ) -> list[CalendarEvent]:
     """
     Fetch events from the primary calendar plus any IDs listed in extra_calendar_ids.
@@ -55,10 +56,15 @@ def get_events(
     extra_calendar_ids come from context.json["calendar_ids"] and let the user
     whitelist specific non-primary calendars without reading every calendar they
     have access to.
+
+    service — pre-built googleapiclient service object. When None (CLI path),
+    _get_calendar_service() reads credentials from token.json on disk.
+    Pass an explicit service to use caller-managed credentials (API path).
     """
     tz_str = _normalize_timezone(timezone_str)
     tz = ZoneInfo(tz_str)
-    service = _get_calendar_service()
+    if service is None:
+        service = _get_calendar_service()
 
     start_of_day = datetime(target_date.year, target_date.month, target_date.day,
                             0, 0, 0, tzinfo=tz)

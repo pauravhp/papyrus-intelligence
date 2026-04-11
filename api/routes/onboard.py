@@ -16,10 +16,14 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build as build_gcal_service
 from groq import Groq
 from pydantic import BaseModel
 
 from api.auth import get_current_user
+from api.config import settings
 from api.db import supabase
 from src.calendar_client import get_events
 from src.llm import _groq_json_call
@@ -81,7 +85,55 @@ def onboard_stage1(
     Stage 1: Scan 14 days of GCal, detect patterns, call LLM to propose
     a draft config (based on context.template.json). Returns the LLM output
     directly — no file I/O.
+
+    Google credentials are loaded from users.google_credentials in Supabase
+    (stored there by the /auth/google OAuth flow). The access token is refreshed
+    in-place and written back if expired.
     """
+    user_id: str = user["sub"]
+
+    # ── Load Google credentials from Supabase ─────────────────────────────────
+    gcal_result = (
+        supabase.from_("users")
+        .select("google_credentials")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    creds_data: dict | None = (
+        gcal_result.data.get("google_credentials") if gcal_result.data else None
+    )
+    if not creds_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Google Calendar not connected. "
+                "Complete the OAuth flow at /auth/google first."
+            ),
+        )
+
+    creds = Credentials.from_authorized_user_info(
+        creds_data,
+        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+    )
+    # Override client_id/secret from settings in case stored values differ
+    creds._client_id = settings.GOOGLE_CLIENT_ID
+    creds._client_secret = settings.GOOGLE_CLIENT_SECRET
+
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            refreshed = json.loads(creds.to_json())
+            supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google token is invalid and cannot be refreshed. Re-run /auth/google.",
+            )
+
+    gcal_service = build_gcal_service("calendar", "v3", credentials=creds)
+
+    # ── Template + prompt context ──────────────────────────────────────────────
     try:
         with open(TEMPLATE_PATH) as f:
             template: dict = json.load(f)
@@ -109,6 +161,7 @@ def onboard_stage1(
                 target_date=target,
                 timezone_str=body.timezone,
                 extra_calendar_ids=body.calendar_ids,
+                service=gcal_service,
             )
             events_by_date[target] = day_events
             all_events.extend(day_events)
