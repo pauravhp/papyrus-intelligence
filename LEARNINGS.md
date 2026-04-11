@@ -184,6 +184,22 @@ Current: `meta-llama/llama-4-scout-17b-16e-instruct` (both ENRICH_MODEL and SCHE
 
 ---
 
+## Frontend Auth Setup (2026-04-10)
+
+**`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` replaces `NEXT_PUBLIC_SUPABASE_ANON_KEY`.** The old anon key was a long-lived JWT tied to the project's JWT secret — rotating the secret could cause app-wide downtime. The new publishable key (`sb_publishable_...`) is non-JWT and can be rotated independently. Both work during the transition period; always use `PUBLISHABLE_KEY` for new projects.
+
+**`getClaims()` not `getSession()` for server-side auth.** `getSession()` reads the cookie as-is — no cryptographic validation, can be spoofed. `getClaims()` validates the JWT against the project's JWKS endpoint (RS256/ES256) or falls back to `getUser()` for symmetric keys. Safe for middleware and Server Components. `data` shape: `{ claims: JwtPayload; header: JwtHeader; signature: Uint8Array } | null` — check `data?.claims`, not `data?.claims` directly from destructuring.
+
+**`utils/supabase/middleware.ts` must return both `supabase` and `supabaseResponse`.** The Supabase-provided template returns only `supabaseResponse`. To call `getClaims()` in `middleware.ts`, we need the `supabase` client from the same closure (same cookie `setAll` binding). Modified the utility to `return { supabase, supabaseResponse }`.
+
+**Auth callback route at `/auth/callback`.** When email confirmation is enabled, Supabase sends a link that redirects to `<origin>/auth/callback?code=<code>`. The route handler calls `supabase.auth.exchangeCodeForSession(code)` and redirects to `/dashboard`. Without this route, email confirmation silently fails.
+
+**`create-next-app@latest` installed Next.js 16.2.3, not 14.** `npx create-next-app@latest` always installs the current latest — specify `@14` in the command to pin a version. Next.js 16 is compatible with all patterns used here; `cookies()` must be awaited (already the correct pattern for 15+).
+
+**Next.js 16 renamed `middleware.ts` → `proxy.ts`, `middleware()` → `proxy()`.** The functionality is identical; only the file name and exported function name changed. A `middleware.ts` file still works but emits a deprecation warning at build time. Always use `proxy.ts` for Next.js 16+ projects. The `config` export with `matcher` is unchanged.
+
+---
+
 ## --onboard Stage 1 (2026-04-10)
 
 **`get_events()` fetches one day at a time — 14 sequential API calls for the scan window.** This takes ~5-10 seconds. Each call returns only events for that single date. Batching is not supported by the existing API; use a loop with `end="\r"` progress indicator to avoid appearing frozen.

@@ -104,6 +104,42 @@ Token-efficient file map for new sessions. Read this before touching any code.
 
 ---
 
+## `frontend/` — Next.js 16 App Router (auth shell)
+
+**Stack:** Next.js 16.2.3, TypeScript, Tailwind CSS, `@supabase/supabase-js` 2.103, `@supabase/ssr` 0.10.2.
+
+**Auth key:** `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (`sb_publishable_...`) — not the legacy `ANON_KEY`. Non-JWT, rotates independently of the JWT secret.
+
+### File map
+
+**`utils/supabase/client.ts`** — Browser client. `createBrowserClient()` from `@supabase/ssr`. Used in `'use client'` components for sign-in, sign-up, and sign-out calls.
+
+**`utils/supabase/server.ts`** — Server client. `createServerClient()` from `@supabase/ssr` with a `cookieStore` (awaited `cookies()`) injected at call site. Used in Server Components and Route Handlers.
+
+**`utils/supabase/middleware.ts`** — Proxy client factory. Returns `{ supabase, supabaseResponse }` (diverges from Supabase's template which only returns `supabaseResponse`). Both are needed: `supabase` to call `getClaims()`, `supabaseResponse` to forward refreshed session cookies. Cookie `setAll` closure mutates `supabaseResponse` in place so the same reference must be returned.
+
+**`proxy.ts`** — Next.js 16 proxy (formerly `middleware.ts`; renamed in Next.js 16 — same functionality). Calls `getClaims()` to validate the JWT locally against the JWKS endpoint. Never calls `getSession()` (reads cookie without cryptographic validation). Redirects: unauthenticated → `/login` for `/dashboard`; authenticated → `/dashboard` for `/login`.
+
+**`app/page.tsx`** — Server Component. Calls `getClaims()` and redirects to `/dashboard` or `/login`.
+
+**`app/login/page.tsx`** — Client Component (`'use client'`). Email/password sign-in and sign-up form using `signInWithPassword()` and `signUp()`. Toggle between modes. Shows confirmation message on sign-up if email verification is enabled.
+
+**`app/dashboard/page.tsx`** — Server Component. Calls `getClaims()` server-side; redirects to `/login` if unauthenticated. Renders `claims.email` and the `<SignOutButton>`.
+
+**`app/dashboard/SignOutButton.tsx`** — Client Component. Calls `supabase.auth.signOut()` then `router.push('/login') + router.refresh()`.
+
+**`app/auth/callback/route.ts`** — Route Handler (`GET`). Exchanges `?code=` for a session via `exchangeCodeForSession()`. Required when Supabase email confirmation is enabled — the confirmation link redirects here. On success → `/dashboard`. On failure → `/login?error=auth-callback-failed`.
+
+### Auth pattern: `getClaims()` not `getSession()`
+
+`getSession()` on the server reads the cookie as-is — no JWT validation, spoofable. `getClaims()` verifies the JWT against the project's JWKS keys (RS256/ES256); falls back to `getUser()` for symmetric-key projects. The FastAPI backend uses the same JWKS pattern in `api/auth.py`. Return type from `getClaims()`: `{ data: { claims, header, signature } | null, error }` — check `data?.claims`.
+
+### CORS
+
+`api/main.py` adds `CORSMiddleware` allowing `http://localhost:3000` with credentials.
+
+---
+
 ## Supabase (multi-user web product — future)
 
 **`supabase/migrations/001_initial.sql`** — Full Postgres schema for the web product. Four tables:

@@ -9,3 +9,6 @@ snapshots/
 test_gcal.py
 test_groq.py
 supabase/.temp/
+.agents/
+context.json.bak
+skills-lock.json

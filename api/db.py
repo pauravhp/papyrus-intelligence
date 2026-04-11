@@ -36,12 +36,21 @@ def set_encryption_key() -> None:
     encrypt_field() / decrypt_field() SQL functions can use it.
 
     Call this before any RPC or query that reads or writes an encrypted column.
+
+    REQUIRES a public wrapper function in Supabase (Postgres built-in set_config
+    is not exposed via PostgREST). Add this migration before using encrypted columns:
+
+        CREATE OR REPLACE FUNCTION public.set_encryption_key(key text)
+        RETURNS void LANGUAGE sql SECURITY DEFINER AS $$
+            SELECT set_config('app.encryption_key', key, true);
+        $$;
+
+    Until that migration is applied, this is a no-op (logged as a warning).
     """
-    supabase.rpc(
-        "set_config",
-        {
-            "setting_name": "app.encryption_key",
-            "new_value": settings.ENCRYPTION_KEY,
-            "is_local": True,
-        },
-    ).execute()
+    try:
+        supabase.rpc(
+            "set_encryption_key",
+            {"key": settings.ENCRYPTION_KEY},
+        ).execute()
+    except Exception as exc:
+        print(f"[db] set_encryption_key skipped (migration not applied?): {exc}")
