@@ -1,365 +1,117 @@
-# CLAUDE.md
+# CLAUDE.md — papyrus-intelligence
 
-## Scheduling Agent — Claude Code Context Document
+## What This Is
 
-Place this file at the project root. Claude Code reads it automatically at session start.
+A scheduling coach and personal productivity hub. Three moments:
 
----
+- **Morning:** Chat to plan your day with natural language context ("plan light today, roommate isn't doing well")
+- **Mid-day:** Replan gracefully when things slip — resilience over precision
+- **Weekly:** Achievement narrative — what you built, not what you missed
 
-## 1. What This Project Is
+Hub-and-spoke:
 
-A personal AI scheduling agent that reads Google Calendar + Todoist, reasons about them via a multi-step LLM pipeline (Groq/Llama), proposes a daily schedule respecting personal rules, gets user confirmation, and writes back to Todoist via the Sync API. Google Calendar sync then handles calendar block creation automatically.
+- **Todoist** → passive input (mobile capture only)
+- **This app** → active hub (all scheduling happens here)
+- **GCal** → passive output (app writes events directly)
 
-The agent is the intelligence layer. Todoist is the interface the user already lives in. The goal is to make Todoist smarter, not to replace it.
-
----
-
-## 2. Language & Stack
-
-- Python 3.10+
-- SQLite via the built-in `sqlite3` module (`data/schedule.db`)
-- Google Calendar API (`google-api-python-client`)
-- Todoist REST API v2 + Sync API v9
-- Groq API (`groq` Python SDK). Model for Step 1 Enrich: `meta-llama/llama-4-scout-17b-16e-instruct`. Model for Step 2 Schedule: `meta-llama/llama-4-scout-17b-16e-instruct`.
-- `python-dotenv` for secrets
-- CLI via `argparse` — flags: `--plan-day`, `--review`, `--add-task`, `--check`
-- `productivity_science.json` — pre-compiled research reference (see Section 9)
+No Todoist Pro. Direct GCal writes. BYOK (users bring their own Groq or Anthropic key).
 
 ---
 
-## 3. Project Structure
+## Architecture — ReAct Agent
 
-```
-scheduling-agent/
-├── CLAUDE.md
-├── README.md
-├── .env                      # secrets, never commit
-├── credentials.json          # GCal OAuth creds, never commit
-├── token.json                # GCal OAuth token, never commit
-├── context.json              # personal scheduling rules and label vocab
-├── productivity_science.json # pre-compiled research (never re-fetch at runtime)
-├── main.py                   # CLI entry point
-├── src/
-│   ├── calendar_client.py    # Google Calendar API wrapper
-│   ├── todoist_client.py     # Todoist REST + Sync API wrapper
-│   ├── scheduler.py          # free window calculator, constraint engine
-│   ├── llm.py                # Groq calls, prompt templates, chain
-│   ├── db.py                 # SQLite setup and queries
-│   └── models.py             # typed dataclasses
-├── data/
-│   └── schedule.db           # SQLite database (gitignored)
-├── snapshots/
-│   └── latest.json           # last confirmed schedule snapshot (gitignored)
-└── tests/
-    └── test_scheduler.py     # unit tests for free window calculator
-```
+**The LLM orchestrates. Code enforces. Writes are human-gated.**
+
+User: "plan my day"  
+ Agent → get_tasks() → get_calendar() → schedule_day() → ScheduleCard shown  
+ User: "looks good"  
+ Agent → confirm_schedule() → GCal events written + Todoist due_datetimes set
+
+DO NOT build a hardcoded pipeline. No pack_schedule(). No enrich→order→pack.  
+ The LLM assigns tasks to times. Python provides free windows and enforces hard constraints.
 
 ---
 
-## 4. Key Architectural Rules — DO NOT VIOLATE
+## Stack
 
-**Rule 1: Constraints in code, judgment in LLM.**
-The LLM never receives raw calendar events. It only receives pre-computed free windows. Never ask the LLM to figure out what time is free — compute that in `scheduler.py` first.
-
-**Rule 2: LLM handles judgment only.**
-Task ordering, slot assignment within free windows, project inference, energy/circadian reasoning, momentum sequencing. It does not enforce hard rules — code does that.
-
-**Rule 3: Diff before writing.**
-Always compare new schedule against `snapshots/latest.json`. Only write tasks that actually changed. Never overwrite unchanged tasks.
-
-**Rule 4: Batch writes via Sync API.**
-All Todoist writes use Sync API v9 in a single HTTP call. Individual task reads use REST API v2.
-
-**Rule 5: Google Calendar is read-only.**
-Never write to GCal directly. Todoist's native GCal sync handles calendar block creation automatically once `due_datetime` and `duration` are set on a task.
-
-**Rule 6: All LLM outputs must be valid JSON.**
-Wrap every LLM call in `try/except` with JSON parse validation. Retry once on failure. Log the full prompt if retry also fails.
-
-**Rule 7: Use Todoist filter syntax for task fetching.**
-Do not fetch all tasks and filter in Python. Push the query to Todoist:
-
-- Daily planning: `"!date | today | overdue"`
-- At-risk tasks: `"p1 & due before: +2 days"`
-- Inbox triage: filter by `project_id` matching inbox ID
-- In-progress: `"@in-progress"`
-
-**Rule 8: Never re-fetch `productivity_science.json` at runtime.**
-This file is pre-compiled research. It is loaded once at startup and injected into LLM prompts as static context. It never makes an external call at scheduling time.
+- Python 3.10+ / FastAPI
+- Next.js 15 / TypeScript / app router
+- Supabase (Postgres + Auth + encrypted credential storage)
+- Anthropic SDK (Claude Haiku default) + Groq fallback — BYOK
+- Google Calendar API (read + write, `calendar.events` scope)
+- Todoist REST API v1 (read + `due_datetime` writes only, no Pro features)
 
 ---
 
-## 5. Todoist — Full Feature Usage
+## Core Rules
 
-This project uses Todoist as more than a task store. Use all of the following:
+**Rule 1: LLM orchestrates, code enforces.**  
+ Hard constraints (sleep hours, cutoffs, GCal buffers) enforced in Python.
+LLM gets pre-computed free windows as guidance, not walls.
 
-### Labels as scheduling metadata
+**Rule 2: Writes are human-gated.**  
+ `confirm_schedule` is the only tool that writes externally.  
+ Only called after user approves the proposed schedule.
 
-Defined in `context.json` under `label_vocabulary`. The scheduler reads these as hard constraints before the LLM step:
+**Rule 3: Tools are the unit of work.**  
+ Each tool is independently testable. No tool has side effects unless it's a write tool.  
+ Tools return structured data, not strings.
 
-- `@deep-work` — schedule in high-focus windows only, never adjacent to meetings without buffer
-- `@admin` — low-cognitive, batch in afternoon
-- `@waiting` — never auto-schedule, surface in weekly review only
-- `@quick` — under 15min, batch into transition gaps between blocks
-- `@focus` — needs uninterrupted environment
-- `@in-progress` — partially done, higher urgency than unstarted same-priority tasks
-- `@recurring-review` — weekly review only, not daily plan
+**Rule 4: One LLM call for scheduling.**  
+ `schedule_day()` = single call. Input: tasks + free windows + context + context_note.  
+ Output: proposed schedule with reasoning. No multi-step pipeline.
 
-### Sections for task state within projects
+**Rule 5: Direct GCal writes.**  
+ Never rely on Todoist's GCal sync. Write GCal events directly.  
+ Set due_datetime in Todoist for task organisation only.
 
-Each project uses sections: **This Week / Backlog / Waiting**. When the agent schedules a task, it moves it to "This Week". When pushed to next week, it moves to "Backlog". When `@waiting`, it moves to "Waiting". This gives the user a live Kanban view inside Todoist that mirrors agent decisions.
+**Rule 6: BYOK always.**  
+ Never use server-side LLM keys in production. Always use user's Supabase-stored key.  
+ Dev fallback to env vars is allowed locally only (log a warning).
 
-### Filter syntax for all task queries
-
-Never fetch-all. Always use Todoist filter strings via REST API v2 `GET /tasks?filter=<string>`.
-
-### Task comments as audit trail
-
-When the agent reschedules a task, it writes a comment:
-`"Rescheduled from Wed 3pm → Thu 9:30am. Reason: supervisor call conflict."`
-Uses `POST /comments`.
-
-### Reminders on P1 blocks (Phase 3+)
-
-Set a 10-minute reminder before any scheduled P1 task block via `POST /reminders`. Requires Pro account (user has this).
-
-### Activity log for habit learning (Phase 7)
-
-Use `GET https://api.todoist.com/sync/v9/activity/get` to read actual completion timestamps. More accurate than self-reported end-of-day capture.
-
-### Official Todoist MCP (future/multi-user phase)
-
-Doist maintains an official MCP at `https://ai.todoist.net/mcp`. When the project gets a web backend, expose scheduling logic through this MCP for conversational interaction via Claude.
+**Rule 7: JSON validation on all LLM outputs.**  
+ try/except + parse. Retry once. Log full prompt on double failure.
 
 ---
 
-## 6. Personal Rules (from context.json — enforced in code)
+## Agent Tools
 
-- Sleep: 1am–9am default. **Fri/Sat/Sun: nothing before noon, no exceptions.**
-- Morning buffer: 90min after wake. First task never before 10:30am on weekdays.
-- Late night detection: GCal event ends after 11pm → shift next day's effective wake time forward, push buffer accordingly.
-- Flamingo (`colorId "4"`) = meetings/calls → **15min buffer before AND after.**
-- Banana (`colorId "5"`) = events → **30min buffer before AND after.**
-- Verify actual `colorId` values on first run by printing event `colorId`s via `--check`.
-- Meetings/calls/events: **IMMOVABLE.** Todoist task blocks always move around them.
-- No tasks after 11pm. Minimum 5min gap between any two task blocks.
-- Tasks pushed 3+ times: flag prominently as at-risk.
-- `@waiting` tasks are never auto-scheduled under any circumstances.
-
-**Daily fixed blocks (from context.json daily_blocks):**
-Treated identically to calendar event buffers in
-compute_free_windows(). Read from context.json at startup.
-Applied every day regardless of GCal content.
-Movable: false means they are never scheduled over.
-User can override individual instances verbally before
-a --plan-day run ("lunch is at 2pm today").
+| Tool               | R/W | Purpose                                   |
+| ------------------ | --- | ----------------------------------------- |
+| `get_tasks`        | R   | Todoist tasks with filter                 |
+| `get_calendar`     | R   | GCal events (all calendars)               |
+| `schedule_day`     | R   | Inner LLM call → proposed schedule        |
+| `confirm_schedule` | W   | Write GCal events + Todoist due_datetimes |
+| `push_task`        | W   | Clear due + add comment                   |
+| `get_status`       | R   | Today's confirmed schedule from Supabase  |
+| `onboard_scan`     | R   | 14-day GCal pattern scan                  |
+| `onboard_apply`    | W   | Apply Q&A answers to draft config         |
+| `onboard_confirm`  | W   | Promote draft → live config               |
 
 ---
 
-## 7. LLM Scheduling Philosophy
+## Coaching Rules
 
-Work block types and preferred time windows are **NOT hardcoded**. The LLM reasons from first principles every time using:
-
-- `productivity_science.json` — pre-compiled research on circadian rhythm, energy levels, focus windows, task sequencing, and cognitive load theory (loaded at startup, never re-fetched)
-- The user's specific free windows for that day
-- Task labels, priorities, deadlines, and estimated durations
-- Momentum sequencing — ordering tasks within a block to build energy and flow
-
-After several weeks of usage data, learned patterns from `task_history` may be introduced. Until then, the LLM reasons with full autonomy within hard constraints enforced by code.
+- One nudge max per conversation (e.g. "you haven't set a deadline on this project")
+- Never raised again if dismissed
+- Toggleable off in user settings
+- Surfaces in weekly story + in conversation — never as a popup
 
 ---
 
-## 8. LLM Chain — Two-Step Pipeline
+## Testing
 
-No LangChain. No framework. Two separate Groq API calls in `src/llm.py`.
-
-### Step 1 — Enrich (`enrich_tasks`)
-
-- **Input:** raw task list + label vocab + context rules
-- **Job:** for each task, assess cognitive load, energy requirement, suggested block type, and scheduling flags
-- **Output per task:**
-
-```json
-{
-	"task_id": "string",
-	"cognitive_load": "high | medium | low",
-	"energy_requirement": "peak | moderate | low",
-	"suggested_block": "descriptive string e.g. morning peak focus",
-	"can_be_split": true,
-	"scheduling_flags": ["string"]
-}
-```
-
-### Step 2 — Schedule (`generate_schedule`)
-
-- **Input:** enriched tasks + pre-computed free windows + date + context + `productivity_science.json` heuristics summary
-- **Job:** assign tasks to time slots using productivity science reasoning. Explain briefly why each task was placed where it was. Sequence tasks within blocks for momentum.
-- **Output:**
-
-```json
-{
-	"reasoning_summary": "Brief note on overall approach for today",
-	"scheduled": [
-		{
-			"task_id": "string",
-			"task_name": "string",
-			"start_time": "2026-04-03T09:30:00",
-			"end_time": "2026-04-03T11:00:00",
-			"duration_minutes": 90,
-			"block_label": "string",
-			"placement_reason": "string"
-		}
-	],
-	"pushed": [
-		{
-			"task_id": "string",
-			"task_name": "string",
-			"reason": "string",
-			"suggested_date": "2026-04-04"
-		}
-	],
-	"flagged": [
-		{
-			"task_id": "string",
-			"task_name": "string",
-			"issue": "string"
-		}
-	]
-}
-```
+- Write tests before implementation (`superpowers:test-driven-development`)
+- Every tool's Python implementation has unit tests
+- No real API calls in unit tests — mock TodoistClient, get_events, LLM calls
+- Run: `source venv/bin/activate && python3 -m pytest tests/ -v`
+- Use `superpowers:verification-before-completion` before marking any step done
 
 ---
 
-## 9. productivity_science.json — Pre-Compiled Research
+## Session Protocol
 
-This file lives at the project root and is **loaded once at startup**. It is **never re-fetched or regenerated at runtime**. It contains distilled research across four domains:
-
-- **Circadian rhythm:** alertness peaks (~10am, ~6pm), post-lunch dip (1–3pm), cognitive performance curves by time of day
-- **Cognitive load theory:** high-load tasks require peak windows, switching cost between task types, batch vs interleaved scheduling
-- **Deep work theory (Cal Newport):** minimum viable session lengths, context-switching penalties, protection of uninterrupted blocks
-- **Task momentum:** sequencing from smaller to larger to build flow, avoiding cold-start on hardest tasks, transition buffer value
-
-The LLM receives a structured excerpt from this file in every scheduling prompt. It uses it as a reference to justify placement decisions. This means even a smaller/cheaper model has explicit research scaffolding to reason from — it doesn't need to have memorized the research, it reads it fresh each call.
-
-For Step 1 (enrichment): inject the full file.
-For Step 2 (scheduling): inject only the `scheduling_heuristics_summary` section to keep token count lean.
-
----
-
-## 10. SQLite Schema
-
-### `task_history` — collected from day one, queried in Phase 7
-
-```
-id, task_id, task_name, project_id,
-estimated_duration_mins, actual_duration_mins,
-scheduled_at, completed_at, day_of_week,
-was_rescheduled, reschedule_count,
-was_late_night_prior, cognitive_load_label,
-created_at
-```
-
-### `schedule_log` — audit trail of every run
-
-```
-id, run_at, schedule_date, proposed_json,
-confirmed (bool), confirmed_at, diff_json
-```
-
----
-
-## 11. Todoist API Reference
-
-**All reads and writes use REST API v1 base URL:** `https://api.todoist.com/api/v1/`
-
-- Reads: `GET /api/v1/tasks?filter=<string>` (paginated — use `_get_all_pages()`)
-- Writes: `POST /api/v1/tasks/{id}` with partial JSON body for individual task updates
-- Comments: `POST /api/v1/comments`
-- Activity: `GET https://api.todoist.com/sync/v9/activity/get`
-- Reminders: `POST /api/v1/reminders` (Pro only)
-
-**Due datetime:** Pass as `"due_datetime": "<ISO 8601 with tz offset>"` — e.g. `"2026-04-07T13:00:00-07:00"`. Use `datetime.isoformat()` on a tz-aware datetime object.
-
-**Duration:** `"duration": <int>` + `"duration_unit": "minute"` — both required.
-
-**Deadline:** `"deadline": {"date": "YYYY-MM-DD"}` — separate field from `due`.
-
-**DEPRECATED — do not use:**
-
-- ~~`https://api.todoist.com/rest/v2/`~~ — 410 Gone
-- ~~`https://api.todoist.com/sync/v9/sync`~~ — 410 Gone (see LEARNINGS.md)
-
-### Google Calendar colorId Reference
-
-Verify real values on first run by printing `colorId` + `summary` for all events via `--check`:
-
-- `"4"` = Flamingo — meetings/calls (30min buffer each side)
-- `"5"` = Banana — events (30min buffer each side)
-
----
-
-## 12. Current Build Phase
-
-> **Phase 2: Write-back + date targeting.**
-
-- Write-back to Todoist is implemented (individual REST v1 POST calls)
-- `--plan-day` accepts optional date argument (today/tomorrow/monday/YYYY-MM-DD)
-- DO NOT implement webhooks yet
-- DO NOT implement reminders yet
-
----
-
-## 13. Error Handling Conventions
-
-- API errors: log clearly, don't crash, return empty list and warn
-- LLM JSON errors: retry once, then raise with full prompt logged
-- Missing `.env` vars: fail fast on startup with clear message
-- Datetimes: compute in local timezone, convert to ISO 8601 for APIs
-- Empty Todoist response: check HTTP status code before parsing body — distinguish auth error from genuinely empty task list
-
----
-
-## 14. Testing
-
-`src/scheduler.py` must have unit tests in `tests/test_scheduler.py`. Pure logic, no API calls, mock data only.
-
-Minimum 5 test cases:
-
-1. Normal weekday — standard morning buffer + work blocks
-2. Late night adjustment — event ends after 11pm, next day shifts
-3. Weekend noon rule — Fri/Sat/Sun, nothing before 12pm
-4. Flamingo buffer collision — 30min before/after applied correctly
-5. Overlapping events edge case — two events close together, buffer overlap handled
-
-```bash
-source venv/bin/activate
-python3 -m pytest tests/
-```
-
-**Always activate the venv first.** Every `python3` or `pytest` command must be preceded by `source venv/bin/activate`. This applies to running `main.py` as well:
-
-```bash
-source venv/bin/activate
-python3 main.py --plan-day
-```
-
----
-
-## 15. Living Learnings Log
-
-Claude Code must maintain a file called `LEARNINGS.md` at the project root.
-After every session, before finishing, append any of the following:
-
-- API behaviour that differed from documentation
-- Bugs found and how they were fixed
-- Decisions made and why (e.g. model choice, data structure change)
-- Anything that took more than one attempt to get right
-- Deprecations, version changes, or unexpected responses from any API
-
-Format each entry as:
-
-### [Date] — [Short title]
-
-[What was learned and why it matters for future sessions]
-
-Claude Code reads LEARNINGS.md at the start of every session before writing any code.
+- Planning: use `superpowers:writing-plans`, track in `task_plan.md`
+- Implementation: one item from `task_plan.md` per session, TDD, verify, commit
+- Append API gotchas and decisions to `LEARNINGS.md` after each session
+- Use `superpowers:requesting-code-review` before moving to the next step
