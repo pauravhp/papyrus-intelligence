@@ -112,10 +112,8 @@ def onboard_stage1(
             ),
         )
 
-    creds = Credentials.from_authorized_user_info(
-        creds_data,
-        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
-    )
+    from src.calendar_client import WRITE_SCOPES
+    creds = Credentials.from_authorized_user_info(creds_data, scopes=WRITE_SCOPES)
     # Override client_id/secret from settings in case stored values differ
     creds._client_id = settings.GOOGLE_CLIENT_ID
     creds._client_secret = settings.GOOGLE_CLIENT_SECRET

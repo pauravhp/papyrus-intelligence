@@ -33,7 +33,10 @@ from api.db import supabase
 router = APIRouter()
 
 _REDIRECT_URI = "http://localhost:8000/auth/google/callback"
-_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
+]
 _FRONTEND_ONBOARD = "http://localhost:3000/onboard"
 _STATE_MAX_AGE = 600  # seconds — consent screen should complete in <10 min
 

@@ -9,6 +9,10 @@ from googleapiclient.discovery import build
 from src.models import CalendarEvent
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+WRITE_SCOPES = [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
+]
 TOKEN_PATH = Path(__file__).parent.parent / "token.json"
 CREDS_PATH = Path(__file__).parent.parent / "credentials.json"
 
@@ -124,3 +128,64 @@ def get_events(
 
     events.sort(key=lambda e: e.start)
     return events
+
+
+def build_gcal_service_from_credentials(
+    creds_data: dict,
+    client_id: str,
+    client_secret: str,
+):
+    """
+    Build a googleapiclient service from a stored credentials dict.
+    Refreshes the token if expired. Caller is responsible for writing
+    the refreshed creds back to Supabase.
+
+    Returns (service, refreshed_creds_dict | None).
+    If creds were not refreshed, second element is None.
+    """
+    creds = Credentials.from_authorized_user_info(creds_data, scopes=WRITE_SCOPES)
+    creds._client_id = client_id
+    creds._client_secret = client_secret
+
+    refreshed: dict | None = None
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            import json as _json
+            refreshed = _json.loads(creds.to_json())
+        else:
+            raise RuntimeError("GCal token is invalid and cannot be refreshed.")
+
+    service = build("calendar", "v3", credentials=creds)
+    return service, refreshed
+
+
+def create_event(
+    service,
+    title: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    timezone_str: str,
+    calendar_id: str = "primary",
+) -> str:
+    """Create a GCal event. Returns the new event's id."""
+    body = {
+        "summary": title,
+        "start": {"dateTime": start_dt.isoformat(), "timeZone": timezone_str},
+        "end": {"dateTime": end_dt.isoformat(), "timeZone": timezone_str},
+    }
+    result = service.events().insert(calendarId=calendar_id, body=body).execute()
+    return result["id"]
+
+
+def delete_event(
+    service,
+    event_id: str,
+    calendar_id: str = "primary",
+) -> None:
+    """Delete a GCal event by id. Silently ignores 404."""
+    try:
+        service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+    except Exception as exc:
+        if "404" not in str(exc) and "notFound" not in str(exc):
+            raise
