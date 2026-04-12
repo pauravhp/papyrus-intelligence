@@ -1,0 +1,232 @@
+"""
+POST /api/chat — ReAct agent loop.
+
+Request:
+  {
+    "messages": [{"role": "user"|"assistant", "content": "..."}],
+    "context_note": ""   # optional override; agent can also pick it up from the message
+  }
+
+Response:
+  {
+    "message": "...",          # assistant's final text
+    "schedule_card": {...},    # present if schedule_day was called this turn
+    "messages": [...]          # updated conversation history
+  }
+
+Architecture:
+- Stateless: full conversation history comes in with each request
+- Tool loop: up to MAX_ITERATIONS Anthropic tool-use cycles
+- BYOK: all keys loaded from Supabase, decrypted via decrypt_field RPC
+"""
+
+import json
+
+import anthropic
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from api.auth import get_current_user
+from api.db import set_encryption_key, supabase
+from api.config import settings
+from api.services.agent_tools import TOOL_SCHEMAS, TOOL_DISPATCH
+from src.calendar_client import build_gcal_service_from_credentials
+
+router = APIRouter()
+MAX_ITERATIONS = 10
+
+SYSTEM_PROMPT = """You are Papyrus, a calm and effective scheduling coach.
+
+Your job is to help the user plan their day, replan when things slip, and reflect on their week.
+
+Available tools:
+- get_tasks: fetch Todoist tasks
+- get_calendar: fetch Google Calendar events
+- schedule_day: run the scheduling engine (ALWAYS call before confirm_schedule)
+- confirm_schedule: write the schedule to Google Calendar + Todoist (only after user approval)
+- push_task: push a task to another day
+- get_status: check today's confirmed schedule
+
+Rules you must follow:
+- Never call confirm_schedule unless the user has explicitly said "looks good", "confirm", "yes go ahead" or similar.
+- Always call schedule_day first to generate a proposal.
+- If the user says "plan my day" or similar, call get_tasks + get_calendar + schedule_day in sequence.
+- Present schedules clearly: show task name, time, and duration.
+- One coaching nudge max per conversation. Never repeat a dismissed nudge.
+"""
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    context_note: str = ""
+
+
+class ChatResponse(BaseModel):
+    message: str
+    schedule_card: dict | None = None
+    messages: list[dict]
+
+
+def _load_user_context(user_id: str) -> dict:
+    """Load config + decrypt API keys + build GCal service from Supabase."""
+    row_result = (
+        supabase.from_("users")
+        .select("config, groq_api_key, anthropic_api_key, todoist_api_key, google_credentials")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    if not row_result.data:
+        raise HTTPException(status_code=400, detail="User not found or not onboarded.")
+
+    row = row_result.data
+    config = row.get("config") or {}
+
+    # Decrypt API keys
+    set_encryption_key()
+
+    def _decrypt(enc: str | None) -> str | None:
+        if not enc:
+            return None
+        try:
+            return supabase.rpc("decrypt_field", {"ciphertext": enc}).execute().data
+        except Exception:
+            return None
+
+    groq_key = _decrypt(row.get("groq_api_key"))
+    anth_key = _decrypt(row.get("anthropic_api_key"))
+    tod_key = _decrypt(row.get("todoist_api_key"))
+
+    # Build GCal service
+    gcal_creds = row.get("google_credentials")
+    gcal_service = None
+    if gcal_creds:
+        try:
+            svc, refreshed = build_gcal_service_from_credentials(
+                gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+            )
+            gcal_service = svc
+            if refreshed:
+                supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
+        except Exception as exc:
+            print(f"[chat] GCal service init failed: {exc}")
+
+    return {
+        "user_id": user_id,
+        "config": config,
+        "anthropic_api_key": anth_key,
+        "groq_api_key": groq_key,
+        "todoist_api_key": tod_key,
+        "gcal_service": gcal_service,
+        "supabase": supabase,
+    }
+
+
+@router.post("/api/chat", response_model=ChatResponse)
+def chat(
+    body: ChatRequest,
+    user: dict = Depends(get_current_user),
+) -> ChatResponse:
+    user_id: str = user["sub"]
+    user_ctx = _load_user_context(user_id)
+
+    anth_key = user_ctx.get("anthropic_api_key")
+    groq_key = user_ctx.get("groq_api_key")
+
+    if not anth_key and not groq_key:
+        raise HTTPException(status_code=400, detail="No LLM API key configured. Complete onboarding.")
+
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    schedule_card: dict | None = None
+
+    if anth_key:
+        ant_client = anthropic.Anthropic(api_key=anth_key)
+    else:
+        # Groq-only path: no tool use, plain chat
+        from groq import Groq
+        groq_client = Groq(api_key=groq_key)
+        resp = groq_client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
+            max_tokens=1024,
+        )
+        reply = resp.choices[0].message.content or ""
+        messages.append({"role": "assistant", "content": reply})
+        return ChatResponse(message=reply, schedule_card=None, messages=messages)
+
+    # Anthropic ReAct loop
+    for _ in range(MAX_ITERATIONS):
+        response = ant_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            tools=TOOL_SCHEMAS,
+            messages=messages,
+        )
+
+        # Collect assistant content
+        assistant_blocks: list[dict] = []
+        for block in response.content:
+            if block.type == "text":
+                assistant_blocks.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                assistant_blocks.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+
+        messages.append({"role": "assistant", "content": assistant_blocks})
+
+        if response.stop_reason == "end_turn":
+            final_text = next(
+                (b.text for b in response.content if b.type == "text"), ""
+            )
+            return ChatResponse(
+                message=final_text,
+                schedule_card=schedule_card,
+                messages=messages,
+            )
+
+        if response.stop_reason != "tool_use":
+            break
+
+        # Execute tools
+        tool_results: list[dict] = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            tool_name = block.name
+            dispatcher = TOOL_DISPATCH.get(tool_name)
+            if not dispatcher:
+                result_content = json.dumps({"error": f"unknown tool: {tool_name}"})
+            else:
+                try:
+                    result = dispatcher(block.input, user_ctx)
+                    if tool_name == "schedule_day":
+                        schedule_card = result
+                    result_content = json.dumps(result)
+                except Exception as exc:
+                    print(f"[chat] Tool {tool_name} failed: {exc}")
+                    result_content = json.dumps({"error": str(exc)})
+
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": result_content,
+            })
+
+        messages.append({"role": "user", "content": tool_results})
+
+    # Fallback if loop exhausted
+    return ChatResponse(
+        message="I ran into an issue completing your request. Please try again.",
+        schedule_card=schedule_card,
+        messages=messages,
+    )
