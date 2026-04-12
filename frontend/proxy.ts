@@ -13,7 +13,10 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  if (!isAuthenticated && pathname.startsWith("/dashboard")) {
+  if (
+    !isAuthenticated &&
+    (pathname.startsWith("/dashboard") || pathname.startsWith("/onboard"))
+  ) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 

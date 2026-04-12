@@ -1,10 +1,42 @@
-export default function OnboardPage() {
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { Suspense } from "react";
+import { createClient } from "@/utils/supabase/server";
+import OnboardClient from "./OnboardClient";
+
+export default async function OnboardPage() {
+  const cookieStore = await cookies();
+  const supabase = createClient(cookieStore);
+  const { data, error } = await supabase.auth.getClaims();
+
+  if (!data?.claims || error) {
+    redirect("/login");
+  }
+
+  // Already onboarded → skip back to dashboard
+  const userId = data.claims.sub as string;
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("config")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const isOnboarded =
+    userRow?.config && Object.keys(userRow.config).length > 0;
+  if (isOnboarded) {
+    redirect("/dashboard");
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm bg-white rounded-xl shadow p-8 space-y-2">
-        <h1 className="text-2xl font-semibold text-gray-900">Calendar connected</h1>
-        <p className="text-sm text-gray-500">Onboarding coming soon.</p>
-      </div>
-    </div>
+    <Suspense
+      fallback={
+        <div
+          className="min-h-screen flex items-center justify-center"
+          style={{ background: "#080810" }}
+        />
+      }
+    >
+      <OnboardClient />
+    </Suspense>
   );
 }

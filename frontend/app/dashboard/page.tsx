@@ -13,6 +13,20 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
+  // If user hasn't completed onboarding, send them there
+  const userId = data.claims.sub as string;
+  const { data: userRow } = await supabase
+    .from("users")
+    .select("config")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const isOnboarded =
+    userRow?.config && Object.keys(userRow.config).length > 0;
+  if (!isOnboarded) {
+    redirect("/onboard?stage=0");
+  }
+
   const email = data.claims.email as string;
 
   return (
