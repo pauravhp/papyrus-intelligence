@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from api.auth import get_current_user
 from api.config import settings
-from api.db import supabase
+from api.db import set_encryption_key, supabase
 from src.calendar_client import get_events
 from src.llm import _groq_json_call
 from src.onboard_patterns import build_pattern_summary
@@ -351,6 +351,9 @@ def onboard_stage3(
 
 class PromoteRequest(BaseModel):
     draft_config: dict
+    groq_api_key: str = ""
+    anthropic_api_key: str = ""
+    todoist_api_key: str = ""
 
 
 class PromoteResponse(BaseModel):
@@ -364,23 +367,16 @@ def onboard_promote(
 ) -> PromoteResponse:
     """
     Promote: strip _onboard_draft from draft_config and write it to
-    users.config in Supabase for the authenticated user.
+    users.config in Supabase for the authenticated user. Also saves
+    encrypted API keys (groq, anthropic, todoist) if provided.
 
     user_id comes from the verified JWT — never trusted from the request body.
-
-    Note: users.config is plain jsonb (not encrypted). Encrypted credential
-    columns (todoist_api_key, groq_api_key, google_credentials) are written
-    by a separate credential-save step (not yet implemented) and require a
-    SQL wrapper function to set the encryption key within the same transaction.
     """
     user_id: str = user["sub"]
 
     clean_config = copy.deepcopy(body.draft_config)
     clean_config.pop("_onboard_draft", None)
 
-    # users.config is plain jsonb — no encryption needed for this column.
-    # set_encryption_key() will be required once todoist_api_key / groq_api_key
-    # are written (separate credential-save step, not yet implemented).
     result = (
         supabase.from_("users")
         .update({"config": clean_config})
@@ -393,5 +389,24 @@ def onboard_promote(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Supabase write failed: {result.error}",
         )
+
+    # Save encrypted API keys
+    set_encryption_key()
+    key_updates: dict = {}
+    if body.groq_api_key:
+        key_updates["groq_api_key"] = supabase.rpc(
+            "encrypt_field", {"plaintext": body.groq_api_key}
+        ).execute().data
+    if body.anthropic_api_key:
+        key_updates["anthropic_api_key"] = supabase.rpc(
+            "encrypt_field", {"plaintext": body.anthropic_api_key}
+        ).execute().data
+    if body.todoist_api_key:
+        key_updates["todoist_api_key"] = supabase.rpc(
+            "encrypt_field", {"plaintext": body.todoist_api_key}
+        ).execute().data
+
+    if key_updates:
+        supabase.from_("users").update(key_updates).eq("id", user_id).execute()
 
     return PromoteResponse(success=True)

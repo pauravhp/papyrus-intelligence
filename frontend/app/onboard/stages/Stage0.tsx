@@ -45,6 +45,7 @@ export default function Stage0({ onAdvance }: Stage0Props) {
   const supabase = createClient();
   const [googleStatus, setGoogleStatus] = useState<GoogleStatus>("loading");
   const [groqKey, setGroqKey] = useState("");
+  const [anthropicKey, setAnthropicKey] = useState("");
   const [todoistKey, setTodoistKey] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +75,7 @@ export default function Stage0({ onAdvance }: Stage0Props) {
       "sfm_creds",
       JSON.stringify({
         groq_api_key: groqKey.trim(),
+        anthropic_api_key: anthropicKey.trim(),
         todoist_api_key: todoistKey.trim(),
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         calendar_ids: [],
@@ -215,6 +217,23 @@ export default function Stage0({ onAdvance }: Stage0Props) {
                     ? "0 0 0 1.5px rgba(244,63,94,0.5)"
                     : undefined,
                 }}
+              />
+            </div>
+            <div>
+              <label
+                className="block text-xs font-medium mb-1.5"
+                style={{ color: "#94a3b8" }}
+              >
+                Anthropic API key{" "}
+                <span style={{ color: "#475569" }}>(optional — Groq used if absent)</span>
+              </label>
+              <input
+                type="password"
+                value={anthropicKey}
+                onChange={(e) => setAnthropicKey(e.target.value)}
+                placeholder="sk-ant-…"
+                className="w-full text-sm px-3 py-2 rounded-lg outline-none"
+                style={INPUT_STYLE}
               />
             </div>
             <div>

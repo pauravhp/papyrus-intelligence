@@ -134,8 +134,14 @@ export default function Stage3({ onAdvance }: Stage3Props) {
 
       const stage2 = JSON.parse(sessionStorage.getItem("sfm_stage2") ?? "{}");
       const draftConfig = stage2.updated_config ?? {};
+      const creds = JSON.parse(sessionStorage.getItem("sfm_creds") ?? "{}");
 
-      await apiPost("/api/onboard/promote", { draft_config: draftConfig }, token);
+      await apiPost("/api/onboard/promote", {
+        draft_config: draftConfig,
+        groq_api_key: creds.groq_api_key ?? "",
+        anthropic_api_key: creds.anthropic_api_key ?? "",
+        todoist_api_key: creds.todoist_api_key ?? "",
+      }, token);
       onAdvance();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
