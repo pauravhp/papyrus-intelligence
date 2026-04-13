@@ -309,6 +309,68 @@ def execute_onboard_confirm(draft_config: dict, user_ctx: dict) -> dict:
     return {"promoted": True}
 
 
+def execute_get_projects(_inp: dict, user_ctx: dict) -> list[dict]:
+    """Return active project budgets with deadline pressure. No LLM call."""
+    from api.services.project_service import get_active_projects
+    return get_active_projects(user_ctx["user_id"], user_ctx["supabase"])
+
+
+def execute_log_project_session(inp: dict, user_ctx: dict) -> dict:
+    """
+    Manually decrement a project budget after actual work.
+    This is the ONLY budget decay path — confirm_schedule does not auto-decrement.
+    inp: {project_id: int, hours_worked: float}
+    """
+    from api.services.project_service import log_session
+    return log_session(
+        user_ctx["user_id"],
+        user_ctx["supabase"],
+        project_id=int(inp["project_id"]),
+        hours_worked=float(inp["hours_worked"]),
+    )
+
+
+def execute_manage_project(inp: dict, user_ctx: dict) -> dict:
+    """
+    CRUD for project budgets via natural language.
+    inp.action: "create" | "update" | "delete" | "reset"
+    """
+    from api.services.project_service import (
+        create_project, update_project, delete_project, reset_project,
+    )
+    action = inp.get("action")
+    uid = user_ctx["user_id"]
+    sb = user_ctx["supabase"]
+
+    if action == "create":
+        return create_project(
+            uid, sb,
+            name=inp["name"],
+            total_hours=float(inp["total_hours"]),
+            session_min=int(inp.get("session_min", 60)),
+            session_max=int(inp.get("session_max", 180)),
+            deadline=inp.get("deadline"),
+            priority=int(inp.get("priority", 3)),
+        )
+    elif action == "update":
+        return update_project(
+            uid, sb,
+            project_id=int(inp["project_id"]),
+            session_min=inp.get("session_min"),
+            session_max=inp.get("session_max"),
+            deadline=inp.get("deadline"),
+            priority=inp.get("priority"),
+            add_hours=inp.get("add_hours"),
+        )
+    elif action == "delete":
+        delete_project(uid, sb, int(inp["project_id"]))
+        return {"deleted": True, "project_id": inp["project_id"]}
+    elif action == "reset":
+        return reset_project(uid, sb, int(inp["project_id"]))
+    else:
+        return {"error": f"Unknown action: {action}"}
+
+
 # ── Anthropic tool schemas ─────────────────────────────────────────────────────
 
 TOOL_SCHEMAS = [  # onboard_scan/apply/confirm intentionally excluded — handled by /api/onboard/* HTTP routes
@@ -388,6 +450,42 @@ TOOL_SCHEMAS = [  # onboard_scan/apply/confirm intentionally excluded — handle
         "description": "Return today's confirmed schedule from the database.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+    {
+        "name": "get_projects",
+        "description": "Return all active project budgets with remaining hours and deadline pressure. Call this when scheduling to include project sessions automatically.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "log_project_session",
+        "description": "Manually log hours worked on a project, decrementing its budget. Call this when the user reports time spent on a project (e.g. 'I worked 1.5h on the App project today').",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "integer", "description": "The project id from get_projects"},
+                "hours_worked": {"type": "number", "description": "Hours actually worked (e.g. 1.5)"},
+            },
+            "required": ["project_id", "hours_worked"],
+        },
+    },
+    {
+        "name": "manage_project",
+        "description": "Create, update, delete, or reset a project budget via natural language.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "update", "delete", "reset"]},
+                "project_id": {"type": "integer", "description": "Required for update/delete/reset"},
+                "name": {"type": "string", "description": "Required for create"},
+                "total_hours": {"type": "number", "description": "Required for create"},
+                "session_min": {"type": "integer", "description": "Min session minutes (default 60)"},
+                "session_max": {"type": "integer", "description": "Max session minutes (default 180)"},
+                "deadline": {"type": "string", "description": "ISO date e.g. 2026-05-01"},
+                "priority": {"type": "integer", "description": "4=P1, 3=P2, 2=P3, 1=P4"},
+                "add_hours": {"type": "number", "description": "Add hours to remaining (update only)"},
+            },
+            "required": ["action"],
+        },
+    },
 ]
 
 
@@ -401,4 +499,7 @@ TOOL_DISPATCH = {
     "confirm_schedule":  lambda inp, ctx: execute_confirm_schedule(inp["schedule"], ctx),
     "push_task":         lambda inp, ctx: execute_push_task(inp["task_id"], inp["reason"], ctx),
     "get_status":        lambda inp, ctx: execute_get_status(ctx),
+    "get_projects":          lambda inp, ctx: execute_get_projects(inp, ctx),
+    "log_project_session":   lambda inp, ctx: execute_log_project_session(inp, ctx),
+    "manage_project":        lambda inp, ctx: execute_manage_project(inp, ctx),
 }
