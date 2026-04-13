@@ -1,68 +1,138 @@
+/* frontend/app/globals.css */
 @import "tailwindcss";
 
-/* Cal Sans display font */
-@font-face {
-  font-family: "Cal Sans";
-  src: url("https://raw.githubusercontent.com/calcom/font/main/fonts/CalSans-SemiBold.woff2")
-    format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
+/* ── Light (parchment) — default ───────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-
-  /* Dark / space palette */
-  --space-base: #080810;
-  --space-border: rgba(255, 255, 255, 0.08);
-
-  /* Orb colors */
-  --orb-indigo: #6366f1;
-  --orb-violet: #8b5cf6;
-  --orb-teal: #06b6d4;
-  --orb-rose: #f43f5e;
-  --orb-amber: #f59e0b;
-
-  /* Light / product palette */
-  --landing-base: #fafaf8;
-  --landing-text: #1a1a2e;
-  --text-muted: #64748b;
-  --accent: #6366f1;
+  --bg:             #f5efe0;
+  --surface:        #ede4d0;
+  --surface-raised: #e6dbc8;
+  --text:           #2c1a0e;
+  --text-muted:     #7a6250;
+  --text-faint:     #a89070;
+  --border:         rgba(44, 26, 14, 0.12);
+  --border-strong:  rgba(44, 26, 14, 0.22);
+  --accent:         #c4821a;
+  --accent-tint:    rgba(196, 130, 26, 0.12);
+  --accent-hover:   #a06a10;
+  --danger:         #8b2e2e;
+  --danger-tint:    rgba(139, 46, 46, 0.1);
 }
 
+/* ── Dark (espresso) ────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg:             #120d08;
+  --surface:        #1e1208;
+  --surface-raised: #261808;
+  --text:           #e8dcc8;
+  --text-muted:     #9a8470;
+  --text-faint:     #6a5848;
+  --border:         rgba(232, 220, 200, 0.1);
+  --border-strong:  rgba(232, 220, 200, 0.18);
+  --accent:         #e8a838;
+  --accent-tint:    rgba(232, 168, 56, 0.15);
+  --accent-hover:   #f0bf60;
+  --danger:         #c45a5a;
+  --danger-tint:    rgba(196, 90, 90, 0.12);
+}
+
+/* ── Tailwind v4 theme bridge ───────────────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-space-base: var(--space-base);
-  --color-orb-indigo: var(--orb-indigo);
-  --color-orb-violet: var(--orb-violet);
-  --color-orb-teal: var(--orb-teal);
-  --color-orb-rose: var(--orb-rose);
-  --color-orb-amber: var(--orb-amber);
-  --color-accent: var(--accent);
-  --color-landing-text: var(--landing-text);
-  --color-text-muted: var(--text-muted);
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-geist-mono);
+  --color-bg:             var(--bg);
+  --color-surface:        var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-text:           var(--text);
+  --color-text-muted:     var(--text-muted);
+  --color-text-faint:     var(--text-faint);
+  --color-accent:         var(--accent);
+  --color-accent-tint:    var(--accent-tint);
+  --color-danger:         var(--danger);
+  --font-sans:            var(--font-literata);
+  --font-display:         var(--font-gilda);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* ── Base ───────────────────────────────────────────────────────────────── */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-literata), Georgia, serif;
+  -webkit-font-smoothing: antialiased;
 }
 
+/* ── Display font utility ───────────────────────────────────────────────── */
 @layer utilities {
   .font-display {
-    font-family: "Cal Sans", var(--font-inter), Arial, sans-serif;
+    font-family: var(--font-gilda), Georgia, serif;
   }
+}
+
+/* ── Ink wash animation (used by InkWash component) ─────────────────────── */
+.ink-layer {
+  position: absolute;
+  inset: -20%;
+  border-radius: 60% 40% 55% 45% / 50% 60% 40% 50%;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+.ink-layer-1 {
+  background: radial-gradient(ellipse at 35% 45%, rgba(196, 130, 26, 0.16) 0%, transparent 60%);
+  animation-name: ink-drift-1;
+  animation-duration: 18s;
+}
+.ink-layer-2 {
+  background: radial-gradient(ellipse at 68% 58%, rgba(122, 74, 30, 0.13) 0%, transparent 55%);
+  animation-name: ink-drift-2;
+  animation-duration: 24s;
+}
+.ink-layer-3 {
+  background: radial-gradient(ellipse at 50% 22%, rgba(44, 26, 14, 0.07) 0%, transparent 50%);
+  animation-name: ink-drift-3;
+  animation-duration: 20s;
+}
+.ink-layer-4 {
+  background: radial-gradient(ellipse at 22% 78%, rgba(196, 130, 26, 0.09) 0%, transparent 45%);
+  animation-name: ink-drift-4;
+  animation-duration: 16s;
+}
+
+[data-theme="dark"] .ink-layer-1 {
+  background: radial-gradient(ellipse at 35% 45%, rgba(232, 168, 56, 0.09) 0%, transparent 60%);
+}
+[data-theme="dark"] .ink-layer-2 {
+  background: radial-gradient(ellipse at 68% 58%, rgba(122, 74, 30, 0.11) 0%, transparent 55%);
+}
+[data-theme="dark"] .ink-layer-3 {
+  background: radial-gradient(ellipse at 50% 22%, rgba(232, 168, 56, 0.05) 0%, transparent 50%);
+}
+[data-theme="dark"] .ink-layer-4 {
+  background: radial-gradient(ellipse at 22% 78%, rgba(180, 120, 40, 0.07) 0%, transparent 45%);
+}
+
+@keyframes ink-drift-1 {
+  from { transform: translate(0, 0) scale(1);     opacity: 0.7; }
+  to   { transform: translate(4%, 3%) scale(1.06); opacity: 1;   }
+}
+@keyframes ink-drift-2 {
+  from { transform: translate(0, 0) scale(1.02);   opacity: 0.6; }
+  to   { transform: translate(-3%, 5%) scale(0.96); opacity: 0.9; }
+}
+@keyframes ink-drift-3 {
+  from { transform: translate(0, 0) scale(0.98);  opacity: 0.5; }
+  to   { transform: translate(5%, -4%) scale(1.04); opacity: 0.8; }
+}
+@keyframes ink-drift-4 {
+  from { transform: translate(0, 0) scale(1.01);   opacity: 0.6; }
+  to   { transform: translate(-4%, -3%) scale(0.97); opacity: 0.85; }
+}
+
+/* Paper grain overlay */
+.ink-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 150px 150px;
+  pointer-events: none;
 }
