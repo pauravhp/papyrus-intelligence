@@ -63,12 +63,18 @@ def save_credentials(
         ("todoist_api_key", body.todoist_api_key),
     ]:
         if value.strip():
-            encrypted = supabase.rpc(
-                "encrypt_field", {"plaintext": value.strip()}
-            ).execute().data
+            try:
+                encrypted = supabase.rpc(
+                    "encrypt_field", {"plaintext": value.strip()}
+                ).execute().data
+            except Exception:
+                raise HTTPException(status_code=503, detail="credential store unavailable")
             updates[field] = encrypted
 
     if updates:
-        supabase.from_("users").update(updates).eq("id", user_id).execute()
+        try:
+            supabase.from_("users").update(updates).eq("id", user_id).execute()
+        except Exception:
+            raise HTTPException(status_code=503, detail="credential store unavailable")
 
     return SaveCredentialsResponse(success=True)
