@@ -235,3 +235,25 @@ def test_scan_502_on_non_dict_llm_response(client, monkeypatch):
         )
 
     assert resp.status_code == 502
+
+
+def test_promote_saves_config_only(client, monkeypatch):
+    """promote saves config to users.config; ignores any credential fields."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(error=None)
+
+    with patch("api.routes.onboard.supabase", mock_sb):
+        resp = client.post(
+            "/api/onboard/promote",
+            json={"config": {"sleep": {"default_wake_time": "07:00"}}},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    update_call = mock_sb.from_.return_value.update.call_args
+    saved = update_call.args[0]
+    assert "config" in saved
+    assert "groq_api_key" not in saved
+    assert saved["config"]["sleep"]["default_wake_time"] == "07:00"

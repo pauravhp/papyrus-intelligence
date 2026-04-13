@@ -5,6 +5,7 @@ POST /api/onboard/scan              — 14-day GCal scan → proposed config
 POST /api/onboard/promote           — save final config to users.config
 """
 
+import copy
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -243,3 +244,40 @@ def onboard_scan(
         proposed_config=raw.get("proposed_config") or {},
         questions=raw.get("questions_for_stage_2") or [],
     )
+
+
+# ── promote ───────────────────────────────────────────────────────────────────
+
+
+class PromoteRequest(BaseModel):
+    config: dict
+
+
+class PromoteResponse(BaseModel):
+    success: bool
+
+
+@router.post("/promote", response_model=PromoteResponse)
+def onboard_promote(
+    body: PromoteRequest,
+    user: dict = Depends(get_current_user),
+) -> PromoteResponse:
+    """
+    Save the confirmed config to users.config.
+    Credentials are already in Supabase from save-credentials — not accepted here.
+    """
+    user_id: str = user["sub"]
+
+    clean = copy.deepcopy(body.config)
+    clean.pop("_onboard_draft", None)
+
+    result = (
+        supabase.from_("users")
+        .update({"config": clean})
+        .eq("id", user_id)
+        .execute()
+    )
+    if hasattr(result, "error") and result.error:
+        raise HTTPException(status_code=500, detail=f"Supabase write failed: {result.error}")
+
+    return PromoteResponse(success=True)
