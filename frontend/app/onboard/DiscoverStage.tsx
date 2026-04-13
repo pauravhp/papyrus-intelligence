@@ -21,6 +21,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
   const [phase, setPhase] = useState<Phase>("scanning");
   const [proposedConfig, setProposedConfig] = useState<Record<string, unknown>>({});
   const [errorMsg, setErrorMsg] = useState("");
+  const [confirmError, setConfirmError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,10 +51,16 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
 
   const handleConfirm = async (updatedConfig: Record<string, unknown>) => {
     setPhase("confirming");
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token ?? "";
-    await apiPost("/api/onboard/promote", { config: updatedConfig }, token);
-    onComplete();
+    setConfirmError(null);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token ?? "";
+      await apiPost("/api/onboard/promote", { config: updatedConfig }, token);
+      onComplete();
+    } catch (e) {
+      setPhase("review");
+      setConfirmError((e as Error).message);
+    }
   };
 
   return (
@@ -117,6 +124,9 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             <p style={{ color: "#64748b", fontSize: 13, marginBottom: 20 }}>
               Review and adjust — this becomes your scheduling config.
             </p>
+            {confirmError && (
+              <p style={{ color: "#f43f5e", fontSize: 12, marginBottom: 12 }}>{confirmError}</p>
+            )}
             <ConfigCard
               config={proposedConfig}
               onSave={handleConfirm}
