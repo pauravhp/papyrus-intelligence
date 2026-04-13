@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import ChatWindow from "./ChatWindow";
-import SignOutButton from "./SignOutButton";
+import Sidebar from "@/components/Sidebar";
 
 export default async function DashboardPage() {
   const cookieStore = await cookies();
@@ -22,22 +22,16 @@ export default async function DashboardPage() {
 
   const isOnboarded = userRow?.config && Object.keys(userRow.config).length > 0;
   if (!isOnboarded) {
-    redirect("/onboard?stage=0");
+    redirect("/onboard");
   }
 
   return (
-    <div style={{ background: "#080810", minHeight: "100vh", color: "#f8fafc" }}>
-      <div
-        style={{
-          position: "fixed",
-          top: 16,
-          right: 16,
-          zIndex: 50,
-        }}
-      >
-        <SignOutButton />
-      </div>
-      <ChatWindow />
+    <div style={{ display: "flex", minHeight: "100vh", background: "#080810", color: "#f8fafc" }}>
+      <Sidebar />
+      {/* Main content — offset by sidebar width (56px) */}
+      <main style={{ flex: 1, marginLeft: 56 }}>
+        <ChatWindow />
+      </main>
     </div>
   );
 }
