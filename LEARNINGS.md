@@ -159,3 +159,15 @@ API gotchas and architectural decisions. Read before touching any API client cod
 **GCal token refresh scope must match the originally-granted scope.** Refreshing a stored token with a *wider* scope than was granted (e.g. adding `calendar.events` to a token originally granted `calendar.readonly`) causes `invalid_scope: Bad Request`. The onboard stage1 route only reads events — use `SCOPES` (readonly) for token refresh there. Only use `WRITE_SCOPES` in the chat endpoint where write access is actually needed. The user must re-run the OAuth flow (`/auth/google`) to obtain a token with write scope.
 
 **Camera parallax inside R3F: pass a plain object ref, not `React.RefObject<T>`.** `useFrame` runs inside the Canvas renderer, outside React's commit phase. Passing a `mouseRef` created by `useRef<{x,y}>({x:0,y:0})` works correctly — it's a mutable object shared between the event listener (outer component) and `useFrame` (inner renderer). Type the prop as `{ current: { x: number; y: number } }` (not `React.RefObject<T>`) to avoid the readonly constraint TypeScript places on `RefObject.current`.
+
+---
+
+## Project Budgets — ReAct Agent Integration (2026-04-12)
+
+**`schedule_log` always records `date.today()`, not the target schedule date.** In `execute_confirm_schedule` (agent_tools.py), `"schedule_date": date.today().isoformat()` uses today regardless of what date was scheduled. When a user confirms tomorrow's schedule, the log row is stored under today — `execute_get_status` (which queries by today) will find it immediately, but when tomorrow arrives, it won't. Fix: include `schedule_date` in the schedule dict from `schedule_day` and forward it through `execute_confirm_schedule`.
+
+**`proj_` task IDs are the delimiter between Todoist tasks and synthetic project tasks.** Any `task_id` starting with `proj_` in `execute_confirm_schedule` skips the Todoist `schedule_task` call. GCal events are still created for all tasks. Budget decay is manual-only via `log_project_session`.
+
+**`src/queries/budgets.py` has orphaned SQLite CRUD functions.** After adding `api/services/project_service.py`, the old SQLite functions (`create_project_budget`, `get_all_active_budgets`, `decrement_budget`, etc.) in `budgets.py` are unreachable dead code. Only `compute_deadline_pressure` from that file is still imported. Clean up those SQLite functions in a future session.
+
+**Patching module-level imports in agent_tools.py requires the import at module scope.** `patch("api.services.agent_tools.get_active_projects", ...)` only works if `get_active_projects` is imported at the top of `agent_tools.py`, not inside a function. Inline imports (`from x import y` inside a function) create a local name that can't be patched via the module path.
