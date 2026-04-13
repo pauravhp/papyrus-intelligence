@@ -1,0 +1,179 @@
+// frontend/components/Sidebar.tsx
+"use client";
+
+import { useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { MessageSquare, CalendarDays, Settings2, X } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { createClient } from "@/utils/supabase/client";
+import { apiPost } from "@/utils/api";
+import ConfigCard from "@/components/ConfigCard";
+
+const NAV_ITEMS = [
+  { icon: MessageSquare, label: "Chat",  href: "/dashboard" },
+  { icon: CalendarDays,  label: "Today", href: "/dashboard/today" },
+] as const;
+
+const ICON_BTN: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 40,
+  height: 40,
+  borderRadius: 10,
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  transition: "background 0.15s",
+};
+
+export default function Sidebar() {
+  const pathname = usePathname();
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [config, setConfig] = useState<Record<string, unknown> | null>(null);
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
+
+  const handleOpenPrefs = async () => {
+    if (!config) {
+      const { data } = await supabase.from("users").select("config").maybeSingle();
+      setConfig(data?.config ?? {});
+    }
+    setPrefsOpen(true);
+  };
+
+  const handleSavePrefs = async (updated: Record<string, unknown>) => {
+    const { data: session } = await supabase.auth.getSession();
+    const token = session.session?.access_token ?? "";
+    await apiPost("/api/onboard/promote", { config: updated }, token);
+    setConfig(updated);
+    setPrefsOpen(false);
+  };
+
+  return (
+    <>
+      {/* Sidebar strip */}
+      <nav
+        style={{
+          position: "fixed",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 56,
+          background: "rgba(8,8,16,0.95)",
+          backdropFilter: "blur(8px)",
+          borderRight: "1px solid rgba(255,255,255,0.06)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          paddingTop: 20,
+          paddingBottom: 20,
+          gap: 4,
+          zIndex: 40,
+        }}
+      >
+        {NAV_ITEMS.map(({ icon: Icon, label, href }) => {
+          const active = pathname === href;
+          return (
+            <Link key={href} href={href} title={label} style={{ textDecoration: "none" }}>
+              <motion.div
+                whileHover={{ scale: 1.1, background: "rgba(99,102,241,0.15)" }}
+                whileTap={{ scale: 0.92 }}
+                style={{
+                  ...ICON_BTN,
+                  background: active ? "rgba(99,102,241,0.2)" : "transparent",
+                  color: active ? "#818cf8" : "#64748b",
+                }}
+              >
+                <Icon size={18} />
+              </motion.div>
+            </Link>
+          );
+        })}
+
+        {/* Preferences button — at bottom */}
+        <div style={{ flex: 1 }} />
+        <motion.button
+          onClick={handleOpenPrefs}
+          title="Preferences"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.92 }}
+          style={{
+            ...ICON_BTN,
+            color: prefsOpen ? "#818cf8" : "#64748b",
+            background: prefsOpen ? "rgba(99,102,241,0.2)" : "transparent",
+          }}
+        >
+          <Settings2 size={18} />
+        </motion.button>
+      </nav>
+
+      {/* Preferences panel overlay */}
+      <AnimatePresence>
+        {prefsOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              key="backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setPrefsOpen(false)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.45)",
+                zIndex: 45,
+              }}
+            />
+
+            {/* Panel */}
+            <motion.div
+              key="panel"
+              initial={{ x: -340, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -340, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 28 }}
+              style={{
+                position: "fixed",
+                left: 56,
+                top: 0,
+                bottom: 0,
+                width: 340,
+                background: "#0d0d1a",
+                borderRight: "1px solid rgba(255,255,255,0.08)",
+                zIndex: 50,
+                overflowY: "auto",
+                padding: "24px 20px",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                <h2 style={{ color: "#f8fafc", fontSize: 16, fontWeight: 600, margin: 0 }}>
+                  Preferences
+                </h2>
+                <button
+                  onClick={() => setPrefsOpen(false)}
+                  style={{ ...ICON_BTN, color: "#64748b" }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {config ? (
+                <ConfigCard
+                  config={config}
+                  onSave={handleSavePrefs}
+                  saveLabel="Save preferences"
+                />
+              ) : (
+                <p style={{ color: "#64748b", fontSize: 13 }}>Loading…</p>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
