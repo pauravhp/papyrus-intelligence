@@ -1,3 +1,4 @@
+// frontend/app/dashboard/ConfirmButtons.tsx
 "use client";
 
 interface Props {
@@ -15,18 +16,18 @@ export default function ConfirmButtons({ onConfirm, onReject, disabled }: Props)
         style={{
           padding: "9px 22px",
           borderRadius: 10,
-          background: "#6366f1",
-          color: "#fff",
+          background: "var(--accent)",
+          color: "var(--bg)",
           border: "none",
           fontSize: 13,
-          fontWeight: 500,
+          fontFamily: "var(--font-literata)",
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.5 : 1,
-          transition: "opacity 0.15s, transform 0.1s",
+          transition: "opacity 0.15s",
           letterSpacing: "0.01em",
         }}
       >
-        Looks good →
+        Looks good
       </button>
       <button
         onClick={onReject}
@@ -35,9 +36,10 @@ export default function ConfirmButtons({ onConfirm, onReject, disabled }: Props)
           padding: "9px 22px",
           borderRadius: 10,
           background: "transparent",
-          color: "#64748b",
-          border: "1px solid rgba(255,255,255,0.08)",
+          color: "var(--text-muted)",
+          border: "1px solid var(--border-strong)",
           fontSize: 13,
+          fontFamily: "var(--font-literata)",
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.5 : 1,
           transition: "opacity 0.15s",
