@@ -71,19 +71,28 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
   const calRules = (draft.calendar_rules ?? {}) as Record<string, Record<string, unknown>>;
 
   const setSleep = (key: string, value: unknown) =>
-    setDraft((d) => ({ ...d, sleep: { ...(d.sleep as object), [key]: value } }));
+    setDraft((d) => {
+      const prev = (typeof d.sleep === "object" && d.sleep !== null ? d.sleep : {}) as Record<string, unknown>;
+      return { ...d, sleep: { ...prev, [key]: value } };
+    });
 
   const setScheduling = (key: string, value: unknown) =>
-    setDraft((d) => ({ ...d, scheduling: { ...(d.scheduling as object), [key]: value } }));
+    setDraft((d) => {
+      const prev = (typeof d.scheduling === "object" && d.scheduling !== null ? d.scheduling : {}) as Record<string, unknown>;
+      return { ...d, scheduling: { ...prev, [key]: value } };
+    });
 
   const setCalRule = (ruleName: string, key: string, value: unknown) =>
-    setDraft((d) => ({
-      ...d,
-      calendar_rules: {
-        ...(d.calendar_rules as object),
-        [ruleName]: { ...(calRules[ruleName] ?? {}), [key]: value },
-      },
-    }));
+    setDraft((d) => {
+      const rules = (d.calendar_rules ?? {}) as Record<string, Record<string, unknown>>;
+      return {
+        ...d,
+        calendar_rules: {
+          ...rules,
+          [ruleName]: { ...(rules[ruleName] ?? {}), [key]: value },
+        },
+      };
+    });
 
   const handleSave = async () => {
     setSaving(true);
