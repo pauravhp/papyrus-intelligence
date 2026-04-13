@@ -1,42 +1,38 @@
-import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
-import { Suspense } from "react";
-import { createClient } from "@/utils/supabase/server";
-import OnboardClient from "./OnboardClient";
+// frontend/app/onboard/page.tsx
+"use client";
 
-export default async function OnboardPage() {
-  const cookieStore = await cookies();
-  const supabase = createClient(cookieStore);
-  const { data, error } = await supabase.auth.getClaims();
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import SetupStage from "./SetupStage";
+import DiscoverStage from "./DiscoverStage";
 
-  if (!data?.claims || error) {
-    redirect("/login");
-  }
+type Step = "setup" | "discover";
 
-  // Already onboarded → skip back to dashboard
-  const userId = data.claims.sub as string;
-  const { data: userRow } = await supabase
-    .from("users")
-    .select("config")
-    .eq("id", userId)
-    .maybeSingle();
+export default function OnboardPage() {
+  const router = useRouter();
+  const [step, setStep] = useState<Step>("setup");
+  const [timezone, setTimezone] = useState("UTC");
+  const [calendarIds, setCalendarIds] = useState<string[]>([]);
 
-  const isOnboarded =
-    userRow?.config && Object.keys(userRow.config).length > 0;
-  if (isOnboarded) {
-    redirect("/dashboard");
+  const handleSetupComplete = (tz: string, calIds: string[]) => {
+    setTimezone(tz);
+    setCalendarIds(calIds);
+    setStep("discover");
+  };
+
+  const handleOnboardComplete = () => {
+    router.push("/dashboard");
+  };
+
+  if (step === "setup") {
+    return <SetupStage onAdvance={handleSetupComplete} />;
   }
 
   return (
-    <Suspense
-      fallback={
-        <div
-          className="min-h-screen flex items-center justify-center"
-          style={{ background: "#080810" }}
-        />
-      }
-    >
-      <OnboardClient />
-    </Suspense>
+    <DiscoverStage
+      timezone={timezone}
+      calendarIds={calendarIds}
+      onComplete={handleOnboardComplete}
+    />
   );
 }
