@@ -68,9 +68,14 @@ def test_log_session_decrements_remaining():
         "deadline": None, "priority": 3, "created_at": "x", "updated_at": "x",
     }
     sb = MagicMock()
+    # Mock initial select to return current remaining_hours
+    sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {"remaining_hours": 20.0}
     sb.from_.return_value.update.return_value.eq.return_value.eq.return_value.select.return_value.single.return_value.execute.return_value.data = updated
     result = log_session("user-123", sb, project_id=1, hours_worked=1.5)
     assert result["remaining_hours"] == 18.5
+    # Verify the update was called with the correctly computed new_remaining (20.0 - 1.5 = 18.5)
+    update_call_args = sb.from_.return_value.update.call_args[0][0]
+    assert update_call_args["remaining_hours"] == 18.5
 
 
 def test_delete_project_calls_delete():
@@ -87,9 +92,14 @@ def test_reset_project_restores_hours():
         "deadline": None, "priority": 3, "created_at": "x", "updated_at": "x",
     }
     sb = MagicMock()
+    # Mock initial select to return total_budget_hours
+    sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {"total_budget_hours": 22.0}
     sb.from_.return_value.update.return_value.eq.return_value.eq.return_value.select.return_value.single.return_value.execute.return_value.data = updated
     result = reset_project("user-123", sb, project_id=1)
     assert result["remaining_hours"] == 22.0
+    # Verify the update was called with remaining_hours set to total (22.0)
+    update_call_args = sb.from_.return_value.update.call_args[0][0]
+    assert update_call_args["remaining_hours"] == 22.0
 
 
 def test_update_project_patches_fields():
