@@ -1,3 +1,4 @@
+// frontend/app/login/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -22,10 +23,7 @@ export default function LoginPage() {
     setLoading(true);
 
     if (mode === "signin") {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         setError(error.message);
       } else {
@@ -37,65 +35,126 @@ export default function LoginPage() {
       if (error) {
         setError(error.message);
       } else {
-        setMessage(
-          "Check your email to confirm your account, then sign in.",
-        );
+        setMessage("Check your email to confirm your account, then sign in.");
       }
     }
 
     setLoading(false);
   };
 
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "var(--surface-raised)",
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 13,
+    color: "var(--text)",
+    outline: "none",
+    fontFamily: "var(--font-literata)",
+  };
+
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.08em",
+    color: "var(--text-muted)",
+    marginBottom: 6,
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm bg-white rounded-xl shadow p-8 space-y-6">
-        <h1 className="text-2xl font-semibold text-gray-900">
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "var(--bg)",
+        padding: "0 16px",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: 16,
+          padding: "36px 32px",
+        }}
+      >
+        <h1
+          className="font-display"
+          style={{
+            fontSize: 26,
+            color: "var(--text)",
+            marginBottom: 28,
+            fontWeight: 400,
+            letterSpacing: "-0.01em",
+          }}
+        >
           {mode === "signin" ? "Sign in" : "Create account"}
         </h1>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
+            <label style={labelStyle}>Email</label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              style={inputStyle}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
+            <label style={labelStyle}>Password</label>
             <input
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              style={inputStyle}
             />
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {message && <p className="text-sm text-green-600">{message}</p>}
+          {error && (
+            <p style={{ fontSize: 13, color: "var(--danger)" }}>{error}</p>
+          )}
+          {message && (
+            <p style={{ fontSize: 13, color: "var(--accent)" }}>{message}</p>
+          )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-black text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
+            style={{
+              width: "100%",
+              padding: "10px 0",
+              borderRadius: 8,
+              background: "var(--accent)",
+              color: "var(--bg)",
+              border: "none",
+              fontSize: 14,
+              fontFamily: "var(--font-literata)",
+              cursor: loading ? "not-allowed" : "pointer",
+              opacity: loading ? 0.6 : 1,
+              transition: "opacity 0.15s",
+            }}
           >
-            {loading
-              ? "Loading…"
-              : mode === "signin"
-                ? "Sign in"
-                : "Sign up"}
+            {loading ? "Loading" : mode === "signin" ? "Sign in" : "Sign up"}
           </button>
         </form>
 
-        <p className="text-sm text-center text-gray-500">
+        <p
+          style={{
+            fontSize: 13,
+            textAlign: "center",
+            color: "var(--text-muted)",
+            marginTop: 20,
+          }}
+        >
           {mode === "signin" ? "No account?" : "Already have one?"}{" "}
           <button
             onClick={() => {
@@ -103,7 +162,16 @@ export default function LoginPage() {
               setError(null);
               setMessage(null);
             }}
-            className="text-black font-medium underline"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--accent)",
+              fontSize: 13,
+              textDecoration: "underline",
+              textUnderlineOffset: 3,
+              fontFamily: "var(--font-literata)",
+            }}
           >
             {mode === "signin" ? "Sign up" : "Sign in"}
           </button>
