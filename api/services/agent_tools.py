@@ -191,14 +191,16 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
         except Exception as exc:
             print(f"[confirm_schedule] GCal create failed for {item.get('task_name')}: {exc}")
 
-        try:
-            start_dt = datetime.fromisoformat(item["start_time"])
-            todoist_client.schedule_task(
-                item["task_id"], start_dt, item["duration_minutes"]
-            )
-            todoist_count += 1
-        except Exception as exc:
-            print(f"[confirm_schedule] Todoist update failed for {item.get('task_id')}: {exc}")
+        # Skip Todoist write for project budget tasks — budget tracked via log_project_session
+        if not item.get("task_id", "").startswith("proj_"):
+            try:
+                start_dt = datetime.fromisoformat(item["start_time"])
+                todoist_client.schedule_task(
+                    item["task_id"], start_dt, item["duration_minutes"]
+                )
+                todoist_count += 1
+            except Exception as exc:
+                print(f"[confirm_schedule] Todoist update failed for {item.get('task_id')}: {exc}")
 
     import json as _json
     from datetime import datetime as _dt

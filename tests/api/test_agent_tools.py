@@ -210,3 +210,42 @@ def test_schedule_day_injects_project_as_synthetic_task():
     assert proj_tasks[0].duration_minutes == 90  # session_min
     assert proj_tasks[0].remaining_hours == 20.0
     assert proj_tasks[0].deadline_pressure == "at_risk"
+
+
+def test_confirm_schedule_skips_todoist_for_project_tasks():
+    """Items with task_id starting with proj_ get a GCal event but no Todoist write."""
+    from api.services.agent_tools import execute_confirm_schedule
+    from unittest.mock import MagicMock, patch
+
+    gcal_svc = MagicMock()
+    sb = MagicMock()
+    sb.from_.return_value.insert.return_value.execute.return_value.data = []
+
+    ctx = {
+        "config": {"user": {"timezone": "America/Vancouver"}, "rules": {}},
+        "todoist_api_key": "tok",
+        "gcal_service": gcal_svc,
+        "user_id": "u1",
+        "supabase": sb,
+    }
+
+    schedule = {
+        "scheduled": [
+            {
+                "task_id": "proj_7",
+                "task_name": "App Side Project",
+                "start_time": "2026-04-13T10:30:00-07:00",
+                "end_time": "2026-04-13T12:30:00-07:00",
+                "duration_minutes": 120,
+            }
+        ],
+        "pushed": [],
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.create_event", return_value="gcal-id-1"):
+        result = execute_confirm_schedule(schedule, ctx)
+        # GCal event should be created
+        assert result["gcal_events_created"] == 1
+        # Todoist should NOT be called for proj_ task
+        MockTodoist.return_value.schedule_task.assert_not_called()
