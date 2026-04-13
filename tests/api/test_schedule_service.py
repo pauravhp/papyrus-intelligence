@@ -111,3 +111,38 @@ def test_schedule_day_retries_on_invalid_json():
                 groq_api_key=None,
                 target_date="2026-04-12",
             )
+
+
+def test_build_prompt_shows_session_range_for_budget_task():
+    from src.models import TodoistTask, FreeWindow
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from api.services.schedule_service import _build_prompt
+
+    tz = ZoneInfo("America/Vancouver")
+    task = TodoistTask(
+        id="proj_1",
+        content="App Side Project",
+        project_id="none",
+        priority=3,
+        due_datetime=None,
+        deadline="2026-05-01",
+        duration_minutes=90,
+        labels=[],
+        is_inbox=False,
+        is_budget_task=True,
+        session_max_minutes=180,
+        remaining_hours=20.0,
+        deadline_pressure="at_risk",
+    )
+    window = FreeWindow(
+        start=datetime(2026, 4, 13, 9, 0, tzinfo=tz),
+        end=datetime(2026, 4, 13, 12, 0, tzinfo=tz),
+        duration_minutes=180,
+        block_type="morning",
+    )
+    prompt = _build_prompt([task], [window], {}, "", "2026-04-13")
+    assert "90-180min" in prompt
+    assert "remaining=20.0h" in prompt
+    assert "[AT_RISK]" in prompt
+    assert "proj_1" in prompt

@@ -25,6 +25,10 @@ class TodoistTask:
     labels: list[str]
     is_inbox: bool
     is_budget_task: bool = False
+    # Budget task metadata — set when injecting projects into schedule_day
+    session_max_minutes: Optional[int] = None
+    remaining_hours: Optional[float] = None
+    deadline_pressure: Optional[str] = None
 
 
 @dataclass

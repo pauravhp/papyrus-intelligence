@@ -33,11 +33,23 @@ def _build_prompt(
     tz = config.get("user", {}).get("timezone", "UTC")
     rules_hard = config.get("rules", {}).get("hard", [])
 
-    tasks_text = "\n".join(
-        f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
-        + (f" due={t.deadline}" if t.deadline else "")
-        for t in tasks
-    )
+    lines = []
+    for t in tasks:
+        if t.is_budget_task and t.session_max_minutes:
+            dur_str = f"{t.duration_minutes}-{t.session_max_minutes}min"
+            pressure = f" [{t.deadline_pressure.upper()}]" if t.deadline_pressure else ""
+            remaining = f" remaining={t.remaining_hours:.1f}h" if t.remaining_hours is not None else ""
+            lines.append(
+                f"{t.id} {t.content[:50]} p{t.priority} {dur_str}{remaining}"
+                + (f" deadline={t.deadline}" if t.deadline else "")
+                + pressure
+            )
+        else:
+            lines.append(
+                f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
+                + (f" due={t.deadline}" if t.deadline else "")
+            )
+    tasks_text = "\n".join(lines)
     windows_text = " | ".join(
         f"{w.start.strftime('%H:%M')}-{w.end.strftime('%H:%M')}({w.duration_minutes}m)"
         for w in free_windows
@@ -59,7 +71,8 @@ Reply ONLY with JSON:
 {{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
 
 - start_time/end_time: ISO 8601 with tz offset e.g. {target_date}T09:00:00-07:00
-- Every task in exactly one list. Tasks that don't fit go in pushed."""
+- Every task in exactly one list. Tasks that don't fit go in pushed.
+- For project tasks (id starts with proj_): pick any duration within the shown range (e.g. 90-180min means schedule between 90 and 180 minutes)."""
 
 
 def _extract_json(text: str) -> str:
