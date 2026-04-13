@@ -257,3 +257,39 @@ def test_promote_saves_config_only(client, monkeypatch):
     assert "config" in saved
     assert "groq_api_key" not in saved
     assert saved["config"]["sleep"]["default_wake_time"] == "07:00"
+
+
+def test_promote_strips_onboard_draft_key(client, monkeypatch):
+    """promote strips _onboard_draft from config before saving."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    with patch("api.routes.onboard.supabase", mock_sb):
+        resp = client.post(
+            "/api/onboard/promote",
+            json={"config": {"_onboard_draft": True, "sleep": {"default_wake_time": "07:00"}}},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    saved = mock_sb.from_.return_value.update.call_args.args[0]["config"]
+    assert "_onboard_draft" not in saved
+    assert saved["sleep"]["default_wake_time"] == "07:00"
+
+
+def test_promote_500_on_supabase_error(client, monkeypatch):
+    """promote returns 500 if Supabase write raises an exception."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.side_effect = Exception("DB error")
+
+    with patch("api.routes.onboard.supabase", mock_sb):
+        resp = client.post(
+            "/api/onboard/promote",
+            json={"config": {"sleep": {}}},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 500
+    assert "Supabase write failed" in resp.json()["detail"]

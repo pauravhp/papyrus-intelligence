@@ -271,13 +271,9 @@ def onboard_promote(
     clean = copy.deepcopy(body.config)
     clean.pop("_onboard_draft", None)
 
-    result = (
-        supabase.from_("users")
-        .update({"config": clean})
-        .eq("id", user_id)
-        .execute()
-    )
-    if hasattr(result, "error") and result.error:
-        raise HTTPException(status_code=500, detail=f"Supabase write failed: {result.error}")
+    try:
+        supabase.from_("users").update({"config": clean}).eq("id", user_id).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Supabase write failed: {exc}")
 
     return PromoteResponse(success=True)
