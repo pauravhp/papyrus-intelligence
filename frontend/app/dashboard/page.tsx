@@ -26,9 +26,8 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#080810", color: "#f8fafc" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       <Sidebar />
-      {/* Main content — offset by sidebar width (56px) */}
       <main style={{ flex: 1, marginLeft: 56 }}>
         <ChatWindow />
       </main>

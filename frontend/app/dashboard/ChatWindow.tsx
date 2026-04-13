@@ -1,3 +1,4 @@
+// frontend/app/dashboard/ChatWindow.tsx
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -12,7 +13,6 @@ interface Message {
   schedule_card?: Record<string, unknown> | null;
 }
 
-// Thinking dots animation
 function ThinkingIndicator() {
   return (
     <motion.div
@@ -22,7 +22,7 @@ function ThinkingIndicator() {
       transition={{ duration: 0.2 }}
       style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}
     >
-      <span style={{ color: "#475569", fontSize: 13, fontStyle: "italic" }}>
+      <span style={{ color: "var(--text-muted)", fontSize: 13, fontStyle: "italic" }}>
         Papyrus is thinking
       </span>
       {[0, 1, 2].map((i) => (
@@ -34,7 +34,7 @@ function ThinkingIndicator() {
             width: 4,
             height: 4,
             borderRadius: "50%",
-            background: "#d97706",
+            background: "var(--accent)",
             display: "inline-block",
           }}
         />
@@ -77,10 +77,7 @@ export default function ChatWindow() {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token ?? "";
 
-      const apiMessages = newMessages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      const apiMessages = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
       const res = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/chat`,
@@ -107,16 +104,11 @@ export default function ChatWindow() {
       };
 
       setMessages([...newMessages, assistantMsg]);
-      if (data2.schedule_card) {
-        setPendingSchedule(data2.schedule_card);
-      }
+      if (data2.schedule_card) setPendingSchedule(data2.schedule_card);
     } catch (err) {
       setMessages([
         ...newMessages,
-        {
-          role: "assistant",
-          content: `Something went wrong: ${(err as Error).message}`,
-        },
+        { role: "assistant", content: `Something went wrong: ${(err as Error).message}` },
       ]);
     } finally {
       setLoading(false);
@@ -177,14 +169,14 @@ export default function ChatWindow() {
               }}
             >
               {msg.role === "assistant" ? (
-                /* Assistant: no bubble — flowing prose */
                 <div style={{ maxWidth: "92%" }}>
                   <p
                     style={{
-                      color: "#e2e8f0",
+                      color: "var(--text)",
                       fontSize: 15,
                       lineHeight: 1.75,
                       whiteSpace: "pre-wrap",
+                      fontStyle: "normal",
                     }}
                   >
                     {msg.content}
@@ -215,9 +207,9 @@ export default function ChatWindow() {
                     maxWidth: "72%",
                     padding: "10px 16px",
                     borderRadius: "18px 18px 4px 18px",
-                    background: "rgba(99,102,241,0.18)",
-                    border: "1px solid rgba(99,102,241,0.3)",
-                    color: "#e2e8f0",
+                    background: "var(--accent-tint)",
+                    border: "1px solid var(--border-strong)",
+                    color: "var(--text)",
                     fontSize: 14,
                     lineHeight: 1.6,
                     whiteSpace: "pre-wrap",
@@ -230,7 +222,6 @@ export default function ChatWindow() {
           ))}
         </AnimatePresence>
 
-        {/* Thinking indicator */}
         <AnimatePresence>
           {loading && <ThinkingIndicator />}
         </AnimatePresence>
@@ -239,19 +230,14 @@ export default function ChatWindow() {
       </div>
 
       {/* Input bar */}
-      <div
-        style={{
-          padding: "12px 0 28px",
-          flexShrink: 0,
-        }}
-      >
+      <div style={{ padding: "12px 0 28px", flexShrink: 0 }}>
         <div
           style={{
             display: "flex",
             gap: 10,
             alignItems: "flex-end",
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
             borderRadius: 16,
             padding: "10px 12px 10px 16px",
           }}
@@ -261,12 +247,11 @@ export default function ChatWindow() {
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
-              // Auto-grow: reset then set to scrollHeight
               e.target.style.height = "auto";
               e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Plan my day, reschedule, or ask anything…"
+            placeholder="Plan my day, reschedule, or ask anything"
             disabled={loading}
             rows={1}
             style={{
@@ -274,12 +259,12 @@ export default function ChatWindow() {
               background: "transparent",
               border: "none",
               outline: "none",
-              color: "#f1f5f9",
+              color: "var(--text)",
               fontSize: 14,
               lineHeight: 1.6,
               resize: "none",
               overflow: "hidden",
-              fontFamily: "inherit",
+              fontFamily: "var(--font-literata)",
               paddingTop: 2,
             }}
           />
@@ -292,26 +277,18 @@ export default function ChatWindow() {
               height: 34,
               borderRadius: 10,
               background:
-                loading || !input.trim()
-                  ? "rgba(99,102,241,0.2)"
-                  : "#6366f1",
+                loading || !input.trim() ? "var(--accent-tint)" : "var(--accent)",
               border: "none",
               cursor: loading || !input.trim() ? "not-allowed" : "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               transition: "background 0.15s",
-              color: loading || !input.trim() ? "#4f46e5" : "#fff",
+              color: loading || !input.trim() ? "var(--accent)" : "var(--bg)",
             }}
             aria-label="Send message"
           >
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 15 15"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
               <path
                 d="M7.5 1.5L7.5 13.5M7.5 1.5L3 6M7.5 1.5L12 6"
                 stroke="currentColor"
@@ -325,7 +302,7 @@ export default function ChatWindow() {
         <p
           style={{
             textAlign: "center",
-            color: "#334155",
+            color: "var(--text-faint)",
             fontSize: 11,
             marginTop: 8,
           }}
