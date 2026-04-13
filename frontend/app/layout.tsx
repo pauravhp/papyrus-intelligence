@@ -1,35 +1,40 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import { Geist_Mono } from "next/font/google";
+import { Gilda_Display, Literata } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
-const inter = Inter({
-  variable: "--font-inter",
+const gildaDisplay = Gilda_Display({
+  weight: "400",
   subsets: ["latin"],
+  variable: "--font-gilda",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const literata = Literata({
   subsets: ["latin"],
+  style: ["normal", "italic"],
+  variable: "--font-literata",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Schedule for Me — AI-powered scheduling",
+  title: "Papyrus — AI-powered scheduling",
   description:
-    "AI-powered scheduling that learns your patterns, respects your energy, and plans your day — automatically.",
+    "A calm scheduling coach that plans your day, respects your energy, and adapts when things slip.",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${gildaDisplay.variable} ${literata.variable} h-full`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }
