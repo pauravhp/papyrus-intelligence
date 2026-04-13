@@ -3,12 +3,13 @@
 
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, CalendarDays, Settings2, X } from "lucide-react";
+import { MessageSquare, CalendarDays, Settings2, X, Sun, Moon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ConfigCard from "@/components/ConfigCard";
+import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
   { icon: MessageSquare, label: "Chat",  href: "/dashboard" },
@@ -30,6 +31,7 @@ const ICON_BTN: React.CSSProperties = {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { theme, toggle } = useTheme();
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const supabaseRef = useRef(createClient());
@@ -61,9 +63,9 @@ export default function Sidebar() {
           top: 0,
           bottom: 0,
           width: 56,
-          background: "rgba(8,8,16,0.95)",
+          background: "var(--surface)",
           backdropFilter: "blur(8px)",
-          borderRight: "1px solid rgba(255,255,255,0.06)",
+          borderRight: "1px solid var(--border)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -78,12 +80,12 @@ export default function Sidebar() {
           return (
             <Link key={href} href={href} title={label} style={{ textDecoration: "none" }}>
               <motion.div
-                whileHover={{ scale: 1.1, background: "rgba(99,102,241,0.15)" }}
+                whileHover={{ scale: 1.1, background: "var(--accent-tint)" }}
                 whileTap={{ scale: 0.92 }}
                 style={{
                   ...ICON_BTN,
-                  background: active ? "rgba(99,102,241,0.2)" : "transparent",
-                  color: active ? "#818cf8" : "#64748b",
+                  background: active ? "var(--accent-tint)" : "transparent",
+                  color: active ? "var(--accent)" : "var(--text-muted)",
                 }}
               >
                 <Icon size={18} />
@@ -92,8 +94,20 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Preferences button — at bottom */}
         <div style={{ flex: 1 }} />
+
+        {/* Theme toggle */}
+        <motion.button
+          onClick={toggle}
+          title={theme === "light" ? "Switch to dark" : "Switch to light"}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.92 }}
+          style={{ ...ICON_BTN, color: "var(--text-muted)" }}
+        >
+          {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
+        </motion.button>
+
+        {/* Preferences button */}
         <motion.button
           onClick={handleOpenPrefs}
           title="Preferences"
@@ -101,8 +115,8 @@ export default function Sidebar() {
           whileTap={{ scale: 0.92 }}
           style={{
             ...ICON_BTN,
-            color: prefsOpen ? "#818cf8" : "#64748b",
-            background: prefsOpen ? "rgba(99,102,241,0.2)" : "transparent",
+            color: prefsOpen ? "var(--accent)" : "var(--text-muted)",
+            background: prefsOpen ? "var(--accent-tint)" : "transparent",
           }}
         >
           <Settings2 size={18} />
@@ -113,7 +127,6 @@ export default function Sidebar() {
       <AnimatePresence>
         {prefsOpen && (
           <>
-            {/* Backdrop */}
             <motion.div
               key="backdrop"
               initial={{ opacity: 0 }}
@@ -124,12 +137,11 @@ export default function Sidebar() {
               style={{
                 position: "fixed",
                 inset: 0,
-                background: "rgba(0,0,0,0.45)",
+                background: "rgba(44,26,14,0.3)",
                 zIndex: 45,
               }}
             />
 
-            {/* Panel */}
             <motion.div
               key="panel"
               initial={{ x: -340, opacity: 0 }}
@@ -142,20 +154,23 @@ export default function Sidebar() {
                 top: 0,
                 bottom: 0,
                 width: 340,
-                background: "#0d0d1a",
-                borderRight: "1px solid rgba(255,255,255,0.08)",
+                background: "var(--bg)",
+                borderRight: "1px solid var(--border)",
                 zIndex: 50,
                 overflowY: "auto",
                 padding: "24px 20px",
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-                <h2 style={{ color: "#f8fafc", fontSize: 16, fontWeight: 600, margin: 0 }}>
+                <h2
+                  className="font-display"
+                  style={{ color: "var(--text)", fontSize: 18, fontWeight: 400, margin: 0 }}
+                >
                   Preferences
                 </h2>
                 <button
                   onClick={() => setPrefsOpen(false)}
-                  style={{ ...ICON_BTN, color: "#64748b" }}
+                  style={{ ...ICON_BTN, color: "var(--text-muted)" }}
                 >
                   <X size={16} />
                 </button>
@@ -168,7 +183,7 @@ export default function Sidebar() {
                   saveLabel="Save preferences"
                 />
               ) : (
-                <p style={{ color: "#64748b", fontSize: 13 }}>Loading…</p>
+                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading</p>
               )}
             </motion.div>
           </>
