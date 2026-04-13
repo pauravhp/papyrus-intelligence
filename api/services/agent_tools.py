@@ -102,8 +102,9 @@ def execute_schedule_day(
     today = date.today()
     task_filter = "tomorrow" if target_date > today else "today | overdue"
     all_tasks = todoist_client.get_tasks(task_filter)
+    # Full name lookup — keyed before filtering so pushed tasks can also be resolved
+    task_names: dict[str, str] = {t.id: t.content for t in all_tasks}
     # Only schedulable tasks (have a duration label) go to the LLM.
-    # Tasks without duration_minutes have no time estimate — the LLM can't place them.
     tasks_raw = [t for t in all_tasks if t.duration_minutes is not None]
     events = get_events(
         target_date=target_date,
@@ -124,6 +125,12 @@ def execute_schedule_day(
         groq_api_key=user_ctx.get("groq_api_key"),
         target_date=target_date_str,
     )
+    # Restore full task names (inner LLM only saw truncated versions)
+    for item in result.get("scheduled", []):
+        tid = item.get("task_id")
+        if tid and tid in task_names:
+            item["task_name"] = task_names[tid]
+
     result["free_windows_used"] = [
         {"start": w.start.strftime("%H:%M"), "end": w.end.strftime("%H:%M"), "duration_minutes": w.duration_minutes}
         for w in free_windows
