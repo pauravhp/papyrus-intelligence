@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, CalendarDays, Key } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
@@ -30,7 +30,8 @@ interface SetupStageProps {
 }
 
 export default function SetupStage({ onAdvance }: SetupStageProps) {
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
   const [gcalConnected, setGcalConnected] = useState(false);
   const [checking, setChecking] = useState(true);
   const [todoistKey, setTodoistKey] = useState("");
@@ -219,6 +220,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
 
           <div>
             <label
+              htmlFor="todoist-key"
               style={{
                 color: "#94a3b8",
                 fontSize: 11,
@@ -231,6 +233,8 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
               <span style={{ color: "#f43f5e" }}>*</span>
             </label>
             <input
+              id="todoist-key"
+              aria-required="true"
               type="password"
               value={todoistKey}
               onChange={(e) => {
@@ -244,6 +248,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
 
           <div>
             <label
+              htmlFor="llm-key"
               style={{
                 color: "#94a3b8",
                 fontSize: 11,
@@ -264,6 +269,8 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
               </span>
             </label>
             <input
+              id="llm-key"
+              aria-required="true"
               type="password"
               value={llmKey}
               onChange={(e) => {
