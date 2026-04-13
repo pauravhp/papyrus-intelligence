@@ -1,5 +1,5 @@
 """
-The 9 ReAct agent tools: Python implementations + Anthropic tool schemas.
+The 10 ReAct agent tools: Python implementations + Anthropic tool schemas.
 
 Each execute_* function accepts (tool_inputs, user_ctx) where user_ctx is:
 {
