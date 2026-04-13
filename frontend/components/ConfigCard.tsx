@@ -10,18 +10,19 @@ interface ConfigCardProps {
 }
 
 const INPUT: React.CSSProperties = {
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  color: "#f8fafc",
+  background: "var(--surface-raised)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   borderRadius: 8,
   padding: "6px 10px",
   fontSize: 13,
   outline: "none",
   width: "100%",
+  fontFamily: "var(--font-literata)",
 };
 
 const LABEL: React.CSSProperties = {
-  color: "#94a3b8",
+  color: "var(--text-muted)",
   fontSize: 11,
   fontWeight: 500,
   textTransform: "uppercase" as const,
@@ -31,7 +32,7 @@ const LABEL: React.CSSProperties = {
 };
 
 const SECTION_HEADING: React.CSSProperties = {
-  color: "#64748b",
+  color: "var(--text-muted)",
   fontSize: 11,
   fontWeight: 600,
   textTransform: "uppercase" as const,
@@ -107,7 +108,7 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
   };
 
   return (
-    <div style={{ color: "#f8fafc" }}>
+    <div style={{ color: "var(--text)" }}>
       {/* Sleep */}
       <p style={SECTION_HEADING}>Sleep &amp; Schedule</p>
       <Field
@@ -142,14 +143,14 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
             <div
               key={name}
               style={{
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.07)",
+                background: "var(--surface-raised)",
+                border: "1px solid var(--border)",
                 borderRadius: 10,
                 padding: "12px 14px",
                 marginBottom: 10,
               }}
             >
-              <p style={{ color: "#818cf8", fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+              <p style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
                 {name}
               </p>
               <Field
@@ -194,7 +195,7 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
       </div>
 
       {error && (
-        <p style={{ color: "#f43f5e", fontSize: 12, marginTop: 8 }}>{error}</p>
+        <p style={{ color: "var(--danger)", fontSize: 12, marginTop: 8 }}>{error}</p>
       )}
 
       <button
@@ -205,13 +206,13 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
           width: "100%",
           padding: "11px 0",
           borderRadius: 10,
-          background: saving ? "rgba(99,102,241,0.5)" : "#6366f1",
-          color: "#fff",
+          background: saving ? "var(--accent-tint)" : "var(--accent)",
+          color: saving ? "var(--accent)" : "var(--bg)",
           border: "none",
           fontSize: 14,
           fontWeight: 500,
           cursor: saving ? "not-allowed" : "pointer",
-          boxShadow: saving ? "none" : "0 0 18px rgba(99,102,241,0.35)",
+          boxShadow: "none",
         }}
       >
         {saving ? "Saving…" : saveLabel}

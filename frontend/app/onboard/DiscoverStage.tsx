@@ -66,7 +66,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center px-4 py-16"
-      style={{ background: "#080810" }}
+      style={{ background: "var(--bg)" }}
     >
       <AnimatePresence mode="wait">
         {phase === "scanning" && (
@@ -77,24 +77,23 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             exit={{ opacity: 0 }}
             style={{ textAlign: "center", maxWidth: 400 }}
           >
-            {/* Minimal pulse indicator */}
             <div style={{ display: "flex", justifyContent: "center", gap: 6, marginBottom: 24 }}>
               {[0, 1, 2].map((i) => (
                 <motion.div
                   key={i}
                   animate={{ scale: [1, 1.4, 1], opacity: [0.4, 1, 0.4] }}
                   transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2 }}
-                  style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366f1" }}
+                  style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--accent)" }}
                 />
               ))}
             </div>
             <h2
               className="font-display"
-              style={{ fontSize: "1.6rem", color: "#f8fafc", letterSpacing: "-0.02em" }}
+              style={{ fontSize: "1.6rem", color: "var(--text)", letterSpacing: "-0.02em" }}
             >
               Learning your schedule
             </h2>
-            <p style={{ color: "#64748b", fontSize: 13, marginTop: 8 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 8 }}>
               Scanning the last 14 days to understand your patterns…
             </p>
           </motion.div>
@@ -109,23 +108,23 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             style={{
               width: "calc(100% - 32px)",
               maxWidth: 480,
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.08)",
+              background: "var(--surface)",
+              border: "1px solid var(--border)",
               borderRadius: 20,
               padding: "28px 28px 24px",
             }}
           >
             <h2
               className="font-display"
-              style={{ fontSize: "1.4rem", color: "#f8fafc", marginBottom: 4, letterSpacing: "-0.02em" }}
+              style={{ fontSize: "1.4rem", color: "var(--text)", marginBottom: 4, letterSpacing: "-0.02em" }}
             >
               Here's what I found
             </h2>
-            <p style={{ color: "#64748b", fontSize: 13, marginBottom: 20 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, marginBottom: 20 }}>
               Review and adjust — this becomes your scheduling config.
             </p>
             {confirmError && (
-              <p style={{ color: "#f43f5e", fontSize: 12, marginBottom: 12 }}>{confirmError}</p>
+              <p style={{ color: "var(--danger)", fontSize: 12, marginBottom: 12 }}>{confirmError}</p>
             )}
             <ConfigCard
               config={proposedConfig}
@@ -142,7 +141,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             animate={{ opacity: 1 }}
             style={{ textAlign: "center", maxWidth: 400 }}
           >
-            <p style={{ color: "#f43f5e", fontSize: 14, marginBottom: 12 }}>
+            <p style={{ color: "var(--danger)", fontSize: 14, marginBottom: 12 }}>
               Scan failed: {errorMsg}
             </p>
             <motion.button
@@ -150,8 +149,8 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
               whileTap={{ scale: 0.96 }}
               onClick={() => setPhase("scanning")}
               style={{
-                background: "#6366f1",
-                color: "#fff",
+                background: "var(--accent)",
+                color: "var(--bg)",
                 border: "none",
                 borderRadius: 8,
                 padding: "8px 20px",

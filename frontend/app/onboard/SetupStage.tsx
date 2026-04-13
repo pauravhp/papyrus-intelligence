@@ -7,22 +7,22 @@ import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 
 const CARD: React.CSSProperties = {
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  backdropFilter: "blur(12px)",
-  borderRadius: 16,
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
   padding: "20px",
 };
 
 const INPUT: React.CSSProperties = {
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  color: "#f8fafc",
+  background: "var(--surface-raised)",
+  border: "1px solid var(--border)",
+  color: "var(--text)",
   width: "100%",
   fontSize: 13,
   padding: "8px 12px",
   borderRadius: 8,
   outline: "none",
+  fontFamily: "var(--font-literata)",
 };
 
 interface SetupStageProps {
@@ -112,7 +112,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center px-4"
-      style={{ background: "#080810" }}
+      style={{ background: "var(--bg)" }}
     >
       <motion.div
         initial="hidden"
@@ -121,15 +121,16 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
       >
         <motion.div custom={0} variants={FADE} className="text-center mb-4">
           <h1
-            className="font-display text-white"
+            className="font-display"
             style={{
               fontSize: "clamp(1.8rem, 4vw, 2.4rem)",
               letterSpacing: "-0.025em",
+              color: "var(--text)",
             }}
           >
             Connect your tools
           </h1>
-          <p style={{ color: "#94a3b8", fontSize: 13, marginTop: 6 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 6 }}>
             Papyrus needs access to your calendar, tasks, and an AI model.
           </p>
         </motion.div>
@@ -139,30 +140,30 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
           <div className="flex items-start gap-3">
             <div
               style={{
-                background: "rgba(99,102,241,0.15)",
+                background: "var(--accent-tint)",
                 padding: 8,
                 borderRadius: 8,
               }}
             >
-              <CalendarDays size={18} color="#6366f1" />
+              <CalendarDays size={18} color="var(--accent)" />
             </div>
             <div style={{ flex: 1 }}>
-              <p style={{ color: "#f8fafc", fontSize: 13, fontWeight: 500 }}>
+              <p style={{ color: "var(--text)", fontSize: 13, fontWeight: 500 }}>
                 Google Calendar
               </p>
-              <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 2 }}>
+              <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 2 }}>
                 Required — Papyrus reads and writes your events.
               </p>
               <div style={{ marginTop: 10 }}>
                 {checking ? (
-                  <p style={{ color: "#475569", fontSize: 12 }}>Checking…</p>
+                  <p style={{ color: "var(--text-faint)", fontSize: 12 }}>Checking…</p>
                 ) : gcalConnected ? (
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: 6,
-                      color: "#34d399",
+                      color: "var(--accent)",
                       fontSize: 12,
                     }}
                   >
@@ -174,8 +175,8 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     style={{
-                      background: "#6366f1",
-                      color: "#fff",
+                      background: "var(--accent)",
+                      color: "var(--bg)",
                       border: "none",
                       borderRadius: 8,
                       padding: "6px 14px",
@@ -201,18 +202,18 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
           <div className="flex items-center gap-3">
             <div
               style={{
-                background: "rgba(99,102,241,0.15)",
+                background: "var(--accent-tint)",
                 padding: 8,
                 borderRadius: 8,
               }}
             >
-              <Key size={18} color="#6366f1" />
+              <Key size={18} color="var(--accent)" />
             </div>
             <div>
-              <p style={{ color: "#f8fafc", fontSize: 13, fontWeight: 500 }}>
+              <p style={{ color: "var(--text)", fontSize: 13, fontWeight: 500 }}>
                 API Keys
               </p>
-              <p style={{ color: "#94a3b8", fontSize: 12 }}>
+              <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
                 Stored encrypted — never logged.
               </p>
             </div>
@@ -222,7 +223,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
             <label
               htmlFor="todoist-key"
               style={{
-                color: "#94a3b8",
+                color: "var(--text-muted)",
                 fontSize: 11,
                 fontWeight: 500,
                 display: "block",
@@ -230,7 +231,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
               }}
             >
               Todoist API key{" "}
-              <span style={{ color: "#f43f5e" }}>*</span>
+              <span style={{ color: "var(--danger)" }}>*</span>
             </label>
             <input
               id="todoist-key"
@@ -250,17 +251,17 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
             <label
               htmlFor="llm-key"
               style={{
-                color: "#94a3b8",
+                color: "var(--text-muted)",
                 fontSize: 11,
                 fontWeight: 500,
                 display: "block",
                 marginBottom: 4,
               }}
             >
-              LLM API key <span style={{ color: "#f43f5e" }}>*</span>
+              LLM API key <span style={{ color: "var(--danger)" }}>*</span>
               <span
                 style={{
-                  color: "#475569",
+                  color: "var(--text-faint)",
                   fontWeight: 400,
                   marginLeft: 6,
                 }}
@@ -287,7 +288,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            style={{ color: "#f43f5e", fontSize: 12, textAlign: "center" }}
+            style={{ color: "var(--danger)", fontSize: 12, textAlign: "center" }}
           >
             {error}
           </motion.p>
@@ -305,17 +306,14 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
               borderRadius: 12,
               background:
                 canContinue && !loading
-                  ? "#6366f1"
-                  : "rgba(99,102,241,0.3)",
-              color: "#fff",
+                  ? "var(--accent)"
+                  : "var(--accent-tint)",
+              color: canContinue && !loading ? "var(--bg)" : "var(--accent)",
               border: "none",
               fontSize: 14,
               fontWeight: 500,
               cursor: canContinue && !loading ? "pointer" : "not-allowed",
-              boxShadow:
-                canContinue && !loading
-                  ? "0 0 20px rgba(99,102,241,0.35)"
-                  : "none",
+              boxShadow: "none",
             }}
           >
             {loading ? "Saving…" : "Continue →"}
