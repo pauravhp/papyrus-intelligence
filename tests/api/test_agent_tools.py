@@ -90,7 +90,7 @@ def test_execute_confirm_schedule_calls_gcal_and_todoist(user_ctx):
 
 def test_all_tool_schemas_are_valid():
     from api.services.agent_tools import TOOL_SCHEMAS
-    assert len(TOOL_SCHEMAS) == 9
+    assert len(TOOL_SCHEMAS) == 7  # 6 scheduling tools + get_date; onboard tools in /api/onboard/* HTTP routes
     for schema in TOOL_SCHEMAS:
         assert "name" in schema
         assert "description" in schema

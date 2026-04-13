@@ -17,17 +17,18 @@ Response:
 Architecture:
 - Stateless: full conversation history comes in with each request
 - Tool loop: up to MAX_ITERATIONS Anthropic tool-use cycles
-- BYOK: all keys loaded from Supabase, decrypted via decrypt_field RPC
+- Keys: loaded from Supabase when present; fall back to local env vars (dev only)
 """
 
 import json
+from datetime import date
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.auth import get_current_user
-from api.db import set_encryption_key, supabase
+from api.db import supabase
 from api.config import settings
 from api.services.agent_tools import TOOL_SCHEMAS, TOOL_DISPATCH
 from src.calendar_client import build_gcal_service_from_credentials
@@ -40,19 +41,20 @@ SYSTEM_PROMPT = """You are Papyrus, a calm and effective scheduling coach.
 Your job is to help the user plan their day, replan when things slip, and reflect on their week.
 
 Available tools:
+- get_date: resolve any date — use offset_days=0 for today, 1 for tomorrow, 7 for next week, etc. ALWAYS call this instead of asking the user for a date.
 - get_tasks: fetch Todoist tasks
-- get_calendar: fetch Google Calendar events
-- schedule_day: run the scheduling engine (ALWAYS call before confirm_schedule)
+- get_calendar: fetch Google Calendar events for a specific date (YYYY-MM-DD)
+- schedule_day: run the scheduling engine — pass target_date as YYYY-MM-DD (ALWAYS call before confirm_schedule)
 - confirm_schedule: write the schedule to Google Calendar + Todoist (only after user approval)
 - push_task: push a task to another day
 - get_status: check today's confirmed schedule
 
-Rules you must follow:
-- Never call confirm_schedule unless the user has explicitly said "looks good", "confirm", "yes go ahead" or similar.
-- Always call schedule_day first to generate a proposal.
-- If the user says "plan my day" or similar, call get_tasks + get_calendar + schedule_day in sequence.
-- Present schedules clearly: show task name, time, and duration.
-- One coaching nudge max per conversation. Never repeat a dismissed nudge.
+Rules:
+- Never ask the user for a date. Call get_date first for any relative term (today, tomorrow, next Monday).
+- To plan a day: call get_date → schedule_day. Do NOT call get_tasks separately — schedule_day handles it.
+- Never call confirm_schedule unless the user explicitly approves ("looks good", "confirm", "yes").
+- Present schedules concisely: task name, time, duration.
+- One coaching nudge max per conversation.
 """
 
 
@@ -73,7 +75,13 @@ class ChatResponse(BaseModel):
 
 
 def _load_user_context(user_id: str) -> dict:
-    """Load config + decrypt API keys + build GCal service from Supabase."""
+    """Load config + API keys + build GCal service from Supabase.
+
+    Key resolution order:
+    1. Supabase row (plaintext — encrypted storage is deferred until pgcrypto
+       session-variable issue with PostgREST is resolved).
+    2. Local environment variables (dev fallback — logged as a warning).
+    """
     row_result = (
         supabase.from_("users")
         .select("config, groq_api_key, anthropic_api_key, todoist_api_key, google_credentials")
@@ -87,20 +95,16 @@ def _load_user_context(user_id: str) -> dict:
     row = row_result.data
     config = row.get("config") or {}
 
-    # Decrypt API keys
-    set_encryption_key()
+    def _resolve_key(supabase_value: str | None, settings_value: str | None, label: str) -> str | None:
+        if supabase_value:
+            return supabase_value
+        if settings_value:
+            print(f"[chat] WARNING: using local .env {label} — Supabase key not set")
+        return settings_value
 
-    def _decrypt(enc: str | None) -> str | None:
-        if not enc:
-            return None
-        try:
-            return supabase.rpc("decrypt_field", {"ciphertext": enc}).execute().data
-        except Exception:
-            return None
-
-    groq_key = _decrypt(row.get("groq_api_key"))
-    anth_key = _decrypt(row.get("anthropic_api_key"))
-    tod_key = _decrypt(row.get("todoist_api_key"))
+    groq_key = _resolve_key(row.get("groq_api_key"), settings.GROQ_API_KEY, "GROQ_API_KEY")
+    anth_key = _resolve_key(row.get("anthropic_api_key"), settings.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY")
+    tod_key = _resolve_key(row.get("todoist_api_key"), settings.TODOIST_API_KEY, "TODOIST_API_KEY")
 
     # Build GCal service
     gcal_creds = row.get("google_credentials")

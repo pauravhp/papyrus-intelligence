@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
+    # Dev fallback keys — used when Supabase-stored keys are absent
+    ANTHROPIC_API_KEY: str | None = None
+    GROQ_API_KEY: str | None = None
+    TODOIST_API_KEY: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

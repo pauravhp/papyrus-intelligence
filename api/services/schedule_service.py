@@ -30,55 +30,36 @@ def _build_prompt(
     context_note: str,
     target_date: str,
 ) -> str:
-    rules_hard = config.get("rules", {}).get("hard", [])
-    rules_soft = config.get("rules", {}).get("soft", [])
     tz = config.get("user", {}).get("timezone", "UTC")
+    rules_hard = config.get("rules", {}).get("hard", [])
 
     tasks_text = "\n".join(
-        f"- id={t.id} | {t.content} | priority={t.priority} | "
-        f"duration={t.duration_minutes or '?'}min | labels={t.labels} | deadline={t.deadline}"
+        f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
+        + (f" due={t.deadline}" if t.deadline else "")
         for t in tasks
     )
-    windows_text = "\n".join(
-        f"- {w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')} ({w.duration_minutes}min, {w.block_type})"
+    windows_text = " | ".join(
+        f"{w.start.strftime('%H:%M')}-{w.end.strftime('%H:%M')}({w.duration_minutes}m)"
         for w in free_windows
     )
+    rules_text = "\n".join(f"- {r}" for r in rules_hard) if rules_hard else "None"
 
-    return f"""You are a scheduling coach. Assign tasks to time slots for {target_date} (timezone: {tz}).
+    note = f"Note: {context_note}" if context_note else ""
 
-USER NOTE: {context_note or 'None'}
+    return f"""Schedule tasks for {target_date} tz={tz}. {note}
 
-TASKS:
+TASKS (id name priority duration):
 {tasks_text}
 
-FREE WINDOWS:
-{windows_text}
+FREE WINDOWS: {windows_text}
 
-HARD RULES:
-{chr(10).join(f'- {r}' for r in rules_hard)}
+HARD RULES: {rules_text}
 
-SOFT RULES:
-{chr(10).join(f'- {r}' for r in rules_soft)}
+Reply ONLY with JSON:
+{{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
 
-Output ONLY valid JSON with this exact structure:
-{{
-  "scheduled": [
-    {{
-      "task_id": "<id>",
-      "task_name": "<content>",
-      "start_time": "<ISO 8601 with tz offset>",
-      "end_time": "<ISO 8601 with tz offset>",
-      "duration_minutes": <int>
-    }}
-  ],
-  "pushed": [
-    {{"task_id": "<id>", "reason": "<why pushed to another day>"}}
-  ],
-  "reasoning_summary": "<1-3 sentences explaining decisions>"
-}}
-
-Assign each task to exactly one slot. Tasks that don't fit today go in pushed[].
-Never schedule outside the provided free windows. Honor all hard rules."""
+- start_time/end_time: ISO 8601 with tz offset e.g. {target_date}T09:00:00-07:00
+- Every task in exactly one list. Tasks that don't fit go in pushed."""
 
 
 def _extract_json(text: str) -> str:

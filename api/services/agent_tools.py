@@ -15,7 +15,7 @@ Each execute_* function accepts (tool_inputs, user_ctx) where user_ctx is:
 TOOL_SCHEMAS is the list passed to Anthropic messages.create(tools=...).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from src.calendar_client import create_event, get_events
@@ -25,6 +25,18 @@ from src.scheduler import compute_free_windows
 
 
 # ── Python implementations ─────────────────────────────────────────────────────
+
+
+def execute_get_date(offset_days: int, _user_ctx: dict) -> dict:
+    """Return the date for today + offset_days as YYYY-MM-DD and a human label."""
+    target = date.today() + timedelta(days=offset_days)
+    labels = {0: "today", 1: "tomorrow", -1: "yesterday"}
+    label = labels.get(offset_days, target.strftime("%A"))
+    return {
+        "date": target.isoformat(),
+        "label": label,
+        "day_of_week": target.strftime("%A"),
+    }
 
 
 def execute_get_tasks(filter_str: str, user_ctx: dict) -> list[dict]:
@@ -86,7 +98,13 @@ def execute_schedule_day(
     target_date = date.fromisoformat(target_date_str)
 
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
-    tasks_raw = todoist_client.get_tasks("today")
+    # Use 'tomorrow' filter when scheduling tomorrow, otherwise 'today | overdue'
+    today = date.today()
+    task_filter = "tomorrow" if target_date > today else "today | overdue"
+    all_tasks = todoist_client.get_tasks(task_filter)
+    # Only schedulable tasks (have a duration label) go to the LLM.
+    # Tasks without duration_minutes have no time estimate — the LLM can't place them.
+    tasks_raw = [t for t in all_tasks if t.duration_minutes is not None]
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
@@ -286,10 +304,21 @@ def execute_onboard_confirm(draft_config: dict, user_ctx: dict) -> dict:
 
 # ── Anthropic tool schemas ─────────────────────────────────────────────────────
 
-TOOL_SCHEMAS = [
+TOOL_SCHEMAS = [  # onboard_scan/apply/confirm intentionally excluded — handled by /api/onboard/* HTTP routes
+    {
+        "name": "get_date",
+        "description": "Get the calendar date for today or a relative offset. Use offset_days=0 for today, 1 for tomorrow, -1 for yesterday, 7 for next week, etc.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "offset_days": {"type": "integer", "description": "0=today, 1=tomorrow, -1=yesterday, 7=one week from today, etc."}
+            },
+            "required": ["offset_days"],
+        },
+    },
     {
         "name": "get_tasks",
-        "description": "Fetch Todoist tasks. Use filter 'today' for today's tasks, 'p1' for priority-1, etc.",
+        "description": "Fetch Todoist tasks. Use only when the user asks to see their task list directly. Do NOT call before schedule_day — schedule_day fetches tasks internally.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -352,65 +381,17 @@ TOOL_SCHEMAS = [
         "description": "Return today's confirmed schedule from the database.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
-    {
-        "name": "onboard_scan",
-        "description": "Scan the last 14 days of Google Calendar to propose a schedule config. Use during onboarding.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "timezone": {"type": "string"},
-                "calendar_ids": {"type": "array", "items": {"type": "string"}},
-                "groq_api_key": {"type": "string"},
-            },
-            "required": ["timezone", "calendar_ids", "groq_api_key"],
-        },
-    },
-    {
-        "name": "onboard_apply",
-        "description": "Apply user Q&A answers to a draft config (Stage 2 of onboarding).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "draft_config": {"type": "object"},
-                "answers": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "field": {"type": "string"},
-                            "value": {"type": "string"},
-                        },
-                        "required": ["field", "value"],
-                    },
-                },
-            },
-            "required": ["draft_config", "answers"],
-        },
-    },
-    {
-        "name": "onboard_confirm",
-        "description": "Promote a draft config to live, saving it to the user's profile.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "draft_config": {"type": "object"}
-            },
-            "required": ["draft_config"],
-        },
-    },
 ]
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 TOOL_DISPATCH = {
+    "get_date":          lambda inp, ctx: execute_get_date(inp["offset_days"], ctx),
     "get_tasks":         lambda inp, ctx: execute_get_tasks(inp["filter_str"], ctx),
     "get_calendar":      lambda inp, ctx: execute_get_calendar(inp["target_date"], ctx),
     "schedule_day":      lambda inp, ctx: execute_schedule_day(inp["context_note"], inp["target_date"], ctx),
     "confirm_schedule":  lambda inp, ctx: execute_confirm_schedule(inp["schedule"], ctx),
     "push_task":         lambda inp, ctx: execute_push_task(inp["task_id"], inp["reason"], ctx),
     "get_status":        lambda inp, ctx: execute_get_status(ctx),
-    "onboard_scan":      lambda inp, ctx: execute_onboard_scan(inp["timezone"], inp["calendar_ids"], inp["groq_api_key"], ctx),
-    "onboard_apply":     lambda inp, ctx: execute_onboard_apply(inp["draft_config"], inp["answers"], ctx),
-    "onboard_confirm":   lambda inp, ctx: execute_onboard_confirm(inp["draft_config"], ctx),
 }
