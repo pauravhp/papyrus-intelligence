@@ -90,7 +90,7 @@ def test_execute_confirm_schedule_calls_gcal_and_todoist(user_ctx):
 
 def test_all_tool_schemas_are_valid():
     from api.services.agent_tools import TOOL_SCHEMAS
-    assert len(TOOL_SCHEMAS) == 10  # 6 scheduling tools + get_date; onboard tools in /api/onboard/* HTTP routes
+    assert len(TOOL_SCHEMAS) == 9  # removed log_project_session; onboard tools in /api/onboard/* HTTP routes
     for schema in TOOL_SCHEMAS:
         assert "name" in schema
         assert "description" in schema
@@ -98,67 +98,13 @@ def test_all_tool_schemas_are_valid():
         assert schema["input_schema"]["type"] == "object"
 
 
-def test_execute_get_projects_returns_list():
-    from api.services.agent_tools import execute_get_projects
-    sb = MagicMock()
-    sb.from_.return_value.select.return_value.eq.return_value.gt.return_value.order.return_value.execute.return_value.data = [
-        {
-            "id": 1, "project_name": "App Project", "total_budget_hours": 22.0,
-            "remaining_hours": 20.0, "session_min_minutes": 90, "session_max_minutes": 180,
-            "deadline": None, "priority": 3, "created_at": "x", "updated_at": "x",
-        }
-    ]
-    ctx = {"user_id": "u1", "supabase": sb}
-    result = execute_get_projects({}, ctx)
-    assert isinstance(result, list)
-    assert result[0]["project_name"] == "App Project"
-    assert "deadline_pressure" in result[0]
-
-
-def test_execute_log_project_session_decrements():
-    from api.services.agent_tools import execute_log_project_session
-    sb = MagicMock()
-    sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.single.return_value.execute.return_value.data = {
-        "remaining_hours": 20.0
-    }
-    sb.from_.return_value.update.return_value.eq.return_value.eq.return_value.select.return_value.single.return_value.execute.return_value.data = {
-        "id": 1, "project_name": "App", "total_budget_hours": 22.0,
-        "remaining_hours": 18.5, "session_min_minutes": 90, "session_max_minutes": 180,
-        "deadline": None, "priority": 3, "created_at": "x", "updated_at": "x",
-    }
-    ctx = {"user_id": "u1", "supabase": sb}
-    result = execute_log_project_session({"project_id": 1, "hours_worked": 1.5}, ctx)
-    assert result["remaining_hours"] == 18.5
-
-
-def test_execute_manage_project_create():
-    from api.services.agent_tools import execute_manage_project
-    sb = MagicMock()
-    sb.from_.return_value.insert.return_value.execute.return_value.data = [
-        {
-            "id": 2, "project_name": "GPU Study", "total_budget_hours": 10.0,
-            "remaining_hours": 10.0, "session_min_minutes": 45, "session_max_minutes": 60,
-            "deadline": None, "priority": 3, "created_at": "x", "updated_at": "x",
-        }
-    ]
-    ctx = {"user_id": "u1", "supabase": sb}
-    result = execute_manage_project({
-        "action": "create",
-        "name": "GPU Study",
-        "total_hours": 10.0,
-        "session_min": 45,
-        "session_max": 60,
-    }, ctx)
-    assert result["project_name"] == "GPU Study"
-
-
-def test_tool_schemas_include_project_tools():
+def test_tool_schemas_include_rhythm_tools():
     from api.services.agent_tools import TOOL_SCHEMAS
     names = [s["name"] for s in TOOL_SCHEMAS]
-    assert "get_projects" in names
-    assert "manage_project" in names
-    assert "log_project_session" in names
-    assert len(TOOL_SCHEMAS) == 10  # 7 existing + 3 new
+    assert "get_rhythms" in names
+    assert "manage_rhythm" in names
+    assert "log_project_session" not in names
+    assert "get_projects" not in names
 
 
 def test_schedule_day_injects_project_as_synthetic_task():
@@ -181,10 +127,10 @@ def test_schedule_day_injects_project_as_synthetic_task():
         "supabase": MagicMock(),
     }
 
-    project_row = {
-        "id": 7, "project_name": "App Side Project", "total_budget_hours": 22.0,
-        "remaining_hours": 20.0, "session_min_minutes": 90, "session_max_minutes": 180,
-        "deadline": "2026-05-01", "priority": 3, "created_at": "x", "updated_at": "x",
+    rhythm_row = {
+        "id": 7, "rhythm_name": "App Side Project",
+        "sessions_per_week": 2, "session_min_minutes": 90, "session_max_minutes": 180,
+        "end_date": None, "sort_order": 0, "created_at": "x", "updated_at": "x",
     }
 
     captured_tasks = []
@@ -197,7 +143,7 @@ def test_schedule_day_injects_project_as_synthetic_task():
          patch("api.services.agent_tools.get_events", return_value=[]), \
          patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
          patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
-         patch("api.services.agent_tools.get_active_projects", return_value=[{**project_row, "deadline_pressure": "at_risk"}]):
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[rhythm_row]):
         MockTodoist.return_value.get_tasks.return_value = []
         MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
         execute_schedule_day("", "2026-04-13", ctx)
@@ -205,11 +151,10 @@ def test_schedule_day_injects_project_as_synthetic_task():
     proj_tasks = [t for t in captured_tasks if t.id == "proj_7"]
     assert len(proj_tasks) == 1
     assert proj_tasks[0].content == "App Side Project"
-    assert proj_tasks[0].is_budget_task is True
+    assert proj_tasks[0].is_rhythm is True
     assert proj_tasks[0].session_max_minutes == 180
     assert proj_tasks[0].duration_minutes == 90  # session_min
-    assert proj_tasks[0].remaining_hours == 20.0
-    assert proj_tasks[0].deadline_pressure == "at_risk"
+    assert proj_tasks[0].sessions_per_week == 2
 
 
 def test_confirm_schedule_skips_todoist_for_project_tasks():

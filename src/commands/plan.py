@@ -407,7 +407,7 @@ def cmd_plan_day(context: dict, target_date: date) -> None:
                 duration_minutes=session_dur,
                 labels=["deep-work"],
                 is_inbox=False,
-                is_budget_task=True,
+                is_rhythm=True,
             )
             budget_task_objects.append(t)
             if pressure in ("critical", "at_risk"):

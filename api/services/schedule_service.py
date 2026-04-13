@@ -35,15 +35,10 @@ def _build_prompt(
 
     lines = []
     for t in tasks:
-        if t.is_budget_task and t.session_max_minutes:
+        if t.is_rhythm and t.session_max_minutes:
             dur_str = f"{t.duration_minutes}-{t.session_max_minutes}min"
-            pressure = f" [{t.deadline_pressure.upper()}]" if t.deadline_pressure else ""
-            remaining = f" remaining={t.remaining_hours:.1f}h" if t.remaining_hours is not None else ""
-            lines.append(
-                f"{t.id} {t.content[:50]} p{t.priority} {dur_str}{remaining}"
-                + (f" deadline={t.deadline}" if t.deadline else "")
-                + pressure
-            )
+            cadence = f" [{t.sessions_per_week}x/week]" if t.sessions_per_week else ""
+            lines.append(f"{t.id} {t.content[:50]} {dur_str}{cadence}")
         else:
             lines.append(
                 f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
@@ -72,7 +67,7 @@ Reply ONLY with JSON:
 
 - start_time/end_time: ISO 8601 with tz offset e.g. {target_date}T09:00:00-07:00
 - Every task in exactly one list. Tasks that don't fit go in pushed.
-- For project tasks (id starts with proj_): pick any duration within the shown range (e.g. 90-180min means schedule between 90 and 180 minutes)."""
+- For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room."""
 
 
 def _extract_json(text: str) -> str:

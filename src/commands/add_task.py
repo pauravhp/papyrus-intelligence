@@ -264,7 +264,7 @@ def cmd_add_task(context: dict, search_text: str, target_date: date) -> None:
                     duration_minutes=session_dur,
                     labels=["deep-work"],
                     is_inbox=False,
-                    is_budget_task=True,
+                    is_rhythm=True,
                 )
             )
 

@@ -13,6 +13,7 @@ Each execute_* function accepts (tool_inputs, user_ctx) where user_ctx is:
 }
 
 TOOL_SCHEMAS is the list passed to Anthropic messages.create(tools=...).
+9 tools total — onboard_scan/apply/confirm handled by /api/onboard/* HTTP routes.
 """
 
 from datetime import date, datetime, timedelta
@@ -22,7 +23,7 @@ from src.calendar_client import create_event, get_events
 from src.todoist_client import TodoistClient
 from api.services.schedule_service import schedule_day
 from src.scheduler import compute_free_windows
-from api.services.project_service import get_active_projects
+from api.services.rhythm_service import get_active_rhythms
 from src.models import TodoistTask as _TodoistTask
 
 
@@ -108,28 +109,27 @@ def execute_schedule_day(
     task_names: dict[str, str] = {t.id: t.content for t in all_tasks}
     # Only schedulable tasks (have a duration label) go to the LLM.
     tasks_raw = [t for t in all_tasks if t.duration_minutes is not None]
-    # Inject active project budgets as synthetic schedulable tasks
-    active_projects = get_active_projects(user_ctx["user_id"], user_ctx["supabase"])
-    for proj in active_projects:
+    # Inject active rhythms as synthetic schedulable tasks (sorted by sort_order asc)
+    active_rhythms = get_active_rhythms(user_ctx["user_id"], user_ctx["supabase"])
+    synthetic_rhythms = []
+    for rhythm in active_rhythms:
         synthetic = _TodoistTask(
-            id=f"proj_{proj['id']}",
-            content=proj["project_name"],
-            project_id="budget",
-            priority=int(proj["priority"]),
+            id=f"proj_{rhythm['id']}",
+            content=rhythm["rhythm_name"],
+            project_id="rhythm",
+            priority=0,
             due_datetime=None,
-            deadline=proj.get("deadline"),
-            duration_minutes=int(proj["session_min_minutes"]),  # min = conservative estimate
+            deadline=None,
+            duration_minutes=int(rhythm["session_min_minutes"]),
             labels=[],
             is_inbox=False,
-            is_budget_task=True,
-            session_max_minutes=int(proj["session_max_minutes"]),
-            remaining_hours=float(proj["remaining_hours"]),
-            deadline_pressure=proj.get("deadline_pressure"),
+            is_rhythm=True,
+            session_max_minutes=int(rhythm["session_max_minutes"]),
+            sessions_per_week=int(rhythm["sessions_per_week"]),
         )
-        tasks_raw.insert(0, synthetic)  # prepend so projects are scheduled first
-    # Add project synthetic names to lookup
-    for proj in active_projects:
-        task_names[f"proj_{proj['id']}"] = proj["project_name"]
+        task_names[f"proj_{rhythm['id']}"] = rhythm["rhythm_name"]
+        synthetic_rhythms.append(synthetic)
+    tasks_raw = synthetic_rhythms + tasks_raw
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
@@ -139,6 +139,9 @@ def execute_schedule_day(
 
     scheduled_tasks = todoist_client.get_todays_scheduled_tasks(target_date)
     free_windows = compute_free_windows(events, target_date, config, scheduled_tasks)
+    # Exclude already-scheduled tasks from LLM input — they block time via free_windows above
+    already_scheduled_ids = {t.id for t in scheduled_tasks}
+    tasks_raw = [t for t in tasks_raw if t.id not in already_scheduled_ids]
 
     result = schedule_day(
         tasks=tasks_raw,
@@ -335,63 +338,46 @@ def execute_onboard_confirm(draft_config: dict, user_ctx: dict) -> dict:
     return {"promoted": True}
 
 
-def execute_get_projects(_inp: dict, user_ctx: dict) -> list[dict]:
-    """Return active project budgets with deadline pressure. No LLM call."""
-    return get_active_projects(user_ctx["user_id"], user_ctx["supabase"])
+def execute_get_rhythms(_inp: dict, user_ctx: dict) -> list[dict]:
+    """Return active rhythms with session range and cadence. No LLM call."""
+    return get_active_rhythms(user_ctx["user_id"], user_ctx["supabase"])
 
 
-def execute_log_project_session(inp: dict, user_ctx: dict) -> dict:
+def execute_manage_rhythm(inp: dict, user_ctx: dict) -> dict:
     """
-    Manually decrement a project budget after actual work.
-    This is the ONLY budget decay path — confirm_schedule does not auto-decrement.
-    inp: {project_id: int, hours_worked: float}
+    CRUD for rhythms via natural language.
+    inp.action: "create" | "update" | "delete"
     """
-    from api.services.project_service import log_session
-    return log_session(
-        user_ctx["user_id"],
-        user_ctx["supabase"],
-        project_id=int(inp["project_id"]),
-        hours_worked=float(inp["hours_worked"]),
-    )
-
-
-def execute_manage_project(inp: dict, user_ctx: dict) -> dict:
-    """
-    CRUD for project budgets via natural language.
-    inp.action: "create" | "update" | "delete" | "reset"
-    """
-    from api.services.project_service import (
-        create_project, update_project, delete_project, reset_project,
+    from api.services.rhythm_service import (
+        create_rhythm, update_rhythm, delete_rhythm,
     )
     action = inp.get("action")
     uid = user_ctx["user_id"]
     sb = user_ctx["supabase"]
 
     if action == "create":
-        return create_project(
+        return create_rhythm(
             uid, sb,
             name=inp["name"],
-            total_hours=float(inp["total_hours"]),
+            sessions_per_week=int(inp["sessions_per_week"]),
             session_min=int(inp.get("session_min", 60)),
-            session_max=int(inp.get("session_max", 180)),
-            deadline=inp.get("deadline"),
-            priority=int(inp.get("priority", 3)),
+            session_max=int(inp.get("session_max", 120)),
+            end_date=inp.get("end_date"),
+            sort_order=int(inp.get("sort_order", 0)),
         )
     elif action == "update":
-        return update_project(
+        return update_rhythm(
             uid, sb,
-            project_id=int(inp["project_id"]),
+            rhythm_id=int(inp["rhythm_id"]),
+            sessions_per_week=inp.get("sessions_per_week"),
             session_min=inp.get("session_min"),
             session_max=inp.get("session_max"),
-            deadline=inp.get("deadline"),
-            priority=inp.get("priority"),
-            add_hours=inp.get("add_hours"),
+            end_date=inp.get("end_date"),
+            sort_order=inp.get("sort_order"),
         )
     elif action == "delete":
-        delete_project(uid, sb, int(inp["project_id"]))
-        return {"deleted": True, "project_id": inp["project_id"]}
-    elif action == "reset":
-        return reset_project(uid, sb, int(inp["project_id"]))
+        delete_rhythm(uid, sb, int(inp["rhythm_id"]))
+        return {"deleted": True, "rhythm_id": inp["rhythm_id"]}
     else:
         return {"error": f"Unknown action: {action}"}
 
@@ -476,37 +462,24 @@ TOOL_SCHEMAS = [  # onboard_scan/apply/confirm intentionally excluded — handle
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
-        "name": "get_projects",
-        "description": "Return all active project budgets with remaining hours and deadline pressure. Call this when scheduling to include project sessions automatically.",
+        "name": "get_rhythms",
+        "description": "Return all active rhythms with session range and cadence. Call this when the user asks about their rhythms or wants to see what recurring sessions are scheduled.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
-        "name": "log_project_session",
-        "description": "Manually log hours worked on a project, decrementing its budget. Call this when the user reports time spent on a project (e.g. 'I worked 1.5h on the App project today').",
+        "name": "manage_rhythm",
+        "description": "Create, update, or delete a rhythm. Use when the user describes a recurring weekly commitment they want to protect time for.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "project_id": {"type": "integer", "description": "The project id from get_projects"},
-                "hours_worked": {"type": "number", "description": "Hours actually worked (e.g. 1.5)"},
-            },
-            "required": ["project_id", "hours_worked"],
-        },
-    },
-    {
-        "name": "manage_project",
-        "description": "Create, update, delete, or reset a project budget via natural language.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {"type": "string", "enum": ["create", "update", "delete", "reset"]},
-                "project_id": {"type": "integer", "description": "Required for update/delete/reset"},
+                "action": {"type": "string", "enum": ["create", "update", "delete"]},
+                "rhythm_id": {"type": "integer", "description": "Required for update/delete"},
                 "name": {"type": "string", "description": "Required for create"},
-                "total_hours": {"type": "number", "description": "Required for create"},
+                "sessions_per_week": {"type": "integer", "description": "Required for create — how many sessions per week (e.g. 2)"},
                 "session_min": {"type": "integer", "description": "Min session minutes (default 60)"},
-                "session_max": {"type": "integer", "description": "Max session minutes (default 180)"},
-                "deadline": {"type": "string", "description": "ISO date e.g. 2026-05-01"},
-                "priority": {"type": "integer", "description": "4=P1, 3=P2, 2=P3, 1=P4"},
-                "add_hours": {"type": "number", "description": "Add hours to remaining (update only)"},
+                "session_max": {"type": "integer", "description": "Max session minutes (default 120)"},
+                "end_date": {"type": "string", "description": "Optional ISO date e.g. 2026-08-01 — soft end, rhythm stops being injected after this"},
+                "sort_order": {"type": "integer", "description": "Lower = scheduled first when multiple rhythms exist (default 0)"},
             },
             "required": ["action"],
         },
@@ -524,7 +497,6 @@ TOOL_DISPATCH = {
     "confirm_schedule":  lambda inp, ctx: execute_confirm_schedule(inp["schedule"], ctx),
     "push_task":         lambda inp, ctx: execute_push_task(inp["task_id"], inp["reason"], ctx),
     "get_status":        lambda inp, ctx: execute_get_status(ctx),
-    "get_projects":          lambda inp, ctx: execute_get_projects(inp, ctx),
-    "log_project_session":   lambda inp, ctx: execute_log_project_session(inp, ctx),
-    "manage_project":        lambda inp, ctx: execute_manage_project(inp, ctx),
+    "get_rhythms":       lambda inp, ctx: execute_get_rhythms(inp, ctx),
+    "manage_rhythm":     lambda inp, ctx: execute_manage_rhythm(inp, ctx),
 }

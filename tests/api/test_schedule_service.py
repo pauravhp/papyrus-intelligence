@@ -126,14 +126,13 @@ def test_build_prompt_shows_session_range_for_budget_task():
         project_id="none",
         priority=3,
         due_datetime=None,
-        deadline="2026-05-01",
+        deadline=None,
         duration_minutes=90,
         labels=[],
         is_inbox=False,
-        is_budget_task=True,
+        is_rhythm=True,
         session_max_minutes=180,
-        remaining_hours=20.0,
-        deadline_pressure="at_risk",
+        sessions_per_week=2,
     )
     window = FreeWindow(
         start=datetime(2026, 4, 13, 9, 0, tzinfo=tz),
@@ -143,6 +142,5 @@ def test_build_prompt_shows_session_range_for_budget_task():
     )
     prompt = _build_prompt([task], [window], {}, "", "2026-04-13")
     assert "90-180min" in prompt
-    assert "remaining=20.0h" in prompt
-    assert "[AT_RISK]" in prompt
+    assert "[2x/week]" in prompt
     assert "proj_1" in prompt
