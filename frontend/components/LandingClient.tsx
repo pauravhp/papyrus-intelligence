@@ -1,36 +1,56 @@
+// frontend/components/LandingClient.tsx
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ScanLine, Sparkles, CalendarCheck } from "lucide-react";
+import { ScanLine, CalendarCheck, MessageSquare } from "lucide-react";
+import InkWash from "./InkWash";
 
-// Load OrbField only on the client (no SSR — needs WebGL)
-const OrbField = dynamic(() => import("./OrbField"), {
-  ssr: false,
-  loading: () => <div className="w-full h-full" style={{ background: "#080810" }} />,
-});
-
-// ── Navigation ─────────────────────────────────────────────────────────────
+// ── Navigation ──────────────────────────────────────────────────────────────
 
 function Nav() {
   return (
     <nav
-      className="fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6 py-4"
       style={{
-        background:
-          "linear-gradient(to bottom, rgba(8,8,16,0.8) 0%, transparent 100%)",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "16px 32px",
+        background: "var(--bg)",
+        borderBottom: "1px solid var(--border)",
       }}
     >
       <span
-        className="font-display text-white text-xl tracking-tight"
-        style={{ letterSpacing: "-0.02em" }}
+        className="font-display"
+        style={{ fontSize: 20, color: "var(--text)", letterSpacing: "-0.01em" }}
       >
-        schedule for me
+        Papyrus
       </span>
       <Link
         href="/login"
-        className="text-sm text-white/70 hover:text-white border border-white/20 hover:border-white/40 rounded-lg px-4 py-1.5 transition-colors"
+        style={{
+          fontSize: 13,
+          color: "var(--text-muted)",
+          textDecoration: "none",
+          border: "1px solid var(--border-strong)",
+          borderRadius: 8,
+          padding: "6px 16px",
+          transition: "color 0.15s, border-color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLElement).style.color = "var(--text)";
+          (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.color = "var(--text-muted)";
+          (e.currentTarget as HTMLElement).style.borderColor =
+            "var(--border-strong)";
+        }}
       >
         Sign in
       </Link>
@@ -38,7 +58,7 @@ function Nav() {
   );
 }
 
-// ── Hero section ───────────────────────────────────────────────────────────
+// ── Hero ─────────────────────────────────────────────────────────────────────
 
 function Hero() {
   const scrollToHowItWorks = () => {
@@ -47,34 +67,36 @@ function Hero() {
 
   return (
     <section
-      className="relative h-screen overflow-hidden"
-      style={{ background: "#080810" }}
+      style={{
+        position: "relative",
+        height: "100vh",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        background: "var(--bg)",
+      }}
     >
-      {/* 3D canvas fills the entire hero */}
-      <div className="absolute inset-0">
-        <OrbField />
-      </div>
+      <InkWash />
 
-      {/* Radial gradient overlay for text legibility */}
       <div
-        className="absolute inset-0 pointer-events-none"
         style={{
-          background:
-            "radial-gradient(ellipse 70% 60% at 50% 50%, rgba(8,8,16,0.45) 0%, transparent 100%)",
+          position: "relative",
+          zIndex: 10,
+          maxWidth: 680,
+          padding: "0 48px",
         }}
-      />
-
-      {/* Hero text */}
-      <div className="relative z-10 flex flex-col items-center justify-center h-full text-center px-4">
+      >
         <motion.h1
           initial={{ opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          className="font-display text-white leading-tight"
+          className="font-display"
           style={{
-            fontSize: "clamp(2.5rem, 6vw, 4.5rem)",
-            letterSpacing: "-0.03em",
-            textShadow: "0 0 60px rgba(99,102,241,0.3)",
+            fontSize: "clamp(2.5rem, 6vw, 5rem)",
+            lineHeight: 1.1,
+            letterSpacing: "-0.02em",
+            color: "var(--text)",
+            margin: 0,
           }}
         >
           Your schedule,
@@ -86,40 +108,76 @@ function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-6 max-w-md text-white/60"
-          style={{ fontSize: "clamp(1rem, 2vw, 1.125rem)", lineHeight: 1.65 }}
+          style={{
+            marginTop: 24,
+            maxWidth: "58ch",
+            color: "var(--text-muted)",
+            fontSize: "clamp(1rem, 2vw, 1.1rem)",
+            lineHeight: 1.65,
+          }}
         >
-          AI-powered scheduling that learns your patterns, respects your energy,
-          and plans your day — automatically.
+          A calm scheduling coach that plans your day, respects your energy,
+          and adapts gracefully when things slip.
         </motion.p>
 
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="mt-10 flex items-center gap-3 flex-wrap justify-center"
+          style={{ marginTop: 36, display: "flex", gap: 12, flexWrap: "wrap" }}
         >
           <Link
             href="/login"
-            className="inline-flex items-center justify-center px-6 py-3 rounded-xl text-sm font-medium text-white transition-all"
             style={{
-              background: "#6366f1",
-              boxShadow: "0 0 24px rgba(99,102,241,0.45)",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "11px 28px",
+              borderRadius: 8,
+              background: "var(--accent)",
+              color: "var(--bg)",
+              fontSize: 14,
+              textDecoration: "none",
+              fontFamily: "var(--font-literata)",
+              transition: "background 0.15s",
             }}
             onMouseEnter={(e) =>
-              ((e.currentTarget as HTMLElement).style.boxShadow =
-                "0 0 36px rgba(99,102,241,0.65)")
+              ((e.currentTarget as HTMLElement).style.background =
+                "var(--accent-hover)")
             }
             onMouseLeave={(e) =>
-              ((e.currentTarget as HTMLElement).style.boxShadow =
-                "0 0 24px rgba(99,102,241,0.45)")
+              ((e.currentTarget as HTMLElement).style.background =
+                "var(--accent)")
             }
           >
             Get started
           </Link>
           <button
             onClick={scrollToHowItWorks}
-            className="inline-flex items-center justify-center px-6 py-3 rounded-xl text-sm font-medium text-white/70 hover:text-white border border-white/20 hover:border-white/40 transition-colors"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "11px 28px",
+              borderRadius: 8,
+              background: "transparent",
+              color: "var(--text-muted)",
+              border: "1px solid var(--border-strong)",
+              fontSize: 14,
+              cursor: "pointer",
+              fontFamily: "var(--font-literata)",
+              transition: "color 0.15s, border-color 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.color = "var(--text)";
+              (e.currentTarget as HTMLElement).style.borderColor =
+                "var(--accent)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.color = "var(--text-muted)";
+              (e.currentTarget as HTMLElement).style.borderColor =
+                "var(--border-strong)";
+            }}
           >
             See how it works
           </button>
@@ -129,33 +187,45 @@ function Hero() {
       {/* Scroll indicator */}
       <motion.div
         initial={{ opacity: 0 }}
-        animate={{ opacity: 0.4 }}
+        animate={{ opacity: 0.35 }}
         transition={{ delay: 1.2, duration: 0.6 }}
-        className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1"
+        style={{
+          position: "absolute",
+          bottom: 32,
+          left: "50%",
+          transform: "translateX(-50%)",
+        }}
       >
-        <div className="w-px h-8 bg-white/30 animate-pulse" />
+        <div
+          style={{
+            width: 1,
+            height: 32,
+            background: "var(--text-muted)",
+            animation: "pulse 2s ease-in-out infinite",
+          }}
+        />
       </motion.div>
     </section>
   );
 }
 
-// ── How it works ──────────────────────────────────────────────────────────
+// ── How it works ──────────────────────────────────────────────────────────────
 
 const STEPS = [
   {
     icon: ScanLine,
     title: "Connect your calendar",
-    body: "Link Google Calendar in one click. We read your events and learn your existing commitments and patterns.",
+    body: "Link Google Calendar in one click. Papyrus reads your events and learns your existing commitments and patterns.",
   },
   {
-    icon: Sparkles,
-    title: "AI learns your patterns",
-    body: "Our LLM pipeline studies your energy, deep-work windows, and scheduling habits to understand how you actually work.",
+    icon: MessageSquare,
+    title: "Chat to plan",
+    body: "Each morning, describe your day in plain language — energy, context, constraints. Papyrus schedules around what matters.",
   },
   {
     icon: CalendarCheck,
-    title: "Your day, planned",
-    body: "Every morning, get a daily plan that slots your tasks into the right windows — automatically written back to Todoist.",
+    title: "Confirm, done",
+    body: "Review the proposed schedule and confirm. Events are written directly to your calendar. No syncing, no guessing.",
   },
 ];
 
@@ -163,17 +233,23 @@ function HowItWorks() {
   return (
     <section
       id="how-it-works"
-      className="py-24 px-6"
-      style={{ background: "#080810" }}
+      style={{ padding: "96px 48px", background: "var(--surface)" }}
     >
-      <div className="max-w-5xl mx-auto">
+      <div style={{ maxWidth: 960, margin: "0 auto" }}>
         <motion.p
           initial={{ opacity: 0, y: 16 }}
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           viewport={{ once: true }}
-          className="text-center text-xs font-medium tracking-widest uppercase mb-4"
-          style={{ color: "#6366f1" }}
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "var(--accent)",
+            marginBottom: 16,
+          }}
         >
           How it works
         </motion.p>
@@ -183,16 +259,25 @@ function HowItWorks() {
           whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.05 }}
           viewport={{ once: true }}
-          className="font-display text-white text-center mb-16"
+          className="font-display"
           style={{
             fontSize: "clamp(1.75rem, 4vw, 2.5rem)",
-            letterSpacing: "-0.025em",
+            letterSpacing: "-0.02em",
+            textAlign: "center",
+            color: "var(--text)",
+            marginBottom: 64,
           }}
         >
-          Three steps to a smarter day
+          Three steps to a calmer day
         </motion.h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 24,
+          }}
+        >
           {STEPS.map((step, i) => {
             const Icon = step.icon;
             return (
@@ -200,37 +285,54 @@ function HowItWorks() {
                 key={step.title}
                 initial={{ opacity: 0, y: 24 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: i * 0.12 }}
+                transition={{ duration: 0.6, delay: i * 0.1 }}
                 viewport={{ once: true }}
-                className="relative rounded-2xl p-6 flex flex-col gap-4"
                 style={{
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
+                  position: "relative",
+                  background: "var(--bg)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: "28px 24px",
                 }}
               >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center"
-                  style={{ background: "rgba(99,102,241,0.15)" }}
+                <Icon
+                  size={20}
+                  strokeWidth={1.5}
+                  style={{ color: "var(--accent)", marginBottom: 16 }}
+                />
+                <h3
+                  className="font-display"
+                  style={{
+                    fontSize: 18,
+                    color: "var(--text)",
+                    marginBottom: 10,
+                    letterSpacing: "-0.01em",
+                  }}
                 >
-                  <Icon size={20} color="#6366f1" strokeWidth={1.5} />
-                </div>
-                <div>
-                  <h3
-                    className="font-display text-white text-lg mb-2"
-                    style={{ letterSpacing: "-0.015em" }}
-                  >
-                    {step.title}
-                  </h3>
-                  <p
-                    className="text-sm leading-relaxed"
-                    style={{ color: "#64748b" }}
-                  >
-                    {step.body}
-                  </p>
-                </div>
+                  {step.title}
+                </h3>
+                <p
+                  style={{
+                    fontSize: 14,
+                    lineHeight: 1.65,
+                    color: "var(--text-muted)",
+                    maxWidth: "48ch",
+                  }}
+                >
+                  {step.body}
+                </p>
                 <span
-                  className="absolute top-5 right-5 font-display text-5xl font-bold select-none"
-                  style={{ color: "rgba(255,255,255,0.04)" }}
+                  className="font-display"
+                  style={{
+                    position: "absolute",
+                    top: 20,
+                    right: 20,
+                    fontSize: 56,
+                    lineHeight: 1,
+                    color: "var(--border)",
+                    userSelect: "none",
+                    pointerEvents: "none",
+                  }}
                 >
                   {i + 1}
                 </span>
@@ -243,44 +345,56 @@ function HowItWorks() {
   );
 }
 
-// ── CTA strip ─────────────────────────────────────────────────────────────
+// ── CTA strip ─────────────────────────────────────────────────────────────────
 
 function CTAStrip() {
   return (
     <section
-      className="py-24 px-6 text-center"
-      style={{ background: "#080810" }}
+      style={{
+        padding: "96px 48px",
+        textAlign: "center",
+        background: "var(--bg)",
+      }}
     >
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7 }}
         viewport={{ once: true }}
-        className="max-w-xl mx-auto"
+        style={{ maxWidth: 560, margin: "0 auto" }}
       >
         <h2
-          className="font-display text-white mb-6"
+          className="font-display"
           style={{
             fontSize: "clamp(1.75rem, 4vw, 2.25rem)",
-            letterSpacing: "-0.025em",
+            letterSpacing: "-0.02em",
+            color: "var(--text)",
+            marginBottom: 28,
           }}
         >
           Ready to take back your time?
         </h2>
         <Link
           href="/login"
-          className="inline-flex items-center justify-center px-8 py-3.5 rounded-xl text-sm font-medium text-white transition-all"
           style={{
-            background: "#6366f1",
-            boxShadow: "0 0 24px rgba(99,102,241,0.4)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "12px 36px",
+            borderRadius: 8,
+            background: "var(--accent)",
+            color: "var(--bg)",
+            fontSize: 14,
+            textDecoration: "none",
+            fontFamily: "var(--font-literata)",
+            transition: "background 0.15s",
           }}
           onMouseEnter={(e) =>
-            ((e.currentTarget as HTMLElement).style.boxShadow =
-              "0 0 40px rgba(99,102,241,0.6)")
+            ((e.currentTarget as HTMLElement).style.background =
+              "var(--accent-hover)")
           }
           onMouseLeave={(e) =>
-            ((e.currentTarget as HTMLElement).style.boxShadow =
-              "0 0 24px rgba(99,102,241,0.4)")
+            ((e.currentTarget as HTMLElement).style.background = "var(--accent)")
           }
         >
           Start for free
@@ -290,11 +404,11 @@ function CTAStrip() {
   );
 }
 
-// ── Root export ────────────────────────────────────────────────────────────
+// ── Root export ───────────────────────────────────────────────────────────────
 
 export default function LandingClient() {
   return (
-    <main className="flex flex-col">
+    <main style={{ display: "flex", flexDirection: "column" }}>
       <Nav />
       <Hero />
       <HowItWorks />
