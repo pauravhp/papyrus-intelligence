@@ -159,3 +159,54 @@ def test_tool_schemas_include_project_tools():
     assert "manage_project" in names
     assert "log_project_session" in names
     assert len(TOOL_SCHEMAS) == 10  # 7 existing + 3 new
+
+
+def test_schedule_day_injects_project_as_synthetic_task():
+    """Projects with remaining hours appear in schedule_day input as proj_<id> tasks."""
+    from api.services.agent_tools import execute_schedule_day
+    from unittest.mock import MagicMock, patch
+
+    ctx = {
+        "config": {
+            "user": {"timezone": "America/Vancouver"},
+            "calendar_ids": [],
+            "sleep": {},
+            "rules": {"hard": [], "soft": []},
+        },
+        "todoist_api_key": "tok",
+        "anthropic_api_key": "sk-ant",
+        "groq_api_key": None,
+        "gcal_service": MagicMock(),
+        "user_id": "u1",
+        "supabase": MagicMock(),
+    }
+
+    project_row = {
+        "id": 7, "project_name": "App Side Project", "total_budget_hours": 22.0,
+        "remaining_hours": 20.0, "session_min_minutes": 90, "session_max_minutes": 180,
+        "deadline": "2026-05-01", "priority": 3, "created_at": "x", "updated_at": "x",
+    }
+
+    captured_tasks = []
+
+    def fake_schedule_day(tasks, free_windows, config, context_note, **kwargs):
+        captured_tasks.extend(tasks)
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
+         patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.services.agent_tools.get_active_projects", return_value=[{**project_row, "deadline_pressure": "at_risk"}]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        execute_schedule_day("", "2026-04-13", ctx)
+
+    proj_tasks = [t for t in captured_tasks if t.id == "proj_7"]
+    assert len(proj_tasks) == 1
+    assert proj_tasks[0].content == "App Side Project"
+    assert proj_tasks[0].is_budget_task is True
+    assert proj_tasks[0].session_max_minutes == 180
+    assert proj_tasks[0].duration_minutes == 90  # session_min
+    assert proj_tasks[0].remaining_hours == 20.0
+    assert proj_tasks[0].deadline_pressure == "at_risk"

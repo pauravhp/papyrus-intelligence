@@ -22,6 +22,8 @@ from src.calendar_client import create_event, get_events
 from src.todoist_client import TodoistClient
 from api.services.schedule_service import schedule_day
 from src.scheduler import compute_free_windows
+from api.services.project_service import get_active_projects
+from src.models import TodoistTask as _TodoistTask
 
 
 # ── Python implementations ─────────────────────────────────────────────────────
@@ -106,6 +108,28 @@ def execute_schedule_day(
     task_names: dict[str, str] = {t.id: t.content for t in all_tasks}
     # Only schedulable tasks (have a duration label) go to the LLM.
     tasks_raw = [t for t in all_tasks if t.duration_minutes is not None]
+    # Inject active project budgets as synthetic schedulable tasks
+    active_projects = get_active_projects(user_ctx["user_id"], user_ctx["supabase"])
+    for proj in active_projects:
+        synthetic = _TodoistTask(
+            id=f"proj_{proj['id']}",
+            content=proj["project_name"],
+            project_id="budget",
+            priority=int(proj["priority"]),
+            due_datetime=None,
+            deadline=proj.get("deadline"),
+            duration_minutes=int(proj["session_min_minutes"]),  # min = conservative estimate
+            labels=[],
+            is_inbox=False,
+            is_budget_task=True,
+            session_max_minutes=int(proj["session_max_minutes"]),
+            remaining_hours=float(proj["remaining_hours"]),
+            deadline_pressure=proj.get("deadline_pressure"),
+        )
+        tasks_raw.insert(0, synthetic)  # prepend so projects are scheduled first
+    # Add project synthetic names to lookup
+    for proj in active_projects:
+        task_names[f"proj_{proj['id']}"] = proj["project_name"]
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
@@ -311,7 +335,6 @@ def execute_onboard_confirm(draft_config: dict, user_ctx: dict) -> dict:
 
 def execute_get_projects(_inp: dict, user_ctx: dict) -> list[dict]:
     """Return active project budgets with deadline pressure. No LLM call."""
-    from api.services.project_service import get_active_projects
     return get_active_projects(user_ctx["user_id"], user_ctx["supabase"])
 
 
