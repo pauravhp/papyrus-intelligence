@@ -146,3 +146,92 @@ def test_scan_raises_400_if_no_llm_key(client, monkeypatch):
         )
 
     assert resp.status_code == 400
+
+
+def test_scan_400_on_gcal_token_refresh_failure(client, monkeypatch):
+    """scan returns 400 if GCal token refresh fails (RuntimeError)."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={
+            "google_credentials": {"token": "tok"},
+            "groq_api_key": "enc_groq",
+            "anthropic_api_key": None,
+        }
+    )
+    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.set_encryption_key"), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials",
+               side_effect=RuntimeError("Token expired")):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/Vancouver", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 400
+    assert "GCal token invalid" in resp.json()["detail"]
+
+
+def test_scan_502_on_llm_json_error(client, monkeypatch):
+    """scan returns 502 if LLM call raises json.JSONDecodeError."""
+    import json as _json
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={
+            "google_credentials": {"token": "tok"},
+            "groq_api_key": "enc_groq",
+            "anthropic_api_key": None,
+        }
+    )
+    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.set_encryption_key"), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials",
+               return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._groq_json_call",
+               side_effect=_json.JSONDecodeError("bad", "", 0)):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/Vancouver", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 502
+
+
+def test_scan_502_on_non_dict_llm_response(client, monkeypatch):
+    """scan returns 502 if LLM returns a non-dict (e.g., a list)."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={
+            "google_credentials": {"token": "tok"},
+            "groq_api_key": "enc_groq",
+            "anthropic_api_key": None,
+        }
+    )
+    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.set_encryption_key"), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials",
+               return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._groq_json_call", return_value=["not", "a", "dict"]):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/Vancouver", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 502

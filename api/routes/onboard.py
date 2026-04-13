@@ -5,7 +5,6 @@ POST /api/onboard/scan              — 14-day GCal scan → proposed config
 POST /api/onboard/promote           — save final config to users.config
 """
 
-import copy
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -19,7 +18,7 @@ from api.auth import get_current_user
 from api.config import settings
 from api.db import set_encryption_key, supabase
 from src.calendar_client import WRITE_SCOPES, build_gcal_service_from_credentials, get_events
-from src.llm import _groq_json_call
+from src.llm import _extract_json, _groq_json_call
 from src.onboard_patterns import build_pattern_summary
 from src.prompts.onboard import build_onboard_prompt
 
@@ -115,22 +114,31 @@ def _llm_json_call_onboard(
         return _groq_json_call(groq_client, ONBOARD_MODEL, messages, description)
     elif anthropic_key:
         import anthropic as ant
-        import re
 
         client = ant.Anthropic(api_key=anthropic_key)
         system = next((m["content"] for m in messages if m["role"] == "system"), "")
         user_msgs = [m for m in messages if m["role"] != "system"]
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
-            system=system,
-            messages=user_msgs,
-        )
-        raw = resp.content[0].text.strip()
-        if "```" in raw:
-            raw = re.sub(r"^```(?:json)?\s*\n?", "", raw, flags=re.MULTILINE)
-            raw = re.sub(r"\n?```\s*$", "", raw).strip()
-        return json.loads(raw)
+        last_content: str = ""
+        for attempt in range(1, 3):
+            try:
+                resp = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=4096,
+                    system=system,
+                    messages=user_msgs,
+                )
+                last_content = resp.content[0].text or ""
+                cleaned = _extract_json(last_content)
+                return json.loads(cleaned)
+            except json.JSONDecodeError:
+                if attempt < 2:
+                    print(
+                        f"[LLM] Attempt 1 JSON parse failed for '{description}' (Anthropic) — retrying…"
+                    )
+                    continue
+                print(f"\n[LLM] CRITICAL: both attempts failed for '{description}' (Anthropic)")
+                print(f"[LLM] ── RAW RESPONSE ──\n{last_content}")
+                raise
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="No LLM API key configured. Complete setup and add a Groq or Anthropic key.",
