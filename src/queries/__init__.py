@@ -1,21 +1,8 @@
 """
 Re-exports all query functions for clean imports:
-    from src.queries import insert_task_history, get_all_active_budgets, ...
+    from src.queries import insert_task_history, ...
 """
 
-from src.queries.budgets import (
-    add_to_budget,
-    compute_deadline_pressure,
-    create_project_budget,
-    decrement_budget,
-    delete_project_budget,
-    find_budget_by_name,
-    get_all_active_budgets,
-    get_budget_by_name,
-    get_budget_by_task_id,
-    reset_project_budget_hours,
-    update_budget_fields,
-)
 from src.queries.schedule_log import (
     compute_quality_score,
     delete_schedule_log_for_date,
@@ -51,18 +38,6 @@ from src.queries.task_history_writes import (
 )
 
 __all__ = [
-    # budgets
-    "add_to_budget",
-    "compute_deadline_pressure",
-    "create_project_budget",
-    "decrement_budget",
-    "delete_project_budget",
-    "find_budget_by_name",
-    "get_all_active_budgets",
-    "get_budget_by_name",
-    "get_budget_by_task_id",
-    "reset_project_budget_hours",
-    "update_budget_fields",
     # schedule_log
     "compute_quality_score",
     "delete_schedule_log_for_date",
