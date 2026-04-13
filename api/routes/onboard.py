@@ -78,3 +78,160 @@ def save_credentials(
             raise HTTPException(status_code=503, detail="credential store unavailable")
 
     return SaveCredentialsResponse(success=True)
+
+
+# ── scan ──────────────────────────────────────────────────────────────────────
+
+
+class ScanRequest(BaseModel):
+    timezone: str
+    calendar_ids: list[str] = []
+
+
+class ScanResponse(BaseModel):
+    proposed_config: dict
+    questions: list
+
+
+def _decrypt_key(enc: str | None) -> str | None:
+    """Decrypt a single field from Supabase. Returns None if enc is None/empty."""
+    if not enc:
+        return None
+    try:
+        return supabase.rpc("decrypt_field", {"ciphertext": enc}).execute().data
+    except Exception:
+        return None
+
+
+def _llm_json_call_onboard(
+    messages: list[dict],
+    description: str,
+    groq_key: str | None,
+    anthropic_key: str | None,
+) -> dict:
+    """Call LLM for JSON output. Prefers Groq; falls back to Anthropic."""
+    if groq_key:
+        groq_client = Groq(api_key=groq_key)
+        return _groq_json_call(groq_client, ONBOARD_MODEL, messages, description)
+    elif anthropic_key:
+        import anthropic as ant
+        import re
+
+        client = ant.Anthropic(api_key=anthropic_key)
+        system = next((m["content"] for m in messages if m["role"] == "system"), "")
+        user_msgs = [m for m in messages if m["role"] != "system"]
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            system=system,
+            messages=user_msgs,
+        )
+        raw = resp.content[0].text.strip()
+        if "```" in raw:
+            raw = re.sub(r"^```(?:json)?\s*\n?", "", raw, flags=re.MULTILINE)
+            raw = re.sub(r"\n?```\s*$", "", raw).strip()
+        return json.loads(raw)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="No LLM API key configured. Complete setup and add a Groq or Anthropic key.",
+    )
+
+
+@router.post("/scan", response_model=ScanResponse)
+def onboard_scan(
+    body: ScanRequest,
+    user: dict = Depends(get_current_user),
+) -> ScanResponse:
+    """
+    Scan the last 14 days of Google Calendar to propose a schedule config.
+    Reads google_credentials + LLM key from Supabase — no secrets in the request body.
+    """
+    user_id: str = user["sub"]
+
+    row_result = (
+        supabase.from_("users")
+        .select("google_credentials, groq_api_key, anthropic_api_key")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    if not row_result.data:
+        raise HTTPException(status_code=400, detail="User not found.")
+
+    row = row_result.data
+    creds_data: dict | None = row.get("google_credentials")
+    if not creds_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Calendar not connected. Complete OAuth at /auth/google first.",
+        )
+
+    set_encryption_key()
+    groq_key = _decrypt_key(row.get("groq_api_key"))
+    anthropic_key = _decrypt_key(row.get("anthropic_api_key"))
+
+    if not groq_key and not anthropic_key:
+        raise HTTPException(
+            status_code=400,
+            detail="No LLM API key found. Re-run setup and provide a Groq or Anthropic key.",
+        )
+
+    # Build GCal service
+    try:
+        gcal_service, refreshed = build_gcal_service_from_credentials(
+            creds_data, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+        )
+        if refreshed:
+            supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=f"GCal token invalid: {exc}")
+
+    # Load template
+    try:
+        with open(TEMPLATE_PATH) as f:
+            template: dict = json.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="context.template.json not found on server.")
+
+    context_for_prompt: dict = {
+        "user": {"timezone": body.timezone},
+        "calendar_ids": body.calendar_ids,
+        **{k: v for k, v in template.items() if k not in ("user", "calendar_ids")},
+    }
+
+    # Scan 14 days
+    today = date.today()
+    start_date = today - timedelta(days=DAYS_TO_SCAN - 1)
+    events_by_date: dict = {}
+    all_events: list = []
+
+    for i in range(DAYS_TO_SCAN):
+        target = start_date + timedelta(days=i)
+        try:
+            day_events = get_events(
+                target_date=target,
+                timezone_str=body.timezone,
+                extra_calendar_ids=body.calendar_ids,
+                service=gcal_service,
+            )
+            events_by_date[target] = day_events
+            all_events.extend(day_events)
+        except Exception as exc:
+            print(f"[onboard/scan] Warning: could not fetch {target}: {exc}")
+            events_by_date[target] = []
+
+    patterns = build_pattern_summary(events_by_date, all_events)
+    messages = build_onboard_prompt(patterns, context_for_prompt)
+
+    try:
+        raw = _llm_json_call_onboard(messages, "onboard_scan", groq_key, anthropic_key)
+    except (RuntimeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}")
+
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=502, detail="Unexpected LLM response shape.")
+
+    return ScanResponse(
+        proposed_config=raw.get("proposed_config") or {},
+        questions=raw.get("questions_for_stage_2") or [],
+    )
