@@ -102,6 +102,10 @@ def google_oauth_start(
     navigation does not support custom request headers. The JWT is validated
     immediately and never forwarded to Google — only a signed, opaque state
     token carrying the user_id is included in the consent URL.
+
+    google-auth-oauthlib >= 1.2 defaults to autogenerate_code_verifier=True,
+    so we generate the PKCE verifier here, store it in Supabase, and retrieve
+    it in the callback — the two Flow objects cannot share state otherwise.
     """
     user = verify_token(token)
     user_id: str = user["sub"]
@@ -112,6 +116,12 @@ def google_oauth_start(
         prompt="consent",   # force refresh_token on every grant
         state=_sign_state(user_id),
     )
+
+    # Persist code_verifier so the callback can complete the PKCE exchange.
+    supabase.from_("users").update(
+        {"oauth_code_verifier": flow.code_verifier}
+    ).eq("id", user_id).execute()
+
     return RedirectResponse(url=auth_url, status_code=302)
 
 
@@ -136,7 +146,22 @@ def google_oauth_callback(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    flow = Flow.from_client_config(_client_config(), scopes=_SCOPES, redirect_uri=_REDIRECT_URI)
+    # Retrieve the PKCE code_verifier stored during google_oauth_start.
+    row = (
+        supabase.from_("users")
+        .select("oauth_code_verifier")
+        .eq("id", user_id)
+        .maybeSingle()
+        .execute()
+    )
+    code_verifier = (row.data or {}).get("oauth_code_verifier")
+
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=_SCOPES,
+        redirect_uri=_REDIRECT_URI,
+        code_verifier=code_verifier,
+    )
     try:
         flow.fetch_token(code=code)
     except Exception as exc:
@@ -144,6 +169,11 @@ def google_oauth_callback(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Token exchange failed: {exc}",
         ) from exc
+
+    # Clear the one-time verifier now that the exchange is complete.
+    supabase.from_("users").update(
+        {"oauth_code_verifier": None}
+    ).eq("id", user_id).execute()
 
     creds_dict = json.loads(flow.credentials.to_json())
 
