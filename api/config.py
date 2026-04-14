@@ -13,13 +13,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_SECRET_KEY: str   # sb_secret_... from Settings → API Keys
-    ENCRYPTION_KEY: str
+    ENCRYPTION_KEY: str        # used for HMAC state signing in OAuth flows
+
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
-    # Dev fallback keys — used when Supabase-stored keys are absent
-    ANTHROPIC_API_KEY: str | None = None
-    GROQ_API_KEY: str | None = None
-    TODOIST_API_KEY: str | None = None
+    TODOIST_CLIENT_ID: str        # new — required
+    TODOIST_CLIENT_SECRET: str    # new — required
+    ANTHROPIC_API_KEY: str        # now required (was Optional)
 
     model_config = SettingsConfigDict(
         env_file=".env",

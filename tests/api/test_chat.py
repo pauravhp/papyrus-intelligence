@@ -4,6 +4,9 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
+os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-client-id")
+os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-client-secret")
 
 from unittest.mock import MagicMock, patch
 import pytest
