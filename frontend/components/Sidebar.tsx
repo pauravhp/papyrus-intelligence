@@ -3,17 +3,18 @@
 
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, CalendarDays, Settings2, X, Sun, Moon } from "lucide-react";
+import { MessageSquare, CalendarDays, Activity, Settings2, X, Sun, Moon, LogOut } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ConfigCard from "@/components/ConfigCard";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
-  { icon: MessageSquare, label: "Chat",  href: "/dashboard" },
-  { icon: CalendarDays,  label: "Today", href: "/dashboard/today" },
+  { icon: MessageSquare, label: "Chat",    href: "/dashboard" },
+  { icon: CalendarDays,  label: "Today",   href: "/dashboard/today" },
+  { icon: Activity,      label: "Rhythms", href: "/dashboard/rhythms" },
 ] as const;
 
 const ICON_BTN: React.CSSProperties = {
@@ -31,11 +32,17 @@ const ICON_BTN: React.CSSProperties = {
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, toggle } = useTheme();
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
   const handleOpenPrefs = async () => {
     if (!config) {
@@ -95,6 +102,17 @@ export default function Sidebar() {
         })}
 
         <div style={{ flex: 1 }} />
+
+        {/* Sign out */}
+        <motion.button
+          onClick={handleSignOut}
+          title="Sign out"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.92 }}
+          style={{ ...ICON_BTN, color: "var(--text-muted)" }}
+        >
+          <LogOut size={18} />
+        </motion.button>
 
         {/* Theme toggle */}
         <motion.button
