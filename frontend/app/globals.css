@@ -136,3 +136,12 @@ body {
   background-size: 150px 150px;
   pointer-events: none;
 }
+
+/* ── Today view responsive layout ──────────────────────────────────────── */
+.today-desktop { display: flex; }
+.today-mobile  { display: none; }
+
+@media (max-width: 767px) {
+  .today-desktop { display: none; }
+  .today-mobile  { display: block; }
+}
