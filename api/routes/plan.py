@@ -5,40 +5,30 @@ Authenticated. Runs the full scheduling pipeline for a given date and returns
 the proposed schedule JSON. No Todoist write-back — that comes in a follow-up
 /api/plan-day/confirm route (not yet implemented).
 
-Pipeline mirrors cmd_plan_day() in src/commands/plan.py:
+Pipeline:
   GCal → Todoist → filter buckets → compute_free_windows →
   LLM Step 1 (enrich) → LLM Step 2 (schedule) → pack_schedule
 
-Differences from the CLI:
-- Groq client uses the user's stored groq_api_key (not env var), so we call
-  _groq_json_call directly with a per-user client instead of enrich_tasks()
-  / generate_schedule() which both instantiate Groq() from the environment.
-- Todoist client uses the user's stored todoist_api_key from Supabase.
-- Google Calendar still uses local token.json (per-user GCal OAuth is future work).
-- SQLite-backed features (budget tasks, auto-sync, schedule_log) are skipped
-  for now — the web product will migrate these to Supabase tables.
-
-Decryption note: Supabase PostgREST issues each RPC call in its own transaction,
-so calling set_config() then decrypt_field() in separate HTTP calls is not
-reliable in transaction-pooling mode. Production fix: add a SQL wrapper function
-`get_user_secrets(user_uuid)` that does SET + SELECT in one transaction.
-For now, encrypted fields fall back to environment variables if decryption fails.
+Credentials:
+- Todoist: OAuth access token loaded from users.todoist_oauth_token
+- LLM: server-side ANTHROPIC_API_KEY from settings
+- GCal: per-user OAuth credentials from users.google_credentials
 """
 
 import json
-import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import anthropic
 from fastapi import APIRouter, Depends, HTTPException, status
-from groq import Groq
 from pydantic import BaseModel
 
 from api.auth import get_current_user
-from api.db import set_encryption_key, supabase
+from api.config import settings
+from api.db import supabase
 from src.calendar_client import get_events
-from src.llm import _groq_json_call, ENRICH_MODEL, SCHEDULE_MODEL
+from src.llm import _anthropic_json_call, ANTHROPIC_SCHEDULE_MODEL
 from src.models import TodoistTask
 from src.prompts.enrich import build_enrich_prompt
 from src.prompts.schedule import build_schedule_prompt
@@ -62,24 +52,6 @@ def _load_prod_science() -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="productivity_science.json not found on server",
         )
-
-
-def _decrypt_field(ciphertext: str | None) -> str | None:
-    """
-    Decrypt a single pgcrypto-encrypted column value via the decrypt_field() SQL function.
-
-    Requires set_encryption_key() to have been called first in the same Postgres session.
-    In production with a connection pool, replace this with a single wrapper RPC that
-    does SET + SELECT atomically (see module docstring).
-    """
-    if not ciphertext:
-        return None
-    try:
-        result = supabase.rpc("decrypt_field", {"ciphertext": ciphertext}).execute()
-        return result.data
-    except Exception as exc:
-        print(f"[plan-day] decrypt_field failed: {exc}")
-        return None
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -132,10 +104,9 @@ def plan_day(
         target_date = date.today()
 
     # ── Fetch user row from Supabase ──────────────────────────────────────────
-    set_encryption_key()
     row_result = (
         supabase.from_("users")
-        .select("config, todoist_api_key, groq_api_key")
+        .select("config, todoist_oauth_token")
         .eq("id", user_id)
         .single()
         .execute()
@@ -156,33 +127,13 @@ def plan_day(
             detail="User config is empty. Complete onboarding (promote stage) first.",
         )
 
-    # Decrypt API keys. Falls back to None if decryption fails (see module docstring).
-    todoist_key: str | None = _decrypt_field(row.get("todoist_api_key"))
-    groq_key: str | None = _decrypt_field(row.get("groq_api_key"))
-
-    # Dev fallback: if encrypted credentials aren't stored in Supabase yet
-    # (credential-save step not implemented), fall back to server env vars.
-    # In production, remove this fallback and enforce the 400 errors below.
-    if not todoist_key:
-        todoist_key = os.getenv("TODOIST_API_TOKEN")
-        if todoist_key:
-            print(f"[plan-day] Using TODOIST_API_TOKEN env fallback for user {user_id}")
-
-    if not groq_key:
-        groq_key = os.getenv("GROQ_API_KEY")
-        if groq_key:
-            print(f"[plan-day] Using GROQ_API_KEY env fallback for user {user_id}")
-
-    if not todoist_key:
+    todoist_token: str | None = (row.get("todoist_oauth_token") or {}).get("access_token")
+    if not todoist_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Todoist API key not found. Store credentials or set TODOIST_API_TOKEN in env.",
+            detail="Todoist not connected. Complete onboarding at /onboard first.",
         )
-    if not groq_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Groq API key not found. Store credentials or set GROQ_API_KEY in env.",
-        )
+    ant_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     prod_science = _load_prod_science()
     tz_str: str = context.get("user", {}).get("timezone", "America/Vancouver")
@@ -214,7 +165,7 @@ def plan_day(
     # ── Todoist ───────────────────────────────────────────────────────────────
     tasks: list[TodoistTask] = []
     try:
-        todoist = TodoistClient(todoist_key)
+        todoist = TodoistClient(todoist_token)
         tasks = todoist.get_tasks("!date | today | overdue")
     except Exception as exc:
         print(f"[plan-day] Todoist fetch failed: {exc}")
@@ -237,7 +188,6 @@ def plan_day(
                 dt = dt.astimezone(_tz_obj)
             if dt.date() == target_date:
                 already_scheduled.append(t)
-            # tasks pinned to other dates are silently ignored (don't move them)
             continue
         schedulable.append(t)
 
@@ -300,14 +250,9 @@ def plan_day(
         )
 
     # ── LLM Step 1 — Enrich ───────────────────────────────────────────────────
-    # Call _groq_json_call directly with a user-keyed Groq client.
-    # enrich_tasks() / generate_schedule() in src/llm.py instantiate Groq()
-    # from the environment, which isn't safe in a multi-user context.
-    groq_client = Groq(api_key=groq_key)
-
     enrich_messages = build_enrich_prompt(schedulable, context, prod_science)
     try:
-        enrich_raw = _groq_json_call(groq_client, ENRICH_MODEL, enrich_messages, "enrich_tasks")
+        enrich_raw = _anthropic_json_call(ant_client, enrich_messages, "enrich_tasks")
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=f"LLM enrich failed: {exc}") from exc
 
@@ -334,7 +279,7 @@ def plan_day(
         target_date.isoformat(),
     )
     try:
-        sched_raw = _groq_json_call(groq_client, SCHEDULE_MODEL, schedule_messages, "generate_schedule")
+        sched_raw = _anthropic_json_call(ant_client, schedule_messages, "generate_schedule")
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=f"LLM schedule failed: {exc}") from exc
 
@@ -351,7 +296,6 @@ def plan_day(
         context,
         target_date,
     )
-    # Merge any tasks pack_schedule couldn't fit with the LLM's pushed list
     all_pushed = sched_raw.get("pushed", []) + overflow_pushed
 
     return PlanDayResponse(

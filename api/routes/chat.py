@@ -77,16 +77,10 @@ class ChatResponse(BaseModel):
 
 
 def _load_user_context(user_id: str) -> dict:
-    """Load config + API keys + build GCal service from Supabase.
-
-    Key resolution order:
-    1. Supabase row (plaintext — encrypted storage is deferred until pgcrypto
-       session-variable issue with PostgREST is resolved).
-    2. Local environment variables (dev fallback — logged as a warning).
-    """
+    """Load config + Todoist OAuth token + build GCal service from Supabase."""
     row_result = (
         supabase.from_("users")
-        .select("config, groq_api_key, anthropic_api_key, todoist_api_key, google_credentials")
+        .select("config, todoist_oauth_token, google_credentials")
         .eq("id", user_id)
         .single()
         .execute()
@@ -97,16 +91,7 @@ def _load_user_context(user_id: str) -> dict:
     row = row_result.data
     config = row.get("config") or {}
 
-    def _resolve_key(supabase_value: str | None, settings_value: str | None, label: str) -> str | None:
-        if supabase_value:
-            return supabase_value
-        if settings_value:
-            print(f"[chat] WARNING: using local .env {label} — Supabase key not set")
-        return settings_value
-
-    groq_key = _resolve_key(row.get("groq_api_key"), settings.GROQ_API_KEY, "GROQ_API_KEY")
-    anth_key = _resolve_key(row.get("anthropic_api_key"), settings.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY")
-    tod_key = _resolve_key(row.get("todoist_api_key"), settings.TODOIST_API_KEY, "TODOIST_API_KEY")
+    tod_token: str | None = (row.get("todoist_oauth_token") or {}).get("access_token")
 
     # Build GCal service
     gcal_creds = row.get("google_credentials")
@@ -125,9 +110,7 @@ def _load_user_context(user_id: str) -> dict:
     return {
         "user_id": user_id,
         "config": config,
-        "anthropic_api_key": anth_key,
-        "groq_api_key": groq_key,
-        "todoist_api_key": tod_key,
+        "todoist_api_key": tod_token,   # kept as "todoist_api_key" — TodoistClient uses Bearer auth either way
         "gcal_service": gcal_service,
         "supabase": supabase,
     }
@@ -141,29 +124,10 @@ def chat(
     user_id: str = user["sub"]
     user_ctx = _load_user_context(user_id)
 
-    anth_key = user_ctx.get("anthropic_api_key")
-    groq_key = user_ctx.get("groq_api_key")
-
-    if not anth_key and not groq_key:
-        raise HTTPException(status_code=400, detail="No LLM API key configured. Complete onboarding.")
+    ant_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     messages = [{"role": m.role, "content": m.content} for m in body.messages]
     schedule_card: dict | None = None
-
-    if anth_key:
-        ant_client = anthropic.Anthropic(api_key=anth_key)
-    else:
-        # Groq-only path: no tool use, plain chat
-        from groq import Groq
-        groq_client = Groq(api_key=groq_key)
-        resp = groq_client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-            max_tokens=1024,
-        )
-        reply = resp.choices[0].message.content or ""
-        messages.append({"role": "assistant", "content": reply})
-        return ChatResponse(message=reply, schedule_card=None, messages=messages)
 
     # Anthropic ReAct loop
     for _ in range(MAX_ITERATIONS):

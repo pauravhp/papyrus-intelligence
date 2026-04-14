@@ -2,27 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, CalendarDays, Key } from "lucide-react";
+import { CheckCircle2, CalendarDays, CheckSquare } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
-import { apiPost } from "@/utils/api";
 
 const CARD: React.CSSProperties = {
   background: "var(--surface)",
   border: "1px solid var(--border)",
   borderRadius: 12,
   padding: "20px",
-};
-
-const INPUT: React.CSSProperties = {
-  background: "var(--surface-raised)",
-  border: "1px solid var(--border)",
-  color: "var(--text)",
-  width: "100%",
-  fontSize: 13,
-  padding: "8px 12px",
-  borderRadius: 8,
-  outline: "none",
-  fontFamily: "var(--font-literata)",
 };
 
 interface SetupStageProps {
@@ -33,19 +20,17 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
   const [gcalConnected, setGcalConnected] = useState(false);
+  const [todoistConnected, setTodoistConnected] = useState(false);
   const [checking, setChecking] = useState(true);
-  const [todoistKey, setTodoistKey] = useState("");
-  const [llmKey, setLlmKey] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     supabase
       .from("users")
-      .select("google_credentials")
+      .select("google_credentials, todoist_oauth_token")
       .maybeSingle()
       .then(({ data }) => {
         setGcalConnected(!!data?.google_credentials);
+        setTodoistConnected(!!data?.todoist_oauth_token);
         setChecking(false);
       });
   }, []);
@@ -57,42 +42,20 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
     window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/auth/google?token=${token}`;
   };
 
-  const canContinue = gcalConnected && todoistKey.trim() && llmKey.trim();
+  const handleConnectTodoist = async () => {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    if (!token) return;
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    window.location.href = `${apiUrl}/auth/todoist?token=${token}`;
+  };
+
+  const canContinue = gcalConnected && todoistConnected;
 
   const handleContinue = async () => {
     if (!canContinue) return;
-    setLoading(true);
-    setError(null);
-
-    const isGroq = llmKey.trim().startsWith("gsk_");
-    const isAnthropic = llmKey.trim().startsWith("sk-ant-");
-    if (!isGroq && !isAnthropic) {
-      setError("LLM key must start with gsk_ (Groq) or sk-ant- (Anthropic).");
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? "";
-
-      await apiPost(
-        "/api/onboard/save-credentials",
-        {
-          groq_api_key: isGroq ? llmKey.trim() : "",
-          anthropic_api_key: isAnthropic ? llmKey.trim() : "",
-          todoist_api_key: todoistKey.trim(),
-        },
-        token,
-      );
-
-      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      onAdvance(timezone, []);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    onAdvance(timezone, []);
   };
 
   const FADE = {
@@ -131,7 +94,7 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
             Connect your tools
           </h1>
           <p style={{ color: "var(--text-muted)", fontSize: 13, marginTop: 6 }}>
-            Papyrus needs access to your calendar, tasks, and an AI model.
+            Papyrus needs access to your calendar and tasks.
           </p>
         </motion.div>
 
@@ -193,130 +156,70 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
           </div>
         </motion.div>
 
-        {/* API Keys */}
-        <motion.div
-          custom={2}
-          variants={FADE}
-          style={{ ...CARD, display: "flex", flexDirection: "column", gap: 14 }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              style={{
-                background: "var(--accent-tint)",
-                padding: 8,
-                borderRadius: 8,
-              }}
-            >
-              <Key size={18} color="var(--accent)" />
+        {/* Todoist */}
+        <motion.div custom={2} variants={FADE} style={CARD}>
+          <div className="flex items-start gap-3">
+            <div style={{ background: "var(--accent-tint)", padding: 8, borderRadius: 8 }}>
+              <CheckSquare size={18} color="var(--accent)" />
             </div>
-            <div>
+            <div style={{ flex: 1 }}>
               <p style={{ color: "var(--text)", fontSize: 13, fontWeight: 500 }}>
-                API Keys
+                Todoist
               </p>
-              <p style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                Stored encrypted — never logged.
+              <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 2 }}>
+                Required — Papyrus reads your tasks and sets due times.
               </p>
+              <div style={{ marginTop: 10 }}>
+                {checking ? (
+                  <p style={{ color: "var(--text-faint)", fontSize: 12 }}>Checking…</p>
+                ) : todoistConnected ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--accent)", fontSize: 12 }}>
+                    <CheckCircle2 size={13} /> Connected
+                  </div>
+                ) : (
+                  <motion.button
+                    onClick={handleConnectTodoist}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    style={{
+                      background: "var(--accent)",
+                      color: "var(--bg)",
+                      border: "none",
+                      borderRadius: 8,
+                      padding: "6px 14px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Connect Todoist
+                  </motion.button>
+                )}
+              </div>
             </div>
-          </div>
-
-          <div>
-            <label
-              htmlFor="todoist-key"
-              style={{
-                color: "var(--text-muted)",
-                fontSize: 11,
-                fontWeight: 500,
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              Todoist API key{" "}
-              <span style={{ color: "var(--danger)" }}>*</span>
-            </label>
-            <input
-              id="todoist-key"
-              aria-required="true"
-              type="password"
-              value={todoistKey}
-              onChange={(e) => {
-                setTodoistKey(e.target.value);
-                setError(null);
-              }}
-              placeholder="Your Todoist token"
-              style={INPUT}
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="llm-key"
-              style={{
-                color: "var(--text-muted)",
-                fontSize: 11,
-                fontWeight: 500,
-                display: "block",
-                marginBottom: 4,
-              }}
-            >
-              LLM API key <span style={{ color: "var(--danger)" }}>*</span>
-              <span
-                style={{
-                  color: "var(--text-faint)",
-                  fontWeight: 400,
-                  marginLeft: 6,
-                }}
-              >
-                gsk_… (Groq) or sk-ant-… (Anthropic)
-              </span>
-            </label>
-            <input
-              id="llm-key"
-              aria-required="true"
-              type="password"
-              value={llmKey}
-              onChange={(e) => {
-                setLlmKey(e.target.value);
-                setError(null);
-              }}
-              placeholder="gsk_… or sk-ant-…"
-              style={INPUT}
-            />
           </div>
         </motion.div>
-
-        {error && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            style={{ color: "var(--danger)", fontSize: 12, textAlign: "center" }}
-          >
-            {error}
-          </motion.p>
-        )}
 
         <motion.div custom={3} variants={FADE}>
           <motion.button
             onClick={handleContinue}
-            disabled={!canContinue || loading}
-            whileHover={canContinue && !loading ? { scale: 1.01 } : undefined}
-            whileTap={canContinue && !loading ? { scale: 0.99 } : undefined}
+            disabled={!canContinue}
+            whileHover={canContinue ? { scale: 1.01 } : undefined}
+            whileTap={canContinue ? { scale: 0.99 } : undefined}
             style={{
               width: "100%",
               padding: "12px 0",
               borderRadius: 12,
-              background:
-                canContinue && !loading
-                  ? "var(--accent)"
-                  : "var(--accent-tint)",
-              color: canContinue && !loading ? "var(--bg)" : "var(--accent)",
+              background: canContinue ? "var(--accent)" : "var(--accent-tint)",
+              color: canContinue ? "var(--bg)" : "var(--accent)",
               border: "none",
               fontSize: 14,
               fontWeight: 500,
-              cursor: canContinue && !loading ? "pointer" : "not-allowed",
+              cursor: canContinue ? "pointer" : "not-allowed",
               boxShadow: "none",
             }}
           >
-            {loading ? "Saving…" : "Continue →"}
+            Continue →
           </motion.button>
         </motion.div>
       </motion.div>

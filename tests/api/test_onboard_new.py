@@ -1,5 +1,14 @@
-# tests/api/test_onboard_new.py
-from unittest.mock import MagicMock, patch, call
+import os
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
+os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
+os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
+os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-client-id")
+os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-client-secret")
+
+from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,81 +30,32 @@ def _mock_verify(monkeypatch):
     )
 
 
-def test_save_credentials_stores_encrypted_keys(client, monkeypatch):
-    """save-credentials encrypts each non-empty key and writes to Supabase."""
-    _mock_verify(monkeypatch)
-    mock_sb = MagicMock()
-    mock_sb.rpc.return_value.execute.return_value.data = "encrypted_value"
-    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
-
-    with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key") as mock_enc:
-        resp = client.post(
-            "/api/onboard/save-credentials",
-            json={
-                "groq_api_key": "gsk_test",
-                "anthropic_api_key": "",
-                "todoist_api_key": "tod_test",
-            },
-            headers=_auth_header(),
-        )
-
-    assert resp.status_code == 200
-    assert resp.json()["success"] is True
-    mock_enc.assert_called_once()
-    # encrypt_field RPC called twice (groq + todoist; anthropic empty so skipped)
-    encrypt_calls = [c for c in mock_sb.rpc.call_args_list if c.args[0] == "encrypt_field"]
-    assert len(encrypt_calls) == 2
-    mock_sb.from_.return_value.update.assert_called_once()
-
-
-def test_save_credentials_skips_empty_keys(client, monkeypatch):
-    """Empty string keys are not encrypted or written."""
-    _mock_verify(monkeypatch)
-    mock_sb = MagicMock()
-    mock_sb.rpc.return_value.execute.return_value.data = "enc"
-    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(error=None)
-
-    with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"):
-        resp = client.post(
-            "/api/onboard/save-credentials",
-            json={"groq_api_key": "", "anthropic_api_key": "", "todoist_api_key": ""},
-            headers=_auth_header(),
-        )
-
-    assert resp.status_code == 200
-    encrypt_calls = [c for c in mock_sb.rpc.call_args_list if c.args[0] == "encrypt_field"]
-    assert len(encrypt_calls) == 0
-    mock_sb.from_.return_value.update.assert_not_called()
-
-
 def test_scan_returns_proposed_config(client, monkeypatch):
-    """scan reads credentials from Supabase and returns proposed_config."""
+    """scan reads GCal credentials from Supabase and returns proposed_config."""
     _mock_verify(monkeypatch)
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
         data={
-            "google_credentials": {"token": "tok", "refresh_token": "rref",
-                                   "token_uri": "https://oauth2.googleapis.com/token",
-                                   "client_id": "cid", "client_secret": "cs",
-                                   "scopes": ["https://www.googleapis.com/auth/calendar.events"]},
-            "groq_api_key": "enc_groq",
-            "anthropic_api_key": None,
+            "google_credentials": {
+                "token": "tok",
+                "refresh_token": "rref",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_id": "cid",
+                "client_secret": "cs",
+                "scopes": ["https://www.googleapis.com/auth/calendar.events"],
+            },
         }
     )
-    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
 
     mock_proposed = {"sleep": {"default_wake_time": "07:00"}, "calendar_rules": {}}
 
     with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"), \
          patch("api.routes.onboard.build_gcal_service_from_credentials",
                return_value=(MagicMock(), None)), \
          patch("api.routes.onboard.get_events", return_value=[]), \
          patch("api.routes.onboard.build_pattern_summary", return_value={}), \
          patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
-         patch("api.routes.onboard._groq_json_call",
+         patch("api.routes.onboard._anthropic_json_call",
                return_value={"proposed_config": mock_proposed, "questions_for_stage_2": []}):
         resp = client.post(
             "/api/onboard/scan",
@@ -114,31 +74,10 @@ def test_scan_raises_400_if_no_gcal_creds(client, monkeypatch):
     _mock_verify(monkeypatch)
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={"google_credentials": None, "groq_api_key": "enc_groq", "anthropic_api_key": None}
+        data={"google_credentials": None}
     )
 
-    with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"):
-        resp = client.post(
-            "/api/onboard/scan",
-            json={"timezone": "America/Vancouver", "calendar_ids": []},
-            headers=_auth_header(),
-        )
-
-    assert resp.status_code == 400
-
-
-def test_scan_raises_400_if_no_llm_key(client, monkeypatch):
-    """scan returns 400 if neither groq nor anthropic key is stored."""
-    _mock_verify(monkeypatch)
-    mock_sb = MagicMock()
-    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={"google_credentials": {"token": "t"}, "groq_api_key": None, "anthropic_api_key": None}
-    )
-    mock_sb.rpc.return_value.execute.return_value.data = None
-
-    with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"):
+    with patch("api.routes.onboard.supabase", mock_sb):
         resp = client.post(
             "/api/onboard/scan",
             json={"timezone": "America/Vancouver", "calendar_ids": []},
@@ -153,16 +92,10 @@ def test_scan_400_on_gcal_token_refresh_failure(client, monkeypatch):
     _mock_verify(monkeypatch)
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={
-            "google_credentials": {"token": "tok"},
-            "groq_api_key": "enc_groq",
-            "anthropic_api_key": None,
-        }
+        data={"google_credentials": {"token": "tok"}}
     )
-    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
 
     with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"), \
          patch("api.routes.onboard.build_gcal_service_from_credentials",
                side_effect=RuntimeError("Token expired")):
         resp = client.post(
@@ -176,28 +109,21 @@ def test_scan_400_on_gcal_token_refresh_failure(client, monkeypatch):
 
 
 def test_scan_502_on_llm_json_error(client, monkeypatch):
-    """scan returns 502 if LLM call raises json.JSONDecodeError."""
-    import json as _json
+    """scan returns 502 if LLM call raises RuntimeError."""
     _mock_verify(monkeypatch)
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={
-            "google_credentials": {"token": "tok"},
-            "groq_api_key": "enc_groq",
-            "anthropic_api_key": None,
-        }
+        data={"google_credentials": {"token": "tok"}}
     )
-    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
 
     with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"), \
          patch("api.routes.onboard.build_gcal_service_from_credentials",
                return_value=(MagicMock(), None)), \
          patch("api.routes.onboard.get_events", return_value=[]), \
          patch("api.routes.onboard.build_pattern_summary", return_value={}), \
          patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
-         patch("api.routes.onboard._groq_json_call",
-               side_effect=_json.JSONDecodeError("bad", "", 0)):
+         patch("api.routes.onboard._anthropic_json_call",
+               side_effect=RuntimeError("LLM returned invalid JSON")):
         resp = client.post(
             "/api/onboard/scan",
             json={"timezone": "America/Vancouver", "calendar_ids": []},
@@ -212,22 +138,16 @@ def test_scan_502_on_non_dict_llm_response(client, monkeypatch):
     _mock_verify(monkeypatch)
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-        data={
-            "google_credentials": {"token": "tok"},
-            "groq_api_key": "enc_groq",
-            "anthropic_api_key": None,
-        }
+        data={"google_credentials": {"token": "tok"}}
     )
-    mock_sb.rpc.return_value.execute.return_value.data = "gsk_decrypted"
 
     with patch("api.routes.onboard.supabase", mock_sb), \
-         patch("api.routes.onboard.set_encryption_key"), \
          patch("api.routes.onboard.build_gcal_service_from_credentials",
                return_value=(MagicMock(), None)), \
          patch("api.routes.onboard.get_events", return_value=[]), \
          patch("api.routes.onboard.build_pattern_summary", return_value={}), \
          patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
-         patch("api.routes.onboard._groq_json_call", return_value=["not", "a", "dict"]):
+         patch("api.routes.onboard._anthropic_json_call", return_value=["not", "a", "dict"]):
         resp = client.post(
             "/api/onboard/scan",
             json={"timezone": "America/Vancouver", "calendar_ids": []},
