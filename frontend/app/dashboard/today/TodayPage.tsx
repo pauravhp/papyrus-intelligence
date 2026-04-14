@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import { apiFetch } from "@/utils/api";
@@ -44,9 +44,11 @@ const FADE = {
 };
 
 export default function TodayPage() {
-  const supabase = createClient();
+  const supabaseRef = useRef(createClient());
+  const supabase = supabaseRef.current;
   const [data, setData] = useState<TodayResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
 
   const load = useCallback(async () => {
@@ -55,6 +57,8 @@ export default function TodayPage() {
     try {
       const result = await apiFetch<TodayResponse>("/api/today", token);
       setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load schedule");
     } finally {
       setLoading(false);
     }
@@ -63,6 +67,11 @@ export default function TodayPage() {
   useEffect(() => { load(); }, [load]);
 
   if (loading) return <TodaySkeleton />;
+  if (error) return (
+    <div style={{ padding: "32px 48px", color: "var(--text-muted)", fontFamily: "var(--font-literata)", fontSize: 14 }}>
+      Could not load schedule. {error}
+    </div>
+  );
 
   const days: Array<{ key: "yesterday" | "today" | "tomorrow"; label: string }> = [
     { key: "yesterday", label: "Yesterday" },
