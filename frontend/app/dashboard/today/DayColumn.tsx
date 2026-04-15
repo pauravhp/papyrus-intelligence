@@ -73,18 +73,28 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
       ) : (
         <div style={{ position: "relative" }}>
           {/* Cross-midnight continuations at the top */}
-          {dayData.schedule_date && getContinuationItems(dayData.scheduled, dayData.schedule_date).map(item => (
-            <TaskBlock key={`cont-${item.task_id}`} item={item} isContinuation />
-          ))}
-
-          {/* Now indicator (today only) — inserted between tasks */}
-          {isToday ? (
-            <NowIndicator scheduled={dayData.scheduled} />
-          ) : (
-            dayData.scheduled.map(item => (
-              <TaskBlock key={item.task_id} item={item} />
-            ))
-          )}
+          {(() => {
+            const continuations = dayData.schedule_date
+              ? getContinuationItems(dayData.scheduled, dayData.schedule_date)
+              : [];
+            const continuationIds = new Set(continuations.map(c => c.task_id));
+            const mainItems = dayData.scheduled.filter(item => !continuationIds.has(item.task_id));
+            return (
+              <>
+                {continuations.map(item => (
+                  <TaskBlock key={`cont-${item.task_id}`} item={item} isContinuation />
+                ))}
+                {/* Now indicator (today only) — inserted between tasks */}
+                {isToday ? (
+                  <NowIndicator scheduled={mainItems} />
+                ) : (
+                  mainItems.map(item => (
+                    <TaskBlock key={item.task_id} item={item} />
+                  ))
+                )}
+              </>
+            );
+          })()}
 
           {/* Pushed tasks */}
           {dayData.pushed.length > 0 && (
