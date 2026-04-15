@@ -5,7 +5,6 @@ Input:  tasks + free windows + config + context_note
 Output: {scheduled: [...], pushed: [...], reasoning_summary: "..."}
 
 Primary: Anthropic SDK (claude-haiku-4-5-20251001)
-Fallback: Groq (meta-llama/llama-4-scout-17b-16e-instruct)
 
 JSON validation: retry once on parse failure; raise RuntimeError on second failure.
 """
@@ -15,12 +14,10 @@ import re
 from datetime import date
 
 import anthropic
-from groq import Groq
 
 from src.models import FreeWindow, TodoistTask
 
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
-GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 
 
 def _build_prompt(
@@ -109,7 +106,6 @@ def schedule_day(
     config: dict,
     context_note: str,
     anthropic_api_key: str | None,
-    groq_api_key: str | None,
     target_date: str | None = None,
 ) -> dict:
     """
@@ -140,19 +136,6 @@ def schedule_day(
             return resp.content[0].text
 
         result = _parse_with_retry(_call, "schedule_day/anthropic")
-    elif groq_api_key:
-        groq_client = Groq(api_key=groq_api_key)
-
-        def _call():  # type: ignore[misc]
-            resp = groq_client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-                max_tokens=2048,
-            )
-            return resp.choices[0].message.content or ""
-
-        result = _parse_with_retry(_call, "schedule_day/groq")
     else:
         import warnings
         warnings.warn("[schedule_day] No API key provided — returning empty schedule", stacklevel=2)

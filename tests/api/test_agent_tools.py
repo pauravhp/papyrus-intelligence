@@ -22,7 +22,6 @@ def user_ctx():
             "rules": {"hard": [], "soft": []},
         },
         "anthropic_api_key": "sk-ant-test",
-        "groq_api_key": "gsk_test",
         "todoist_api_key": "tod_test",
         "gcal_service": MagicMock(),
         "supabase": MagicMock(),

@@ -54,7 +54,6 @@ def test_schedule_day_returns_structured_output():
             config=_make_config(),
             context_note="normal day",
             anthropic_api_key="sk-ant-test",
-            groq_api_key=None,
             target_date="2026-04-12",
         )
 
@@ -63,33 +62,6 @@ def test_schedule_day_returns_structured_output():
     assert result["scheduled"][0]["task_id"] == "t1"
     assert "pushed" in result
     assert "reasoning_summary" in result
-
-
-def test_schedule_day_falls_back_to_groq_when_anthropic_key_absent():
-    """If anthropic_api_key is None, uses Groq."""
-    from api.services.schedule_service import schedule_day
-
-    mock_raw = '{"scheduled":[],"pushed":[{"task_id":"t1","reason":"No window"}],"reasoning_summary":"Pushed all."}'
-
-    with patch("api.services.schedule_service.anthropic") as mock_ant, \
-         patch("api.services.schedule_service.Groq") as MockGroq:
-        mock_groq_client = MagicMock()
-        MockGroq.return_value = mock_groq_client
-        mock_groq_client.chat.completions.create.return_value.choices = [
-            MagicMock(message=MagicMock(content=mock_raw))
-        ]
-        result = schedule_day(
-            tasks=_make_tasks(),
-            free_windows=_make_windows(),
-            config=_make_config(),
-            context_note="",
-            anthropic_api_key=None,
-            groq_api_key="gsk_test",
-            target_date="2026-04-12",
-        )
-
-    mock_ant.Anthropic.assert_not_called()
-    assert "pushed" in result
 
 
 def test_schedule_day_retries_on_invalid_json():
@@ -108,7 +80,6 @@ def test_schedule_day_retries_on_invalid_json():
                 config=_make_config(),
                 context_note="",
                 anthropic_api_key="sk-ant-test",
-                groq_api_key=None,
                 target_date="2026-04-12",
             )
 

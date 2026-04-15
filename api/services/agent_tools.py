@@ -6,7 +6,6 @@ Each execute_* function accepts (tool_inputs, user_ctx) where user_ctx is:
   user_id: str,
   config: dict,           # full users.config from Supabase
   anthropic_api_key: str | None,
-  groq_api_key: str | None,
   todoist_api_key: str | None,
   gcal_service: googleapiclient.Resource,
   supabase: supabase.Client,
@@ -149,7 +148,6 @@ def execute_schedule_day(
         config=config,
         context_note=context_note,
         anthropic_api_key=user_ctx.get("anthropic_api_key"),
-        groq_api_key=user_ctx.get("groq_api_key"),
         target_date=target_date_str,
     )
     # Restore full task names (inner LLM only saw truncated versions)
@@ -252,52 +250,6 @@ def execute_get_status(user_ctx: dict) -> dict:
         "status": "confirmed",
         "schedule": _json.loads(rows[0]["proposed_json"]),
         "confirmed_at": rows[0].get("confirmed_at"),
-    }
-
-
-def execute_onboard_scan(timezone: str, calendar_ids: list, groq_api_key: str, user_ctx: dict) -> dict:
-    """Re-run onboard Stage 1 scan (14-day GCal analysis → proposed config)."""
-    from datetime import timedelta
-    from src.onboard_patterns import build_pattern_summary
-    from src.prompts.onboard import build_onboard_prompt
-    from src.llm import _groq_json_call
-    from pathlib import Path
-    import json as _json
-    from groq import Groq
-
-    today = date.today()
-    start_date = today - timedelta(days=13)
-    events_by_date: dict = {}
-    all_events = []
-
-    for i in range(14):
-        target = start_date + timedelta(days=i)
-        try:
-            day_events = get_events(
-                target_date=target,
-                timezone_str=timezone,
-                extra_calendar_ids=calendar_ids,
-                service=user_ctx["gcal_service"],
-            )
-            events_by_date[target] = day_events
-            all_events.extend(day_events)
-        except Exception:
-            events_by_date[target] = []
-
-    template_path = Path(__file__).parent.parent.parent / "context.template.json"
-    with open(template_path) as f:
-        template = _json.load(f)
-
-    context_for_prompt = {"user": {"timezone": timezone}, "calendar_ids": calendar_ids,
-                          **{k: v for k, v in template.items() if k not in ("user", "calendar_ids")}}
-
-    patterns = build_pattern_summary(events_by_date, all_events)
-    groq_client = Groq(api_key=groq_api_key)
-    messages = build_onboard_prompt(patterns, context_for_prompt)
-    raw = _groq_json_call(groq_client, "meta-llama/llama-4-scout-17b-16e-instruct", messages, "onboard_scan")
-    return {
-        "proposed_config": raw.get("proposed_config", {}),
-        "questions_for_stage_2": raw.get("questions_for_stage_2", []),
     }
 
 
