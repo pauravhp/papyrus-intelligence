@@ -127,8 +127,10 @@ export default function TodayPage() {
           {days.map((d) => (
             <button
               key={d.key}
+              id={`tab-${d.key}`}
               role="tab"
               aria-selected={activeTab === d.key}
+              aria-controls="today-tabpanel"
               onClick={() => setActiveTab(d.key)}
               style={{
                 flex: 1,
@@ -147,11 +149,17 @@ export default function TodayPage() {
             </button>
           ))}
         </div>
-        <DayColumn
-          label={days.find(d => d.key === activeTab)!.label}
-          dayData={data?.[activeTab] ?? null}
-          isToday={activeTab === "today"}
-        />
+        <div
+          id="today-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`tab-${activeTab}`}
+        >
+          <DayColumn
+            label={days.find(d => d.key === activeTab)!.label}
+            dayData={data?.[activeTab] ?? null}
+            isToday={activeTab === "today"}
+          />
+        </div>
       </div>
 
       <ResearchSnippet />
