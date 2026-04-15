@@ -1,8 +1,9 @@
 // frontend/app/dashboard/today/DayColumn.tsx
 import Link from "next/link";
-import { type DayData, type ScheduledItem } from "./TodayPage";
+import { type DayData, type ScheduledItem, type GCalEvent } from "./TodayPage";
 import TaskBlock from "./TaskBlock";
 import NowIndicator from "./NowIndicator";
+import GcalEventBlock from "./GcalEventBlock";
 
 const GRID_START = 8;
 const GRID_DEFAULT_END = 20;
@@ -42,6 +43,9 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
   const scheduled = dayData?.scheduled ?? [];
   const pushed = dayData?.pushed ?? [];
   const isEmpty = scheduled.length === 0;
+  const hasGcal =
+    (dayData?.gcal_events?.length ?? 0) > 0 ||
+    (dayData?.all_day_events?.length ?? 0) > 0;
 
   const crossMidnight = hasCrossMidnightTask(scheduled);
   const gridEnd = crossMidnight ? 25 : GRID_DEFAULT_END;
@@ -92,8 +96,38 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
         )}
       </div>
 
+      {/* All-day event pills */}
+      {(dayData?.all_day_events?.length ?? 0) > 0 && (
+        <div
+          style={{
+            padding: "4px 14px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 4,
+          }}
+        >
+          {dayData!.all_day_events.map((name, i) => (
+            <span
+              key={i}
+              style={{
+                fontSize: 10,
+                color: "var(--text-faint)",
+                fontFamily: "var(--font-literata)",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 3,
+                padding: "1px 5px",
+              }}
+            >
+              {name}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Empty state */}
-      {isEmpty && (
+      {(isEmpty && !hasGcal) && (
         <p
           style={{
             fontSize: 13,
@@ -119,8 +153,8 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
         </p>
       )}
 
-      {/* Calendar grid — shown even when empty for Today (so now line is visible) */}
-      {(!isEmpty || isToday) && (
+      {/* Calendar grid — shown when there are tasks, GCal events, or it's Today (for now line) */}
+      {(!isEmpty || isToday || hasGcal) && (
         <div style={{ display: "flex" }}>
           {/* Time gutter */}
           <div
@@ -224,6 +258,11 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
             {/* Task blocks */}
             {scheduled.map((item) => (
               <TaskBlock key={item.task_id} item={item} />
+            ))}
+
+            {/* GCal event blocks (read-only, behind confirmed task blocks) */}
+            {(dayData?.gcal_events ?? []).map((event) => (
+              <GcalEventBlock key={event.id} event={event} />
             ))}
 
             {/* Now indicator (today column only) */}
