@@ -178,6 +178,20 @@ API gotchas and architectural decisions. Read before touching any API client cod
 
 ---
 
+## FEAT-2 — Today view always shows live GCal events (2026-04-15)
+
+**`get_today_view` builds the GCal service inline, same pattern as `_load_user_context` in `chat.py`.** `build_gcal_service_from_credentials(creds, client_id, client_secret)` returns `(service, refreshed | None)`. Write refreshed creds back to Supabase immediately.
+
+**`gcal_event_ids` in `schedule_log` is stored as a JSON string**, not a native Postgres array. Must `json.loads()` it before iterating. Use `_papyrus_ids()` helper with try/except fallback to empty set.
+
+**`_parse_day` null logic change**: old gate was "no `proposed_json` → None". New gate: "no schedule AND no GCal events → None". A gcal-only day must return a dict with `scheduled: []` so the frontend renders the GCal layer.
+
+**`hasGcal` in `DayColumn.tsx` must include `all_day_events`**, not just `gcal_events`. Omitting it caused the empty-state message to show alongside all-day pills for days with holidays/OOO but no scheduled tasks.
+
+**Three sequential GCal API calls per `/api/today` load** (one per day). Accepted v1 tradeoff — users open this view once or twice a day. No caching needed yet.
+
+---
+
 ## BUG-1 — schedule_day / GCal integration (fixed 2026-04-15)
 
 Three issues found and fixed together:
