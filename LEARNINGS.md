@@ -172,6 +172,12 @@ API gotchas and architectural decisions. Read before touching any API client cod
 
 **Patching module-level imports in agent_tools.py requires the import at module scope.** `patch("api.services.agent_tools.get_active_projects", ...)` only works if `get_active_projects` is imported at the top of `agent_tools.py`, not inside a function. Inline imports (`from x import y` inside a function) create a local name that can't be patched via the module path.
 
+## BUG-2 — Todoist OAuth force_approval (fixed 2026-04-15)
+
+**`&force_approval=1` must be added to the Todoist authorization URL.** Without it, Todoist re-uses an existing token on repeat OAuth flows, skips the consent screen, and returns no new access token — silently breaking re-auth. Adding `force_approval=1` mirrors Google's `prompt=consent` pattern and guarantees a fresh token every time.
+
+---
+
 ## BUG-1 — schedule_day / GCal integration (fixed 2026-04-15)
 
 Three issues found and fixed together:
