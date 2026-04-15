@@ -6,7 +6,7 @@ For each date, returns the most recent confirmed entry (highest id).
 """
 import json
 import logging
-from datetime import date, timedelta, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,15 +20,19 @@ router = APIRouter(prefix="/api")
 
 
 def _get_now() -> datetime:
+    """Thin wrapper so tests can patch it."""
     return datetime.now(timezone.utc)
 
 
 def _compute_review_available(user_config: dict, has_confirmed_schedule: bool) -> bool:
-    """Returns True if review cutoff has passed and a confirmed schedule exists."""
+    """Returns True if review cutoff has passed and a confirmed schedule exists today."""
     if not has_confirmed_schedule:
         return False
     tz_name = user_config.get("user", {}).get("timezone", "UTC")
     sleep_time_str = user_config.get("user", {}).get("sleep_time", "23:00")
+    if not sleep_time_str:
+        logger.warning("sleep_time missing from user config, defaulting to 23:00")
+        sleep_time_str = "23:00"
     try:
         tz = ZoneInfo(tz_name)
         now_local = _get_now().astimezone(tz)
@@ -71,33 +75,6 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         (today + timedelta(days=1)).isoformat(),
     ]
 
-    # Fetch user config for review_available computation
-    config = {}
-    try:
-        user_row = (
-            supabase.from_("users")
-            .select("config")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-        if user_row.data:
-            config = user_row.data.get("config") or {}
-    except Exception:
-        pass  # review_available defaults to False
-
-    # Check if a confirmed schedule exists (separate, simple query)
-    schedule_check = (
-        supabase.from_("schedule_log")
-        .select("id")
-        .eq("user_id", user_id)
-        .eq("confirmed", 1)
-        .order("id", desc=True)
-        .limit(1)
-        .execute()
-    )
-    has_confirmed_schedule = bool(schedule_check.data)
-
     result = (
         supabase.from_("schedule_log")
         .select("schedule_date, proposed_json, confirmed_at")
@@ -114,6 +91,35 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         d = row["schedule_date"]
         if d not in by_date:
             by_date[d] = row
+
+    # Fetch user config for review_available (timezone + sleep_time)
+    config: dict = {}
+    try:
+        user_row = (
+            supabase.from_("users")
+            .select("config")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        if user_row.data:
+            config = user_row.data.get("config") or {}
+    except Exception:
+        pass  # review_available defaults to False on error
+
+    # Check if a confirmed schedule exists for today (separate lightweight query)
+    today_str = dates[1]  # dates[1] is today's iso string
+    schedule_check = (
+        supabase.from_("schedule_log")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("schedule_date", today_str)
+        .eq("confirmed", 1)
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    has_confirmed_schedule = bool(schedule_check.data)
 
     return {
         "yesterday": _parse_day(by_date.get(dates[0])),
