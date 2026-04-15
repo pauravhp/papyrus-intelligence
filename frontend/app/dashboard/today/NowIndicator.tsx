@@ -2,18 +2,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { type ScheduledItem } from "./TodayPage";
-import TaskBlock from "./TaskBlock";
+
+const GRID_START_HOUR = 8;
+const PX_PER_HOUR = 72;
+const GUTTER_WIDTH = 44;
 
 function fmtTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-interface NowIndicatorProps {
-  scheduled: ScheduledItem[];
+function nowTop(d: Date): number {
+  return (d.getHours() + d.getMinutes() / 60 - GRID_START_HOUR) * PX_PER_HOUR;
 }
 
-export default function NowIndicator({ scheduled: items }: NowIndicatorProps) {
+export default function NowIndicator() {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -21,58 +23,54 @@ export default function NowIndicator({ scheduled: items }: NowIndicatorProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Sort by start_time
-  const sorted = [...items].sort(
-    (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-  );
+  const hour = now.getHours();
+  // Only show when current time is within the grid span
+  if (hour < GRID_START_HOUR || hour >= 25) return null;
 
-  const firstStart = sorted.length > 0 ? new Date(sorted[0].start_time) : null;
-  const lastEnd    = sorted.length > 0 ? new Date(sorted[sorted.length - 1].end_time) : null;
+  const top = nowTop(now);
 
-  // Determine insert position: index of first item whose start_time > now
-  // now-line goes before that item (or at end if all have started)
-  const insertBefore = sorted.findIndex(item => new Date(item.start_time) > now);
-  // -1 means all tasks have started (insert after last), 0 means before first
-
-  // Only show if now is within the schedule span
-  const withinSpan = firstStart && lastEnd && now >= firstStart && now <= lastEnd;
-
-  const NowLine = (
+  return (
     <div
       role="separator"
       aria-label={`Current time: ${fmtTime(now)}`}
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        margin: "4px 0",
+        position: "absolute",
+        top,
+        left: -GUTTER_WIDTH,
+        right: 0,
+        height: 1.5,
+        background: "var(--accent)",
+        zIndex: 10,
+        pointerEvents: "none",
       }}
     >
-      <div style={{ flex: 1, height: 1, background: "var(--accent)" }} />
+      {/* Amber dot on left edge */}
+      <div
+        style={{
+          position: "absolute",
+          left: GUTTER_WIDTH - 4,
+          top: -3,
+          width: 7,
+          height: 7,
+          borderRadius: "50%",
+          background: "var(--accent)",
+        }}
+      />
+      {/* Time label on right */}
       <span
         style={{
+          position: "absolute",
+          right: 4,
+          top: -9,
+          fontSize: 10,
           color: "var(--accent)",
-          fontSize: 11,
-          whiteSpace: "nowrap",
           fontFamily: "var(--font-literata)",
+          whiteSpace: "nowrap",
+          fontVariantNumeric: "tabular-nums",
         }}
       >
         {fmtTime(now)} →
       </span>
-    </div>
-  );
-
-  return (
-    <div>
-      {sorted.map((item, idx) => (
-        <div key={item.task_id}>
-          {/* Insert now-line before the first upcoming task */}
-          {withinSpan && insertBefore === idx && NowLine}
-          <TaskBlock item={item} />
-        </div>
-      ))}
-      {/* If all tasks have started (insertBefore === -1), show at end */}
-      {withinSpan && insertBefore === -1 && NowLine}
     </div>
   );
 }
