@@ -107,11 +107,13 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
     except Exception:
         pass  # review_available defaults to False on error
 
-    # Check if a confirmed schedule exists (separate lightweight query)
+    # Check if a confirmed schedule exists for today (separate lightweight query)
+    today_str = dates[1]  # dates[1] is today's iso string
     schedule_check = (
         supabase.from_("schedule_log")
         .select("id")
         .eq("user_id", user_id)
+        .eq("schedule_date", today_str)
         .eq("confirmed", 1)
         .order("id", desc=True)
         .limit(1)

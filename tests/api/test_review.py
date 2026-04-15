@@ -138,7 +138,6 @@ def test_submit_writes_task_history_rows(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
     mock_sb = MagicMock()
     mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
-    mock_sb.from_.return_value.insert.return_value.execute.return_value.data = []
 
     payload = {
         "tasks": [
@@ -169,7 +168,6 @@ def test_submit_writes_rhythm_completions(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
     mock_sb = MagicMock()
     mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
-    mock_sb.from_.return_value.insert.return_value.execute.return_value.data = []
 
     payload = {
         "tasks": [],
@@ -184,7 +182,7 @@ def test_submit_writes_rhythm_completions(client, monkeypatch):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
-    # Verify insert was called on rhythm_completions for completed rhythms only
+    # Verify upsert was called on rhythm_completions for completed rhythms only
     mock_sb.from_.assert_any_call("rhythm_completions")
 
 
@@ -193,7 +191,6 @@ def test_submit_is_idempotent_on_resubmit(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
     mock_sb = MagicMock()
     mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
-    mock_sb.from_.return_value.insert.return_value.execute.return_value.data = []
 
     payload = {
         "tasks": [
@@ -224,7 +221,6 @@ def test_submit_summary_line_fallback_on_llm_failure(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
     mock_sb = MagicMock()
     mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
-    mock_sb.from_.return_value.insert.return_value.execute.return_value.data = []
 
     payload = {
         "tasks": [

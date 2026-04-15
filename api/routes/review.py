@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
 import anthropic
 from fastapi import APIRouter, Depends, HTTPException
@@ -127,7 +127,7 @@ def review_preflight(user: dict = Depends(get_current_user)) -> dict:
     }
 
 
-def _generate_summary_line(user: dict, tasks: list[ReviewSubmitTask], rhythms: list[ReviewSubmitRhythm]) -> str:
+def _generate_summary_line(tasks: list[ReviewSubmitTask], rhythms: list[ReviewSubmitRhythm]) -> str:
     """Single LLM call to generate a one-line contextual observation."""
     completed = [t for t in tasks if t.completed]
     incomplete = [t for t in tasks if not t.completed]
@@ -179,7 +179,7 @@ def review_submit(body: ReviewSubmitRequest, user: dict = Depends(get_current_us
             "estimated_duration_mins": t.estimated_duration_mins,
             "actual_duration_mins": t.actual_duration_mins if t.completed else None,
             "scheduled_at": t.scheduled_at,
-            "completed_at": today if t.completed else None,
+            "completed_at": datetime.now(timezone.utc).isoformat() if t.completed else None,
             "incomplete_reason": t.incomplete_reason,
             "was_agent_scheduled": True,
             "sync_source": "review_ui",
@@ -203,11 +203,15 @@ def review_submit(body: ReviewSubmitRequest, user: dict = Depends(get_current_us
         if r.completed
     ]
     if rhythm_rows:
-        supabase.from_("rhythm_completions").insert(rhythm_rows).execute()
+        supabase.from_("rhythm_completions").upsert(
+            rhythm_rows,
+            on_conflict="user_id,rhythm_id,completed_on",
+            ignore_duplicates=True,
+        ).execute()
 
     # 3. Generate summary line (graceful fallback)
     try:
-        summary_line = _generate_summary_line(user, body.tasks, body.rhythms)
+        summary_line = _generate_summary_line(body.tasks, body.rhythms)
     except Exception:
         logger.warning("LLM summary generation failed, using fallback")
         summary_line = f"{completed_count} of {total_count} tasks done."

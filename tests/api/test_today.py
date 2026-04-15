@@ -95,7 +95,7 @@ def test_today_response_includes_review_available_false_before_cutoff(client):
             "rules": {"hard": []},
         },
     }
-    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
         {"id": 1}
     ]
     # 18:00 UTC = 14:00 ET — before cutoff of 20:30 ET
@@ -122,7 +122,7 @@ def test_today_response_includes_review_available_true_after_cutoff(client):
             "rules": {"hard": []},
         },
     }
-    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
         {"id": 1}
     ]
     # 01:00 UTC next day = 21:00 ET — after cutoff of 20:30 ET
@@ -147,7 +147,7 @@ def test_today_review_available_false_when_no_confirmed_schedule(client):
         "config": {"user": {"timezone": "America/New_York"}, "rules": {"hard": []}},
     }
     # No confirmed schedule
-    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []
 
     mock_now = datetime(2026, 4, 16, 1, 0, 0, tzinfo=timezone.utc)  # after cutoff
 
