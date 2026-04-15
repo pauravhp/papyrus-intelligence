@@ -83,6 +83,7 @@ def todoist_oauth_start(
         "https://api.todoist.com/oauth/authorize"
         f"?client_id={settings.TODOIST_CLIENT_ID}"
         "&scope=data:read_write"
+        "&force_approval=1"  # always show consent screen; prevents token reuse on repeat flows
         f"&state={_sign_state(user_id)}"
     )
     return RedirectResponse(url=auth_url, status_code=302)
