@@ -5,14 +5,44 @@ Only returns entries where confirmed = 1 (written to GCal).
 For each date, returns the most recent confirmed entry (highest id).
 """
 import json
-from datetime import date, timedelta
+import logging
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.auth import get_current_user
 from api.db import supabase
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api")
+
+
+def _get_now() -> datetime:
+    """Thin wrapper so tests can patch it."""
+    return datetime.now(timezone.utc)
+
+
+def _compute_review_available(user_config: dict, has_confirmed_schedule: bool) -> bool:
+    """Returns True if review cutoff has passed and a confirmed schedule exists today."""
+    if not has_confirmed_schedule:
+        return False
+    tz_name = user_config.get("user", {}).get("timezone", "UTC")
+    sleep_time_str = user_config.get("user", {}).get("sleep_time", "23:00")
+    if not sleep_time_str:
+        logger.warning("sleep_time missing from user config, defaulting to 23:00")
+        sleep_time_str = "23:00"
+    try:
+        tz = ZoneInfo(tz_name)
+        now_local = _get_now().astimezone(tz)
+        h, m = map(int, sleep_time_str.split(":"))
+        sleep_dt = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+        cutoff = sleep_dt - timedelta(hours=2, minutes=30)
+        return now_local >= cutoff
+    except Exception:
+        logger.warning("Failed to compute review cutoff, defaulting to False")
+        return False
 
 
 def _parse_day(row: dict | None) -> dict | None:
@@ -62,8 +92,36 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         if d not in by_date:
             by_date[d] = row
 
+    # Fetch user config for review_available (timezone + sleep_time)
+    config: dict = {}
+    try:
+        user_row = (
+            supabase.from_("users")
+            .select("config")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        if user_row.data:
+            config = user_row.data.get("config") or {}
+    except Exception:
+        pass  # review_available defaults to False on error
+
+    # Check if a confirmed schedule exists (separate lightweight query)
+    schedule_check = (
+        supabase.from_("schedule_log")
+        .select("id")
+        .eq("user_id", user_id)
+        .eq("confirmed", 1)
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    has_confirmed_schedule = bool(schedule_check.data)
+
     return {
         "yesterday": _parse_day(by_date.get(dates[0])),
         "today":     _parse_day(by_date.get(dates[1])),
         "tomorrow":  _parse_day(by_date.get(dates[2])),
+        "review_available": _compute_review_available(config, has_confirmed_schedule),
     }
