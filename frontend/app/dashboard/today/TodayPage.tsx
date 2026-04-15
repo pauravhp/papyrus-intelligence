@@ -9,6 +9,8 @@ import TodaySkeleton from "./TodaySkeleton";
 import ResearchSnippet from "./ResearchSnippet";
 import ReplanButton from "./ReplanButton";
 import ReplanModal from "./ReplanModal";
+import ReviewButton from "./ReviewButton";
+import ReviewModal from "./ReviewModal";
 
 export interface ScheduledItem {
   task_id: string;
@@ -34,6 +36,7 @@ interface TodayResponse {
   yesterday: DayData | null;
   today: DayData | null;
   tomorrow: DayData | null;
+  review_available: boolean;
 }
 
 const FADE = {
@@ -54,6 +57,7 @@ export default function TodayPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
   const [modalOpen, setModalOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   const load = useCallback(async () => {
     const { data: session } = await supabase.auth.getSession();
@@ -113,6 +117,9 @@ export default function TodayPage() {
         </div>
         {showReplanButton && (
           <ReplanButton onClick={() => setModalOpen(true)} />
+        )}
+        {data?.review_available && (
+          <ReviewButton onClick={() => setReviewOpen(true)} />
         )}
       </motion.div>
 
@@ -194,6 +201,14 @@ export default function TodayPage() {
             setLoading(true);
             load();
           }}
+        />
+      )}
+
+      {/* Review modal */}
+      {reviewOpen && (
+        <ReviewModal
+          token={token}
+          onClose={() => setReviewOpen(false)}
         />
       )}
     </div>
