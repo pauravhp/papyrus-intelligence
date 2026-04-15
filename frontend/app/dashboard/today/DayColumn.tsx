@@ -4,6 +4,11 @@ import { type DayData, type ScheduledItem } from "./TodayPage";
 import TaskBlock from "./TaskBlock";
 import NowIndicator from "./NowIndicator";
 
+const GRID_START = 8;
+const GRID_DEFAULT_END = 20;
+const PX_PER_HOUR = 72;
+const GUTTER_WIDTH = 44;
+
 interface DayColumnProps {
   label: string;
   dayData: DayData | null;
@@ -12,115 +17,249 @@ interface DayColumnProps {
 
 function fmtDate(isoDate: string): string {
   return new Date(isoDate + "T12:00:00").toLocaleDateString([], {
-    weekday: "short", day: "numeric", month: "short"
+    weekday: "short",
+    day: "numeric",
+    month: "short",
   });
 }
 
-// Detect tasks that start on the PREVIOUS day (cross-midnight continuations to show at top)
-function getContinuationItems(scheduled: ScheduledItem[], dayDate: string): ScheduledItem[] {
-  // Items where start_time is from the previous calendar day but end_time is on this day
-  return scheduled.filter(item => {
-    const startDate = new Date(item.start_time).toDateString();
-    const endDate   = new Date(item.end_time).toDateString();
-    const thisDay   = new Date(dayDate + "T12:00:00").toDateString();
-    return startDate !== thisDay && endDate === thisDay;
-  });
+function formatHour(h: number): string {
+  const actual = h % 24;
+  if (actual === 0) return "12 am";
+  if (actual === 12) return "12 pm";
+  if (actual < 12) return `${actual} am`;
+  return `${actual - 12} pm`;
+}
+
+function hasCrossMidnightTask(scheduled: ScheduledItem[]): boolean {
+  return scheduled.some(
+    (item) =>
+      new Date(item.end_time).getDate() !== new Date(item.start_time).getDate()
+  );
 }
 
 export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
-  const isEmpty = !dayData || dayData.scheduled.length === 0;
+  const scheduled = dayData?.scheduled ?? [];
+  const pushed = dayData?.pushed ?? [];
+  const isEmpty = scheduled.length === 0;
+
+  const crossMidnight = hasCrossMidnightTask(scheduled);
+  const gridEnd = crossMidnight ? 25 : GRID_DEFAULT_END;
+  const gridHeight = (gridEnd - GRID_START) * PX_PER_HOUR;
+
+  // Hour markers: one line + label per hour from GRID_START to gridEnd (inclusive start, exclusive end)
+  const hourMarkers = Array.from(
+    { length: gridEnd - GRID_START },
+    (_, i) => GRID_START + i
+  );
 
   const wrapperStyle: React.CSSProperties = isToday
     ? {
         background: "var(--surface)",
         border: "1px solid var(--border)",
         borderRadius: 12,
-        padding: "20px 18px",
+        overflow: "hidden",
+        boxShadow: "0 2px 16px rgba(192,122,47,0.09)",
       }
-    : { padding: "4px 0" };
+    : {};
 
   return (
     <div style={wrapperStyle}>
-      {/* Day heading */}
-      <p
-        className="font-display"
-        style={{ fontSize: 18, color: "var(--text)", marginBottom: 2 }}
+      {/* Column header */}
+      <div
+        style={{
+          padding: "12px 14px 10px",
+          borderBottom: "1px solid var(--border)",
+        }}
       >
-        {label}
-      </p>
-      {dayData && (
-        <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-literata)", marginBottom: 16 }}>
-          {fmtDate(dayData.schedule_date)}
+        <p
+          className="font-display"
+          style={{ fontSize: 16, color: "var(--text)" }}
+        >
+          {label}
         </p>
-      )}
+        {dayData && (
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--text-faint)",
+              fontFamily: "var(--font-literata)",
+              marginTop: 2,
+            }}
+          >
+            {fmtDate(dayData.schedule_date)}
+          </p>
+        )}
+      </div>
 
-      {isEmpty ? (
-        <p style={{
-          fontSize: 13,
-          color: "var(--text-faint)",
-          fontStyle: "italic",
-          fontFamily: "var(--font-literata)",
-          marginTop: dayData ? 0 : 8,
-        }}>
+      {/* Empty state */}
+      {isEmpty && (
+        <p
+          style={{
+            fontSize: 13,
+            color: "var(--text-faint)",
+            fontStyle: "italic",
+            fontFamily: "var(--font-literata)",
+            padding: "16px 14px",
+          }}
+        >
           {isToday ? (
-            <>No schedule yet.{" "}
-              <Link href="/dashboard" style={{ color: "var(--accent)", textDecoration: "none" }}>
+            <>
+              No schedule yet.{" "}
+              <Link
+                href="/dashboard"
+                style={{ color: "var(--accent)", textDecoration: "none" }}
+              >
                 Plan your day →
               </Link>
             </>
-          ) : "No schedule planned."}
+          ) : (
+            "No schedule planned."
+          )}
         </p>
-      ) : (
-        <div style={{ position: "relative" }}>
-          {/* Cross-midnight continuations at the top */}
-          {(() => {
-            const continuations = dayData.schedule_date
-              ? getContinuationItems(dayData.scheduled, dayData.schedule_date)
-              : [];
-            const continuationIds = new Set(continuations.map(c => c.task_id));
-            const mainItems = dayData.scheduled.filter(item => !continuationIds.has(item.task_id));
-            return (
-              <>
-                {continuations.map(item => (
-                  <TaskBlock key={`cont-${item.task_id}`} item={item} isContinuation />
-                ))}
-                {/* Now indicator (today only) — inserted between tasks */}
-                {isToday ? (
-                  <NowIndicator scheduled={mainItems} />
-                ) : (
-                  mainItems.map(item => (
-                    <TaskBlock key={item.task_id} item={item} />
-                  ))
-                )}
-              </>
-            );
-          })()}
+      )}
 
-          {/* Pushed tasks */}
-          {dayData.pushed.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <p style={{
-                fontSize: 10,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "var(--text-faint)",
-                marginBottom: 6,
-                fontFamily: "var(--font-literata)",
-              }}>
-                Didn&apos;t make the cut
-              </p>
-              {dayData.pushed.map((p) => (
-                <p key={p.task_id} style={{
-                  fontSize: 13,
+      {/* Calendar grid — shown even when empty for Today (so now line is visible) */}
+      {(!isEmpty || isToday) && (
+        <div style={{ display: "flex" }}>
+          {/* Time gutter */}
+          <div
+            style={{
+              width: GUTTER_WIDTH,
+              flexShrink: 0,
+              borderRight: "1px solid var(--border)",
+              position: "relative",
+              height: gridHeight,
+            }}
+          >
+            {hourMarkers.map((h) => (
+              <div
+                key={h}
+                style={{
+                  position: "absolute",
+                  top: (h - GRID_START) * PX_PER_HOUR,
+                  right: 6,
+                  fontSize: 10,
                   color: "var(--text-faint)",
                   fontFamily: "var(--font-literata)",
-                  lineHeight: 1.5,
-                }}>
-                  {p.reason}
-                </p>
-              ))}
-            </div>
-          )}
+                  transform: "translateY(-50%)",
+                  whiteSpace: "nowrap",
+                  fontVariantNumeric: "tabular-nums",
+                  userSelect: "none",
+                }}
+              >
+                {formatHour(h)}
+              </div>
+            ))}
+          </div>
+
+          {/* Events lane */}
+          <div
+            style={{
+              flex: 1,
+              position: "relative",
+              height: gridHeight,
+            }}
+          >
+            {/* Hour lines */}
+            {hourMarkers.map((h) => (
+              <div
+                key={`hr-${h}`}
+                style={{
+                  position: "absolute",
+                  top: (h - GRID_START) * PX_PER_HOUR,
+                  left: 0,
+                  right: 0,
+                  height: 1,
+                  background: "var(--border)",
+                }}
+              />
+            ))}
+
+            {/* Half-hour lines (dashed) */}
+            {hourMarkers.map((h) => (
+              <div
+                key={`hh-${h}`}
+                style={{
+                  position: "absolute",
+                  top: (h - GRID_START + 0.5) * PX_PER_HOUR,
+                  left: 0,
+                  right: 0,
+                  height: 1,
+                  opacity: 0.35,
+                  background:
+                    "repeating-linear-gradient(to right, var(--border) 0, var(--border) 4px, transparent 4px, transparent 8px)",
+                }}
+              />
+            ))}
+
+            {/* Midnight divider (cross-midnight tasks only) */}
+            {crossMidnight && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: (24 - GRID_START) * PX_PER_HOUR,
+                  left: 0,
+                  right: 0,
+                  borderTop: "1px dashed var(--accent)",
+                  display: "flex",
+                  alignItems: "center",
+                  zIndex: 5,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: "var(--accent)",
+                    fontFamily: "var(--font-literata)",
+                    padding: "0 4px",
+                    background: isToday ? "var(--surface)" : "var(--bg, #f5f0e8)",
+                  }}
+                >
+                  midnight →
+                </span>
+              </div>
+            )}
+
+            {/* Task blocks */}
+            {scheduled.map((item) => (
+              <TaskBlock key={item.task_id} item={item} />
+            ))}
+
+            {/* Now indicator (today column only) */}
+            {isToday && <NowIndicator />}
+          </div>
+        </div>
+      )}
+
+      {/* Pushed tasks */}
+      {pushed.length > 0 && (
+        <div style={{ padding: "12px 14px", borderTop: "1px solid var(--border)" }}>
+          <p
+            style={{
+              fontSize: 10,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--text-faint)",
+              marginBottom: 6,
+              fontFamily: "var(--font-literata)",
+            }}
+          >
+            Didn&apos;t make the cut
+          </p>
+          {pushed.map((p) => (
+            <p
+              key={p.task_id}
+              style={{
+                fontSize: 12,
+                color: "var(--text-faint)",
+                fontFamily: "var(--font-literata)",
+                lineHeight: 1.5,
+              }}
+            >
+              {p.reason}
+            </p>
+          ))}
         </div>
       )}
     </div>
