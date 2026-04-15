@@ -81,3 +81,93 @@ def test_get_today_handles_no_schedule(client, monkeypatch):
     assert data["yesterday"] is None
     assert data["today"] is None
     assert data["tomorrow"] is None
+
+
+def test_today_response_includes_review_available_false_before_cutoff(client, monkeypatch):
+    """review_available is False when current time is before sleep_time - 2.5h."""
+    from unittest.mock import patch, MagicMock
+    from datetime import datetime, timezone
+
+    mock_sb = MagicMock()
+    # Mock user row with sleep_time config
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+        "config": {
+            "user": {"timezone": "America/New_York", "sleep_time": "23:00"},
+            "rules": {"hard": []},
+        },
+        "todoist_oauth_token": {"access_token": "tok"},
+        "google_credentials": None,
+    }
+    # Mock schedule_log: one confirmed schedule today
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+        {"proposed_json": '{"scheduled": [], "pushed": []}', "confirmed": 1}
+    ]
+
+    # 14:00 local — before cutoff of 20:30
+    mock_now = datetime(2026, 4, 15, 14, 0, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    with patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today._get_now", return_value=mock_now):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    assert resp.json()["review_available"] is False
+
+
+def test_today_response_includes_review_available_true_after_cutoff(client, monkeypatch):
+    """review_available is True when current time is at or after sleep_time - 2.5h."""
+    from unittest.mock import patch, MagicMock
+    from datetime import datetime, timezone
+
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+        "config": {
+            "user": {"timezone": "America/New_York", "sleep_time": "23:00"},
+            "rules": {"hard": []},
+        },
+        "todoist_oauth_token": {"access_token": "tok"},
+        "google_credentials": None,
+    }
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+        {"proposed_json": '{"scheduled": [], "pushed": []}', "confirmed": 1}
+    ]
+
+    # 21:00 local — after cutoff of 20:30
+    mock_now = datetime(2026, 4, 16, 1, 0, 0, tzinfo=timezone.utc)  # 21:00 ET
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    with patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today._get_now", return_value=mock_now):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    assert resp.json()["review_available"] is True
+
+
+def test_today_review_available_false_when_no_confirmed_schedule(client, monkeypatch):
+    """review_available is False even after cutoff if no confirmed schedule exists."""
+    from unittest.mock import patch, MagicMock
+    from datetime import datetime, timezone
+
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+        "config": {"user": {"timezone": "America/New_York"}, "rules": {"hard": []}},
+        "todoist_oauth_token": {"access_token": "tok"},
+        "google_credentials": None,
+    }
+    # No confirmed schedule
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []
+
+    mock_now = datetime(2026, 4, 16, 1, 0, 0, tzinfo=timezone.utc)  # after cutoff
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    with patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today._get_now", return_value=mock_now):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    assert resp.json()["review_available"] is False
