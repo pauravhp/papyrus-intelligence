@@ -15,7 +15,7 @@ from datetime import date
 
 import anthropic
 
-from src.models import FreeWindow, TodoistTask
+from src.models import CalendarEvent, FreeWindow, TodoistTask
 
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
@@ -26,6 +26,7 @@ def _build_prompt(
     config: dict,
     context_note: str,
     target_date: str,
+    events: list[CalendarEvent] | None = None,
 ) -> str:
     tz = config.get("user", {}).get("timezone", "UTC")
     rules_hard = config.get("rules", {}).get("hard", [])
@@ -50,13 +51,23 @@ def _build_prompt(
 
     note = f"Note: {context_note}" if context_note else ""
 
+    timed_events = [e for e in (events or []) if not e.is_all_day]
+    if timed_events:
+        events_lines = "\n".join(
+            f"{e.start.strftime('%H:%M')}-{e.end.strftime('%H:%M')} {e.summary}"
+            for e in sorted(timed_events, key=lambda e: e.start)
+        )
+        calendar_section = f"\nCALENDAR EVENTS (already blocked — do not schedule over these):\n{events_lines}\n"
+    else:
+        calendar_section = ""
+
     return f"""Schedule tasks for {target_date} tz={tz}. {note}
 
 TASKS (id name priority duration):
 {tasks_text}
 
 FREE WINDOWS: {windows_text}
-
+{calendar_section}
 HARD RULES: {rules_text}
 
 Reply ONLY with JSON:
@@ -107,6 +118,7 @@ def schedule_day(
     context_note: str,
     anthropic_api_key: str | None,
     target_date: str | None = None,
+    events: list[CalendarEvent] | None = None,
 ) -> dict:
     """
     Single LLM call that assigns tasks to time slots.
@@ -121,7 +133,7 @@ def schedule_day(
     if not target_date:
         target_date = date.today().isoformat()
 
-    prompt = _build_prompt(tasks, free_windows, config, context_note, target_date)
+    prompt = _build_prompt(tasks, free_windows, config, context_note, target_date, events=events)
 
     if anthropic_api_key:
         client = anthropic.Anthropic(api_key=anthropic_api_key)

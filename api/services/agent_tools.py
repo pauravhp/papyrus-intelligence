@@ -137,7 +137,7 @@ def execute_schedule_day(
     )
 
     scheduled_tasks = todoist_client.get_todays_scheduled_tasks(target_date)
-    free_windows = compute_free_windows(events, target_date, config, scheduled_tasks)
+    free_windows = compute_free_windows(events, target_date, config, scheduled_tasks=scheduled_tasks)
     # Exclude already-scheduled tasks from LLM input — they block time via free_windows above
     already_scheduled_ids = {t.id for t in scheduled_tasks}
     tasks_raw = [t for t in tasks_raw if t.id not in already_scheduled_ids]
@@ -149,7 +149,35 @@ def execute_schedule_day(
         context_note=context_note,
         anthropic_api_key=user_ctx.get("anthropic_api_key"),
         target_date=target_date_str,
+        events=events,
     )
+
+    # Enforce free-window constraints on LLM output (Rule 1: code enforces).
+    # Any item whose proposed slot doesn't fall within a computed free window
+    # is moved to pushed — this prevents scheduling on top of GCal events.
+    valid_scheduled = []
+    overflow_pushed = []
+    for item in result.get("scheduled", []):
+        try:
+            item_start = datetime.fromisoformat(item["start_time"])
+            item_end = datetime.fromisoformat(item["end_time"])
+        except (KeyError, ValueError):
+            valid_scheduled.append(item)
+            continue
+        in_window = any(
+            item_start >= w.start and item_end <= w.end
+            for w in free_windows
+        )
+        if in_window:
+            valid_scheduled.append(item)
+        else:
+            overflow_pushed.append({
+                "task_id": item.get("task_id", ""),
+                "reason": "Proposed time falls outside available free windows (conflicts with existing calendar events or constraints)",
+            })
+    result["scheduled"] = valid_scheduled
+    result["pushed"] = list(result.get("pushed", [])) + overflow_pushed
+
     # Restore full task names (inner LLM only saw truncated versions)
     for item in result.get("scheduled", []):
         tid = item.get("task_id")

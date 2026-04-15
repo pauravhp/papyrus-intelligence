@@ -156,6 +156,118 @@ def test_schedule_day_injects_project_as_synthetic_task():
     assert proj_tasks[0].sessions_per_week == 2
 
 
+def test_schedule_day_passes_scheduled_tasks_as_keyword_arg():
+    """Bug fix: scheduled_tasks must be passed as a keyword arg to compute_free_windows.
+    The 4th positional param is late_night_prior:bool, not scheduled_tasks.
+    Passing a list positionally caused a spurious 90-min wake penalty and
+    failed to block already-scheduled task slots."""
+    from api.services.agent_tools import execute_schedule_day
+    from src.models import TodoistTask
+
+    TZ = ZoneInfo("America/Vancouver")
+    ctx = {
+        "config": {
+            "user": {"timezone": "America/Vancouver"},
+            "calendar_ids": [],
+            "sleep": {},
+            "rules": {"hard": [], "soft": []},
+        },
+        "todoist_api_key": "tok",
+        "anthropic_api_key": "sk-ant",
+        "gcal_service": MagicMock(),
+        "user_id": "u1",
+        "supabase": MagicMock(),
+    }
+
+    pre_scheduled = [
+        TodoistTask(
+            id="t-pre", content="Existing Task", project_id="p1", priority=1,
+            due_datetime=datetime(2026, 4, 15, 10, 0, tzinfo=TZ),
+            deadline=None, duration_minutes=60, labels=[], is_inbox=False,
+        )
+    ]
+    captured = {}
+
+    def fake_compute_free_windows(events, target_date, context, late_night_prior=False, scheduled_tasks=None, **kw):
+        captured["late_night_prior"] = late_night_prior
+        captured["scheduled_tasks"] = scheduled_tasks
+        return []
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", side_effect=fake_compute_free_windows), \
+         patch("api.services.agent_tools.schedule_day", return_value={"scheduled": [], "pushed": [], "reasoning_summary": ""}), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = pre_scheduled
+        execute_schedule_day("", "2026-04-15", ctx)
+
+    assert captured.get("late_night_prior") is False, (
+        "scheduled_tasks list was passed as late_night_prior — use keyword arg"
+    )
+    assert captured.get("scheduled_tasks") == pre_scheduled, (
+        "scheduled_tasks was not forwarded to compute_free_windows"
+    )
+
+
+def test_schedule_day_pushes_llm_times_outside_free_windows():
+    """LLM-proposed start/end times that fall outside computed free windows are
+    moved to pushed — prevents scheduling tasks on top of GCal events."""
+    from api.services.agent_tools import execute_schedule_day
+    from src.models import FreeWindow
+
+    TZ = ZoneInfo("America/Vancouver")
+    ctx = {
+        "config": {
+            "user": {"timezone": "America/Vancouver"},
+            "calendar_ids": [],
+            "sleep": {},
+            "rules": {"hard": [], "soft": []},
+        },
+        "todoist_api_key": "tok",
+        "anthropic_api_key": "sk-ant",
+        "gcal_service": MagicMock(),
+        "user_id": "u1",
+        "supabase": MagicMock(),
+    }
+
+    # Only one free window: 10:00–11:00
+    free_window = FreeWindow(
+        start=datetime(2026, 4, 15, 10, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 11, 0, tzinfo=TZ),
+        duration_minutes=60,
+        block_type="morning",
+    )
+
+    # LLM proposes 14:00–15:00 — this slot is blocked by a GCal event (not in free windows)
+    llm_result = {
+        "scheduled": [
+            {
+                "task_id": "t1",
+                "task_name": "Task A",
+                "start_time": "2026-04-15T14:00:00-07:00",
+                "end_time": "2026-04-15T15:00:00-07:00",
+                "duration_minutes": 60,
+            }
+        ],
+        "pushed": [],
+        "reasoning_summary": "scheduled",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[free_window]), \
+         patch("api.services.agent_tools.schedule_day", return_value=llm_result), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        result = execute_schedule_day("", "2026-04-15", ctx)
+
+    assert len(result["scheduled"]) == 0, "Task outside free window must not appear in scheduled"
+    assert len(result["pushed"]) == 1, "Task outside free window must be moved to pushed"
+    assert result["pushed"][0]["task_id"] == "t1"
+
+
 def test_confirm_schedule_skips_todoist_for_project_tasks():
     """Items with task_id starting with proj_ get a GCal event but no Todoist write."""
     from api.services.agent_tools import execute_confirm_schedule

@@ -84,6 +84,74 @@ def test_schedule_day_retries_on_invalid_json():
             )
 
 
+def test_build_prompt_shows_gcal_events():
+    """_build_prompt must include a CALENDAR EVENTS section so the LLM knows
+    what is already on the user's calendar and why certain times are blocked."""
+    from api.services.schedule_service import _build_prompt
+    from src.models import CalendarEvent
+    from zoneinfo import ZoneInfo
+
+    TZ = ZoneInfo("America/Vancouver")
+    event = CalendarEvent(
+        id="e1", summary="Team Standup",
+        start=datetime(2026, 4, 15, 9, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 9, 30, tzinfo=TZ),
+        color_id=None, is_all_day=False,
+    )
+    prompt = _build_prompt([], [], {}, "", "2026-04-15", events=[event])
+    assert "Team Standup" in prompt
+    assert "09:00" in prompt
+    assert "09:30" in prompt
+
+
+def test_execute_schedule_day_passes_events_to_schedule_day():
+    """execute_schedule_day must forward fetched GCal events to schedule_day
+    so the inner LLM prompt can include them."""
+    from api.services.agent_tools import execute_schedule_day
+    from src.models import CalendarEvent
+    from zoneinfo import ZoneInfo
+
+    TZ = ZoneInfo("America/Vancouver")
+    ctx = {
+        "config": {
+            "user": {"timezone": "America/Vancouver"},
+            "calendar_ids": [],
+            "sleep": {},
+            "rules": {"hard": [], "soft": []},
+        },
+        "todoist_api_key": "tok",
+        "anthropic_api_key": "sk-ant",
+        "gcal_service": MagicMock(),
+        "user_id": "u1",
+        "supabase": MagicMock(),
+    }
+
+    gcal_event = CalendarEvent(
+        id="ev1", summary="Product Review",
+        start=datetime(2026, 4, 15, 14, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 15, 30, tzinfo=TZ),
+        color_id=None, is_all_day=False,
+    )
+    captured = {}
+
+    def fake_schedule_day(tasks, free_windows, config, context_note, events=None, **kwargs):
+        captured["events"] = events
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[gcal_event]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
+         patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        execute_schedule_day("", "2026-04-15", ctx)
+
+    assert captured.get("events") == [gcal_event], (
+        "execute_schedule_day did not forward GCal events to schedule_day"
+    )
+
+
 def test_build_prompt_shows_session_range_for_budget_task():
     from src.models import TodoistTask, FreeWindow
     from datetime import datetime

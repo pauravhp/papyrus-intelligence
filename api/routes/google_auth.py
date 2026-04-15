@@ -151,7 +151,7 @@ def google_oauth_callback(
         supabase.from_("users")
         .select("oauth_code_verifier")
         .eq("id", user_id)
-        .maybeSingle()
+        .maybe_single()
         .execute()
     )
     code_verifier = (row.data or {}).get("oauth_code_verifier")

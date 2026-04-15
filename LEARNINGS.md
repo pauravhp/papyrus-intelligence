@@ -171,3 +171,11 @@ API gotchas and architectural decisions. Read before touching any API client cod
 **`src/queries/budgets.py` has orphaned SQLite CRUD functions.** After adding `api/services/project_service.py`, the old SQLite functions (`create_project_budget`, `get_all_active_budgets`, `decrement_budget`, etc.) in `budgets.py` are unreachable dead code. Only `compute_deadline_pressure` from that file is still imported. Clean up those SQLite functions in a future session.
 
 **Patching module-level imports in agent_tools.py requires the import at module scope.** `patch("api.services.agent_tools.get_active_projects", ...)` only works if `get_active_projects` is imported at the top of `agent_tools.py`, not inside a function. Inline imports (`from x import y` inside a function) create a local name that can't be patched via the module path.
+
+## BUG-1 — schedule_day / GCal integration (fixed 2026-04-15)
+
+Three issues found and fixed together:
+
+1. **Positional arg mismatch** (`agent_tools.py`): `compute_free_windows(..., scheduled_tasks)` passed the list as `late_night_prior`. Fix: keyword arg `scheduled_tasks=scheduled_tasks`.
+2. **No post-LLM validation**: LLM-proposed times were never checked against free windows — a hallucinated slot inside a blocked interval would get confirmed on top of a GCal event. Fix: filter `scheduled` items outside all free windows into `pushed` after `schedule_day` returns.
+3. **LLM had no event context**: prompt only showed opaque window strings. Fix: pass `events` to `_build_prompt`; add `CALENDAR EVENTS (already blocked)` section so the LLM reasons around actual meetings.
