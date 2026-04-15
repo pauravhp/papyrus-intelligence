@@ -198,3 +198,136 @@ def test_replan_completed_tasks_auto_promoted(client, monkeypatch):
 
 def _today_dt():
     return date.today()
+
+
+def test_replan_confirm_deletes_afternoon_gcal_events(client, monkeypatch):
+    """POST /api/replan/confirm deletes afternoon GCal events and creates new ones."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
+    row, _ = _mock_schedule_log_today(mock_sb, gcal_event_ids='["evt-1", "evt-2"]')
+
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    (
+        mock_sb.from_.return_value
+        .insert.return_value
+        .execute.return_value
+    ).data = [{"id": 2}]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_gcal = MagicMock()
+    # Event 1 starts in the afternoon (should be deleted)
+    mock_gcal.events.return_value.get.return_value.execute.return_value = {
+        "start": {"dateTime": f"{_today()}T14:00:00-07:00"}
+    }
+    mock_gcal.events.return_value.delete.return_value.execute.return_value = {}
+    mock_gcal.events.return_value.insert.return_value.execute.return_value = {"id": "new-evt-1"}
+
+    schedule = {
+        "scheduled": [
+            {
+                "task_id": "t1",
+                "task_name": "Deep work",
+                "start_time": f"{_today()}T15:00:00-07:00",
+                "end_time": f"{_today()}T16:30:00-07:00",
+                "duration_minutes": 90,
+            }
+        ],
+        "pushed": [],
+    }
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.routes.replan.delete_event") as mock_delete, \
+         patch("api.routes.replan.create_event", return_value="new-evt-1"):
+
+        MockTodoist.return_value.schedule_task.return_value = None
+
+        resp = client.post(
+            "/api/replan/confirm",
+            json={"schedule": schedule, "tomorrow_task_ids": []},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["confirmed"] is True
+    assert data["gcal_events_created"] == 1
+
+
+def test_replan_confirm_pushes_tomorrow_tasks(client, monkeypatch):
+    """POST /api/replan/confirm calls clear_task_due + add_comment for tomorrow_task_ids."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
+    row, _ = _mock_schedule_log_today(mock_sb)
+
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    (
+        mock_sb.from_.return_value
+        .insert.return_value
+        .execute.return_value
+    ).data = [{"id": 2}]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_gcal = MagicMock()
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.routes.replan.create_event", return_value="new-evt-1"):
+
+        resp = client.post(
+            "/api/replan/confirm",
+            json={"schedule": {"scheduled": [], "pushed": []}, "tomorrow_task_ids": ["t2"]},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    MockTodoist.return_value.clear_task_due.assert_called_once_with("t2")
+    MockTodoist.return_value.add_comment.assert_called_once()
+
+
+def test_replan_preflight_returns_completed_ids(client, monkeypatch):
+    """POST /api/replan/preflight returns task IDs that Todoist marks as completed."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)):
+
+        def is_completed(task_id):
+            return task_id == "t1"
+        MockTodoist.return_value.is_task_completed.side_effect = is_completed
+
+        resp = client.post(
+            "/api/replan/preflight",
+            json={"task_ids": ["t1", "t2"]},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["completed_ids"] == ["t1"]
