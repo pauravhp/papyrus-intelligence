@@ -212,6 +212,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
         "proposed_json": _json.dumps(schedule),
         "confirmed": 1,
         "confirmed_at": _dt.now().isoformat(),
+        "gcal_event_ids": _json.dumps(gcal_event_ids),
     }).execute()
 
     return {
