@@ -182,8 +182,8 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
                         supabase.from_("users").update(
                             {"google_credentials": refreshed}
                         ).eq("id", user_id).execute()
-                except Exception:
-                    pass  # gcal_events will be empty — graceful degradation
+                except Exception as e:
+                    logger.warning("Failed to build GCal service for user %s: %s", user_id, e)
     except Exception:
         pass  # review_available defaults to False on error
 

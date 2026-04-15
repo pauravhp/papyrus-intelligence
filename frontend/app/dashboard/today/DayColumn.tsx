@@ -43,7 +43,9 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
   const scheduled = dayData?.scheduled ?? [];
   const pushed = dayData?.pushed ?? [];
   const isEmpty = scheduled.length === 0;
-  const hasGcal = (dayData?.gcal_events?.length ?? 0) > 0;
+  const hasGcal =
+    (dayData?.gcal_events?.length ?? 0) > 0 ||
+    (dayData?.all_day_events?.length ?? 0) > 0;
 
   const crossMidnight = hasCrossMidnightTask(scheduled);
   const gridEnd = crossMidnight ? 25 : GRID_DEFAULT_END;
