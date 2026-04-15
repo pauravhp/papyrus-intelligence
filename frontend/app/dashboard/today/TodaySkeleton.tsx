@@ -37,7 +37,7 @@ function ColumnSkeleton({ wide }: { wide?: boolean }) {
 export default function TodaySkeleton() {
   return (
     <div style={{ padding: "32px 48px 48px" }} aria-busy="true">
-      <SkeletonBar width={120} height={32} />
+      <SkeletonBar width="120px" height={32} />
       <div style={{ marginTop: 32, display: "flex", gap: 24 }}>
         <ColumnSkeleton />
         <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "20px 18px" }}>
