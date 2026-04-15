@@ -172,9 +172,11 @@ API gotchas and architectural decisions. Read before touching any API client cod
 
 **Patching module-level imports in agent_tools.py requires the import at module scope.** `patch("api.services.agent_tools.get_active_projects", ...)` only works if `get_active_projects` is imported at the top of `agent_tools.py`, not inside a function. Inline imports (`from x import y` inside a function) create a local name that can't be patched via the module path.
 
-## BUG-2 — Todoist OAuth force_approval (fixed 2026-04-15)
+## BUG-2 — Todoist OAuth re-consent (investigated 2026-04-15)
 
-**`&force_approval=1` must be added to the Todoist authorization URL.** Without it, Todoist re-uses an existing token on repeat OAuth flows, skips the consent screen, and returns no new access token — silently breaking re-auth. Adding `force_approval=1` mirrors Google's `prompt=consent` pattern and guarantees a fresh token every time.
+**Todoist has no OAuth parameter to force re-consent.** The `force_approval` parameter does not exist in Todoist's OAuth spec (documented params: `client_id`, `scope`, `state`, optional `redirect_uri`). Todoist silently ignores unknown query params. Repeat authorizations auto-approve server-side without showing the consent screen — this is Todoist's intentional design.
+
+**Account switching requires manual steps.** To connect a different Todoist account, users must: (1) go to Todoist Settings → Integrations → disconnect the app, (2) return and re-authorize. The correct product fix is a "Disconnect Todoist" button in the frontend that clears `todoist_oauth_token` in Supabase, with instructions to revoke access in Todoist settings first.
 
 ---
 

@@ -31,7 +31,6 @@ def test_todoist_oauth_start_redirects_to_todoist(client):
     assert "api.todoist.com/oauth/authorize" in location
     assert "data%3Aread_write" in location or "data:read_write" in location
     assert "test-todoist-client-id" in location
-    assert "force_approval=1" in location
 
 
 def test_todoist_oauth_callback_stores_token(client):
