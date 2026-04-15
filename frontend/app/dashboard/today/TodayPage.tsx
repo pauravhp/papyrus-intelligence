@@ -62,7 +62,7 @@ export default function TodayPage() {
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
