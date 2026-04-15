@@ -7,6 +7,8 @@ import { apiFetch } from "@/utils/api";
 import DayColumn from "./DayColumn";
 import TodaySkeleton from "./TodaySkeleton";
 import ResearchSnippet from "./ResearchSnippet";
+import ReplanButton from "./ReplanButton";
+import ReplanModal from "./ReplanModal";
 
 export interface ScheduledItem {
   task_id: string;
@@ -47,24 +49,36 @@ export default function TodayPage() {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
   const [data, setData] = useState<TodayResponse | null>(null);
+  const [token, setToken] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
+  const [modalOpen, setModalOpen] = useState(false);
 
   const load = useCallback(async () => {
     const { data: session } = await supabase.auth.getSession();
-    const token = session.session?.access_token ?? "";
+    const tok = session.session?.access_token ?? "";
+    setToken(tok);
     try {
-      const result = await apiFetch<TodayResponse>("/api/today", token);
+      const result = await apiFetch<TodayResponse>("/api/today", tok);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load schedule");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
+
+  const now = new Date();
+  const isPastNoon = now.getHours() >= 12;
+  const showReplanButton = isPastNoon && !!data?.today;
+
+  // Afternoon tasks: start_time >= now
+  const afternoonTasks: ScheduledItem[] = (data?.today?.scheduled ?? []).filter((item) => {
+    return new Date(item.start_time) >= now;
+  });
 
   if (loading) return <TodaySkeleton />;
   if (error) return (
@@ -84,17 +98,22 @@ export default function TodayPage() {
       {/* Header */}
       <motion.div
         initial="hidden" animate="show" custom={0} variants={FADE}
-        style={{ marginBottom: 32 }}
+        style={{ marginBottom: 32, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}
       >
-        <h1
-          className="font-display"
-          style={{ fontSize: 32, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 4 }}
-        >
-          Schedule
-        </h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-literata)" }}>
-          Yesterday, today, and what&apos;s ahead.
-        </p>
+        <div>
+          <h1
+            className="font-display"
+            style={{ fontSize: 32, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 4 }}
+          >
+            Schedule
+          </h1>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-literata)" }}>
+            Yesterday, today, and what&apos;s ahead.
+          </p>
+        </div>
+        {showReplanButton && (
+          <ReplanButton onClick={() => setModalOpen(true)} />
+        )}
       </motion.div>
 
       {/* Desktop: 3-column */}
@@ -163,6 +182,21 @@ export default function TodayPage() {
       </div>
 
       <ResearchSnippet />
+
+      {/* Replan modal */}
+      {modalOpen && (
+        <ReplanModal
+          afternoonTasks={afternoonTasks}
+          token={token}
+          onClose={() => setModalOpen(false)}
+          onConfirm={() => {
+            setModalOpen(false);
+            setLoading(true);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }
+
