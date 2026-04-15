@@ -1,0 +1,387 @@
+// frontend/app/dashboard/today/ReplanModal.tsx
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { type ScheduledItem } from "./TodayPage";
+import TaskTriageBlock, { type TriageState } from "./TaskTriageBlock";
+import ProposedCalendar from "./ProposedCalendar";
+
+const MAX_WORDS = 40;
+function countWords(s: string): number {
+  return s.trim() === "" ? 0 : s.trim().split(/\s+/).length;
+}
+
+interface ReplanModalProps {
+  afternoonTasks: ScheduledItem[];
+  token: string;
+  onClose: () => void;
+  onConfirm: () => void;
+}
+
+type Phase = "triage" | "loading" | "proposed";
+
+interface ProposedResult {
+  scheduled: ScheduledItem[];
+  pushed: Array<{ task_id: string; reason: string }>;
+  reasoning_summary: string;
+}
+
+export default function ReplanModal({
+  afternoonTasks,
+  token,
+  onClose,
+  onConfirm,
+}: ReplanModalProps) {
+  const [phase, setPhase] = useState<Phase>("triage");
+  // task_id -> state; default to "keep"
+  const [triageStates, setTriageStates] = useState<Record<string, TriageState>>(
+    () => Object.fromEntries(afternoonTasks.map((t) => [t.task_id, "keep"]))
+  );
+  // Pre-flight: track which tasks were auto-set by Todoist
+  const [todistDone, setTodoistDone] = useState<Set<string>>(new Set());
+  const [contextNote, setContextNote] = useState("");
+  const [proposed, setProposed] = useState<ProposedResult | null>(null);
+  const [isRefining, setIsRefining] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const noteWordCount = countWords(contextNote);
+  const noteOverLimit = noteWordCount > MAX_WORDS;
+  // Replan is always enabled — even if all tasks are done/tomorrow, backlog fills the rest of the day
+
+  // Fetch Todoist pre-flight on mount
+  useEffect(() => {
+    async function preflight() {
+      try {
+        const res = await fetch("/api/replan/preflight", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ task_ids: afternoonTasks.map((t) => t.task_id) }),
+        });
+        if (res.ok) {
+          const { completed_ids } = await res.json() as { completed_ids: string[] };
+          const doneSet = new Set(completed_ids);
+          setTodoistDone(doneSet);
+          setTriageStates((prev) => {
+            const next = { ...prev };
+            for (const tid of completed_ids) {
+              next[tid] = "done";
+            }
+            return next;
+          });
+        }
+      } catch {
+        // Silently skip — user can toggle manually
+      }
+    }
+    if (afternoonTasks.length > 0) preflight();
+  }, [afternoonTasks, token]);
+
+  // Focus trap + Escape key
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  const handleTriageChange = useCallback((id: string, state: TriageState) => {
+    setTriageStates((prev) => ({ ...prev, [id]: state }));
+  }, []);
+
+  async function submitReplan(refinementMessage?: string) {
+    setPhase("loading");
+    setError(null);
+    try {
+      const res = await fetch("/api/replan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          task_states: triageStates,
+          context_note: contextNote,
+          refinement_message: refinementMessage ?? null,
+        }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail ?? "Replan failed.";
+        throw new Error(detail);
+      }
+      const result = await res.json() as ProposedResult;
+      setProposed(result);
+      setPhase("proposed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setPhase("triage");
+    }
+  }
+
+  async function handleRefinement(message: string) {
+    setIsRefining(true);
+    setPhase("loading");
+    try {
+      const res = await fetch("/api/replan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          task_states: triageStates,
+          context_note: contextNote,
+          refinement_message: message,
+        }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail ?? "Refinement failed.";
+        throw new Error(detail);
+      }
+      const result = await res.json() as ProposedResult;
+      setProposed(result);
+      setPhase("proposed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setPhase("proposed");
+    } finally {
+      setIsRefining(false);
+    }
+  }
+
+  async function handleConfirm() {
+    if (!proposed) return;
+    setPhase("loading");
+    try {
+      const tomorrowIds = Object.entries(triageStates)
+        .filter(([, s]) => s === "tomorrow")
+        .map(([id]) => id);
+
+      const res = await fetch("/api/replan/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ schedule: proposed, tomorrow_task_ids: tomorrowIds }),
+      });
+      if (!res.ok) {
+        const detail = (await res.json().catch(() => ({}))).detail ?? "Confirm failed.";
+        throw new Error(detail);
+      }
+      onConfirm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setPhase("proposed");
+    }
+  }
+
+  return (
+    // Backdrop
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        backdropFilter: "blur(4px)",
+        background: "rgba(0,0,0,0.3)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+      }}
+    >
+      {/* Dialog */}
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Replan your afternoon"
+        tabIndex={-1}
+        style={{
+          background: "var(--surface)",
+          borderRadius: 16,
+          padding: 28,
+          width: "100%",
+          maxWidth: 520,
+          maxHeight: "85vh",
+          overflowY: "auto",
+          outline: "none",
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h2
+            className="font-display"
+            style={{ fontSize: 22, letterSpacing: "-0.02em", color: "var(--text)" }}
+          >
+            {phase === "proposed" ? "Proposed afternoon" : "Replan afternoon"}
+          </h2>
+          <button
+            onClick={onClose}
+            aria-label="Close modal"
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-muted)",
+              fontSize: 18,
+              cursor: "pointer",
+              lineHeight: 1,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {error && (
+          <p style={{ color: "var(--accent-danger, #ef4444)", fontSize: 13, marginBottom: 16, fontFamily: "var(--font-literata)" }}>
+            {error}
+          </p>
+        )}
+
+        {/* Phase content */}
+        <AnimatePresence mode="wait">
+          {phase === "triage" && (
+            <motion.div
+              key="triage"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -14 }}
+              transition={{ duration: 0.24 }}
+            >
+              {afternoonTasks.length === 0 ? (
+                <p style={{ fontSize: 13, color: "var(--text-faint)", fontStyle: "italic", fontFamily: "var(--font-literata)", marginBottom: 16 }}>
+                  No afternoon tasks found in today&apos;s schedule.
+                </p>
+              ) : (
+                <div style={{ marginBottom: 16 }}>
+                  {afternoonTasks.map((task) => (
+                    <TaskTriageBlock
+                      key={task.task_id}
+                      item={task}
+                      state={triageStates[task.task_id] ?? "keep"}
+                      onStateChange={handleTriageChange}
+                      fromTodoist={todistDone.has(task.task_id)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Context note */}
+              <div style={{ marginBottom: 20 }}>
+                <textarea
+                  value={contextNote}
+                  onChange={(e) => setContextNote(e.target.value)}
+                  placeholder="Anything the app should know? e.g. 'running behind, skip the gym'"
+                  rows={3}
+                  aria-label="Context note for replanning"
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: `1px solid ${noteOverLimit ? "var(--accent-danger, #ef4444)" : "var(--border)"}`,
+                    background: "var(--surface)",
+                    color: "var(--text)",
+                    fontSize: 13,
+                    fontFamily: "var(--font-literata)",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                    outline: "none",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                  <span style={{
+                    fontSize: 11,
+                    color: noteOverLimit ? "var(--accent-danger, #ef4444)" : "var(--text-faint)",
+                    fontFamily: "var(--font-literata)",
+                  }}>
+                    {noteWordCount}/{MAX_WORDS} words
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => submitReplan()}
+                disabled={noteOverLimit}
+                aria-disabled={noteOverLimit}
+                style={{
+                  width: "100%",
+                  padding: "10px 0",
+                  background: !noteOverLimit ? "var(--accent)" : "var(--border)",
+                  color: !noteOverLimit ? "var(--surface)" : "var(--text-faint)",
+                  border: "none",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontFamily: "var(--font-literata)",
+                  fontWeight: 500,
+                  cursor: !noteOverLimit ? "pointer" : "not-allowed",
+                }}
+              >
+                Replan →
+              </button>
+            </motion.div>
+          )}
+
+          {phase === "loading" && (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              aria-busy="true"
+              style={{ padding: "32px 0", display: "flex", flexDirection: "column", gap: 10 }}
+            >
+              {[120, 80, 100, 60].map((w, i) => (
+                <motion.div
+                  key={i}
+                  animate={{ opacity: [0.4, 0.7, 0.4] }}
+                  transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.15 }}
+                  style={{
+                    height: 22,
+                    width: `${w}%`,
+                    maxWidth: "100%",
+                    borderRadius: 6,
+                    background: "var(--border)",
+                  }}
+                />
+              ))}
+            </motion.div>
+          )}
+
+          {phase === "proposed" && proposed && (
+            <motion.div
+              key="proposed"
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -14 }}
+              transition={{ duration: 0.24 }}
+            >
+              <ProposedCalendar
+                scheduled={proposed.scheduled}
+                reasoningSummary={proposed.reasoning_summary}
+                onRefinement={handleRefinement}
+                isRefining={isRefining}
+              />
+
+              <button
+                onClick={handleConfirm}
+                style={{
+                  width: "100%",
+                  padding: "10px 0",
+                  background: "var(--accent)",
+                  color: "var(--surface)",
+                  border: "none",
+                  borderRadius: 8,
+                  fontSize: 14,
+                  fontFamily: "var(--font-literata)",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  marginTop: 20,
+                }}
+              >
+                Confirm schedule
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
