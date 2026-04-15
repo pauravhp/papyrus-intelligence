@@ -3,6 +3,7 @@ GET /api/today — Return confirmed schedule_log entries for yesterday, today, t
 
 Only returns entries where confirmed = 1 (written to GCal).
 For each date, returns the most recent confirmed entry (highest id).
+GCal events are fetched live for each day and returned alongside confirmed schedule data.
 """
 import json
 import logging
@@ -12,7 +13,9 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.auth import get_current_user
+from api.config import settings
 from api.db import supabase
+from src.calendar_client import build_gcal_service_from_credentials, get_events
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +48,81 @@ def _compute_review_available(user_config: dict, has_confirmed_schedule: bool) -
         return False
 
 
-def _parse_day(row: dict | None) -> dict | None:
-    """Parse a schedule_log row into a clean day dict. Returns None if no row."""
-    if not row or not row.get("proposed_json"):
-        return None
+def _papyrus_ids(row: dict | None) -> set[str]:
+    """Parse gcal_event_ids JSON from a schedule_log row. Returns empty set on failure."""
+    if not row:
+        return set()
+    raw = row.get("gcal_event_ids") or "[]"
     try:
-        parsed = json.loads(row["proposed_json"])
+        return set(json.loads(raw))
     except (json.JSONDecodeError, TypeError):
+        return set()
+
+
+def _fetch_gcal_for_date(
+    target_date: date,
+    tz_str: str,
+    cal_ids: list,
+    gcal_service,
+    papyrus_event_ids: set[str],
+) -> tuple[list[dict], list[str]]:
+    """Fetch GCal events for one day. Returns (timed_events, all_day_names).
+    Returns ([], []) if service is None or the GCal call fails.
+    """
+    if not gcal_service:
+        return [], []
+    try:
+        events = get_events(
+            target_date=target_date,
+            timezone_str=tz_str,
+            extra_calendar_ids=cal_ids,
+            service=gcal_service,
+        )
+    except Exception:
+        logger.warning("GCal read failed for %s", target_date)
+        return [], []
+    timed: list[dict] = []
+    all_day: list[str] = []
+    for e in events:
+        if e.id in papyrus_event_ids:
+            continue
+        if e.is_all_day:
+            all_day.append(e.summary)
+        else:
+            timed.append({
+                "id": e.id,
+                "summary": e.summary,
+                "start_time": e.start.isoformat(),
+                "end_time": e.end.isoformat(),
+            })
+    return timed, all_day
+
+
+def _parse_day(
+    row: dict | None,
+    target_date: str,
+    gcal_events: list[dict],
+    all_day_events: list[str],
+) -> dict | None:
+    """Parse schedule_log row + gcal data into a day dict. Returns None if no data at all."""
+    has_schedule = row and row.get("proposed_json")
+    has_gcal = bool(gcal_events or all_day_events)
+    if not has_schedule and not has_gcal:
         return None
+    if has_schedule:
+        try:
+            parsed = json.loads(row["proposed_json"])
+        except (json.JSONDecodeError, TypeError):
+            parsed = {}
+    else:
+        parsed = {}
     return {
-        "schedule_date": row["schedule_date"],
+        "schedule_date": target_date,
         "scheduled": parsed.get("scheduled", []),
         "pushed": parsed.get("pushed", []),
-        "confirmed_at": row.get("confirmed_at"),
+        "confirmed_at": (row or {}).get("confirmed_at"),
+        "gcal_events": gcal_events,
+        "all_day_events": all_day_events,
     }
 
 
@@ -65,6 +130,7 @@ def _parse_day(row: dict | None) -> dict | None:
 def get_today_view(user: dict = Depends(get_current_user)) -> dict:
     """
     Returns confirmed schedules for yesterday, today, and tomorrow.
+    GCal events are fetched live for each day and merged into the response.
     Uses idx_schedule_log_user_date index for efficiency.
     """
     user_id: str = user["sub"]
@@ -77,7 +143,7 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
 
     result = (
         supabase.from_("schedule_log")
-        .select("schedule_date, proposed_json, confirmed_at")
+        .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
         .eq("user_id", user_id)
         .in_("schedule_date", dates)
         .eq("confirmed", 1)
@@ -92,18 +158,32 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         if d not in by_date:
             by_date[d] = row
 
-    # Fetch user config for review_available (timezone + sleep_time)
+    # Fetch user config + google credentials
     config: dict = {}
+    gcal_service = None
     try:
         user_row = (
             supabase.from_("users")
-            .select("config")
+            .select("config, google_credentials")
             .eq("id", user_id)
             .single()
             .execute()
         )
         if user_row.data:
             config = user_row.data.get("config") or {}
+            gcal_creds = user_row.data.get("google_credentials")
+            if gcal_creds:
+                try:
+                    svc, refreshed = build_gcal_service_from_credentials(
+                        gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+                    )
+                    gcal_service = svc
+                    if refreshed:
+                        supabase.from_("users").update(
+                            {"google_credentials": refreshed}
+                        ).eq("id", user_id).execute()
+                except Exception:
+                    pass  # gcal_events will be empty — graceful degradation
     except Exception:
         pass  # review_available defaults to False on error
 
@@ -121,9 +201,21 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
     )
     has_confirmed_schedule = bool(schedule_check.data)
 
+    # Fetch GCal events for each day
+    tz_str = config.get("user", {}).get("timezone", "UTC")
+    cal_ids = config.get("calendar_ids", [])
+    date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
+
+    gcal_results: list[tuple[list, list]] = []
+    for d_obj, d_str in zip(date_objs, dates):
+        papyrus_event_ids = _papyrus_ids(by_date.get(d_str))
+        gcal_results.append(
+            _fetch_gcal_for_date(d_obj, tz_str, cal_ids, gcal_service, papyrus_event_ids)
+        )
+
     return {
-        "yesterday": _parse_day(by_date.get(dates[0])),
-        "today":     _parse_day(by_date.get(dates[1])),
-        "tomorrow":  _parse_day(by_date.get(dates[2])),
+        "yesterday": _parse_day(by_date.get(dates[0]), dates[0], gcal_results[0][0], gcal_results[0][1]),
+        "today":     _parse_day(by_date.get(dates[1]), dates[1], gcal_results[1][0], gcal_results[1][1]),
+        "tomorrow":  _parse_day(by_date.get(dates[2]), dates[2], gcal_results[2][0], gcal_results[2][1]),
         "review_available": _compute_review_available(config, has_confirmed_schedule),
     }

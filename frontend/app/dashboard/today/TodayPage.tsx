@@ -25,11 +25,20 @@ export interface PushedItem {
   reason: string;
 }
 
+export interface GCalEvent {
+  id: string;
+  summary: string;
+  start_time: string;
+  end_time: string;
+}
+
 export interface DayData {
   schedule_date: string;
   scheduled: ScheduledItem[];
   pushed: PushedItem[];
   confirmed_at: string | null;
+  gcal_events: GCalEvent[];
+  all_day_events: string[];
 }
 
 interface TodayResponse {

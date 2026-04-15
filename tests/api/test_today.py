@@ -45,14 +45,17 @@ def test_get_today_returns_three_days(client, monkeypatch):
         "pushed": [],
         "reasoning_summary": "Scheduled for focus time."
     }
-    rows = [{"schedule_date": today_str, "proposed_json": json.dumps(schedule), "confirmed_at": f"{today_str}T08:00:00Z"}]
+    rows = [{"schedule_date": today_str, "proposed_json": json.dumps(schedule), "confirmed_at": f"{today_str}T08:00:00Z", "gcal_event_ids": "[]"}]
 
     mock_sb = MagicMock()
     _mock_schedule_log(mock_sb, rows)
 
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    with patch("api.routes.today.supabase", mock_sb):
+    mock_svc = MagicMock()
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
+         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today.supabase", mock_sb):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -64,6 +67,8 @@ def test_get_today_returns_three_days(client, monkeypatch):
     assert len(data["today"]["scheduled"]) == 1
     assert data["yesterday"] is None
     assert data["tomorrow"] is None
+    assert data["today"]["gcal_events"] == []
+    assert data["today"]["all_day_events"] == []
 
 
 def test_get_today_handles_no_schedule(client, monkeypatch):
@@ -73,7 +78,10 @@ def test_get_today_handles_no_schedule(client, monkeypatch):
 
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    with patch("api.routes.today.supabase", mock_sb):
+    mock_svc = MagicMock()
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
+         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today.supabase", mock_sb):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -158,3 +166,138 @@ def test_today_review_available_false_when_no_confirmed_schedule(client):
 
     assert resp.status_code == 200
     assert resp.json()["review_available"] is False
+
+
+def test_today_includes_gcal_events_when_no_confirmed_schedule(client, monkeypatch):
+    """When no confirmed schedule exists but GCal has events, the day is non-null with gcal_events."""
+    from datetime import date, datetime, timezone
+    from src.models import CalendarEvent
+
+    today = date.today()
+    mock_start = datetime(today.year, today.month, today.day, 9, 0, tzinfo=timezone.utc)
+    mock_end = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
+    ev1 = CalendarEvent(id="evt-1", summary="Team sync", start=mock_start, end=mock_end, color_id=None, is_all_day=False)
+    ev2 = CalendarEvent(id="evt-2", summary="1:1", start=mock_start, end=mock_end, color_id=None, is_all_day=False)
+
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, [])
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_svc = MagicMock()
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
+         patch("api.routes.today.get_events", return_value=[ev1, ev2]), \
+         patch("api.routes.today.supabase", mock_sb):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["today"] is not None
+    assert len(data["today"]["gcal_events"]) == 2
+    assert data["today"]["scheduled"] == []
+
+
+def test_today_filters_papyrus_created_events(client, monkeypatch):
+    """Events whose IDs are in schedule_log.gcal_event_ids are excluded from gcal_events."""
+    from datetime import date, datetime, timezone
+    from src.models import CalendarEvent
+
+    today = date.today()
+    today_str = today.isoformat()
+    mock_start = datetime(today.year, today.month, today.day, 9, 0, tzinfo=timezone.utc)
+    mock_end = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
+
+    schedule = {"scheduled": [], "pushed": []}
+    rows = [{
+        "schedule_date": today_str,
+        "proposed_json": json.dumps(schedule),
+        "confirmed_at": f"{today_str}T08:00:00Z",
+        "gcal_event_ids": json.dumps(["evt-papyrus-1"]),
+    }]
+
+    ev_papyrus = CalendarEvent(id="evt-papyrus-1", summary="Papyrus Task", start=mock_start, end=mock_end, color_id=None, is_all_day=False)
+    ev_other = CalendarEvent(id="evt-other", summary="External Meeting", start=mock_start, end=mock_end, color_id=None, is_all_day=False)
+
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, rows)
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_svc = MagicMock()
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
+         patch("api.routes.today.get_events", return_value=[ev_papyrus, ev_other]), \
+         patch("api.routes.today.supabase", mock_sb):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    event_ids = [e["id"] for e in data["today"]["gcal_events"]]
+    assert "evt-papyrus-1" not in event_ids
+    assert "evt-other" in event_ids
+
+
+def test_today_degrades_gracefully_without_gcal_credentials(client, monkeypatch):
+    """No GCal credentials → gcal_events: [], confirmed schedule still returns normally."""
+    from datetime import date
+    today_str = date.today().isoformat()
+    schedule = {
+        "scheduled": [{"task_id": "t1", "task_name": "Focus", "start_time": f"{today_str}T09:00:00Z", "end_time": f"{today_str}T10:00:00Z", "duration_minutes": 60}],
+        "pushed": [],
+    }
+    rows = [{
+        "schedule_date": today_str,
+        "proposed_json": json.dumps(schedule),
+        "confirmed_at": f"{today_str}T08:00:00Z",
+        "gcal_event_ids": "[]",
+    }]
+
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, rows)
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
+        "config": {"user": {"timezone": "UTC"}, "calendar_ids": []},
+        "google_credentials": None,
+    }
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    with patch("api.routes.today.supabase", mock_sb):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["today"] is not None
+    assert data["today"]["gcal_events"] == []
+    assert len(data["today"]["scheduled"]) == 1
+
+
+def test_today_separates_all_day_events(client, monkeypatch):
+    """All-day events go to all_day_events, timed events go to gcal_events."""
+    from datetime import date, datetime, timezone
+    from src.models import CalendarEvent
+
+    today = date.today()
+    mock_start = datetime(today.year, today.month, today.day, 0, 0, tzinfo=timezone.utc)
+    mock_end = datetime(today.year, today.month, today.day, 23, 59, tzinfo=timezone.utc)
+    timed_start = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
+    timed_end = datetime(today.year, today.month, today.day, 11, 0, tzinfo=timezone.utc)
+
+    ev_all_day = CalendarEvent(id="evt-ad", summary="Holiday", start=mock_start, end=mock_end, color_id=None, is_all_day=True)
+    ev_timed = CalendarEvent(id="evt-timed", summary="Meeting", start=timed_start, end=timed_end, color_id=None, is_all_day=False)
+
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, [])
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_svc = MagicMock()
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
+         patch("api.routes.today.get_events", return_value=[ev_all_day, ev_timed]), \
+         patch("api.routes.today.supabase", mock_sb):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["today"] is not None
+    assert data["today"]["all_day_events"] == ["Holiday"]
+    assert len(data["today"]["gcal_events"]) == 1
+    assert data["today"]["gcal_events"][0]["summary"] == "Meeting"
