@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ColorRuleCard from "@/components/ColorRuleCard";
+import FieldTooltip from "@/components/FieldTooltip";
 import {
   ColorRule,
   DEFAULT_CATEGORIES,
@@ -245,13 +246,31 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             <p style={SECTION_HEADING}>Sleep &amp; Schedule</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
               {[
-                { label: "Wake time", key: "default_wake_time", type: "time" },
-                { label: "Morning buffer (min)", key: "morning_buffer_minutes", type: "number" },
-                { label: "First task not before", key: "first_task_not_before", type: "time" },
-                { label: "No tasks after", key: "no_tasks_after", type: "time" },
-              ].map(({ label, key, type }) => (
+                { label: "Wake time", key: "default_wake_time", type: "time", tooltip: undefined },
+                {
+                  label: "Morning buffer (min)",
+                  key: "morning_buffer_minutes",
+                  type: "number",
+                  tooltip: "Time you protect after waking before any task begins. For coffee, a walk, easing in.",
+                },
+                {
+                  label: "First task not before",
+                  key: "first_task_not_before",
+                  type: "time",
+                  tooltip: "A hard floor. No task will be scheduled before this, even if your morning buffer ends earlier.",
+                },
+                {
+                  label: "No tasks after",
+                  key: "no_tasks_after",
+                  type: "time",
+                  tooltip: "Your wind-down boundary. No tasks or meetings will be scheduled past this time.",
+                },
+              ].map(({ label, key, type, tooltip }) => (
                 <div key={key} style={{ marginBottom: 12 }}>
-                  <label style={LABEL}>{label}</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>
+                    <label style={{ ...LABEL, marginBottom: 0 }}>{label}</label>
+                    {tooltip && <FieldTooltip content={tooltip} />}
+                  </div>
                   <input
                     type={type}
                     value={(sleep[key] as string | number) ?? ""}
@@ -303,11 +322,24 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             <p style={{ ...SECTION_HEADING, marginTop: 20 }}>Scheduling</p>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {[
-                { label: "Min gap (min)", key: "min_gap_between_tasks_minutes", type: "number" },
-                { label: "Max tasks / day", key: "max_tasks_per_day", type: "number" },
-              ].map(({ label, key, type }) => (
+                {
+                  label: "Min gap (min)",
+                  key: "min_gap_between_tasks_minutes",
+                  type: "number",
+                  tooltip: "Breathing room between tasks. Time to transition, think, or just exist between blocks.",
+                },
+                {
+                  label: "Max tasks / day",
+                  key: "max_tasks_per_day",
+                  type: "number",
+                  tooltip: "The most tasks Papyrus will schedule in one day. Keeps your plan realistic, not aspirational.",
+                },
+              ].map(({ label, key, type, tooltip }) => (
                 <div key={key} style={{ marginBottom: 12 }}>
-                  <label style={LABEL}>{label}</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>
+                    <label style={{ ...LABEL, marginBottom: 0 }}>{label}</label>
+                    {tooltip && <FieldTooltip content={tooltip} />}
+                  </div>
                   <input
                     type={type}
                     value={(scheduling[key] as number) ?? ""}
