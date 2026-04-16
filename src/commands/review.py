@@ -222,7 +222,7 @@ def cmd_review(context: dict, target_date: date) -> None:
 
                 try:
                     events = get_events(
-                        candidate, tz_str, extra_calendar_ids=extra_cal_ids
+                        candidate, tz_str, calendar_ids=extra_cal_ids
                     )
                 except Exception:
                     events = []

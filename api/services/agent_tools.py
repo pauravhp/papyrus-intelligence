@@ -67,12 +67,16 @@ def execute_get_calendar(target_date_str: str, user_ctx: dict) -> list[dict]:
     """Fetch GCal events for a given date (YYYY-MM-DD)."""
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
-    cal_ids = config.get("calendar_ids", [])
+    cal_ids = (
+        config.get("source_calendar_ids")
+        or config.get("calendar_ids")
+        or ["primary"]
+    )
     target_date = date.fromisoformat(target_date_str)
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
-        extra_calendar_ids=cal_ids,
+        calendar_ids=cal_ids,
         service=user_ctx["gcal_service"],
     )
     return [
@@ -99,7 +103,11 @@ def execute_schedule_day(
     """
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
-    cal_ids = config.get("calendar_ids", [])
+    cal_ids = (
+        config.get("source_calendar_ids")
+        or config.get("calendar_ids")
+        or ["primary"]
+    )
     target_date = date.fromisoformat(target_date_str)
 
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
@@ -135,7 +143,7 @@ def execute_schedule_day(
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
-        extra_calendar_ids=cal_ids,
+        calendar_ids=cal_ids,
         service=user_ctx["gcal_service"],
     )
     logger.info("[schedule_day] gcal_service=%s cal_ids=%s tz=%s events=%d",

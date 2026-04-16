@@ -199,9 +199,13 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
 
     # Compute free windows from now → end of day
     today_str = date.today().isoformat()
-    extra_cal_ids: list[str] = config.get("calendar_ids", [])
+    cal_ids = (
+        config.get("source_calendar_ids")
+        or config.get("calendar_ids")
+        or ["primary"]
+    )
     try:
-        events = get_events(date.today(), tz_str, extra_calendar_ids=extra_cal_ids)
+        events = get_events(date.today(), tz_str, calendar_ids=cal_ids)
     except Exception:
         events = []
 

@@ -305,3 +305,30 @@ def test_confirm_schedule_skips_todoist_for_project_tasks():
         assert result["gcal_events_created"] == 1
         # Todoist should NOT be called for proj_ task
         MockTodoist.return_value.schedule_task.assert_not_called()
+
+
+def test_execute_get_calendar_uses_source_calendar_ids(user_ctx):
+    """execute_get_calendar prefers source_calendar_ids over calendar_ids."""
+    user_ctx["config"]["source_calendar_ids"] = ["primary", "work@co.com"]
+    user_ctx["config"]["calendar_ids"] = ["old@co.com"]
+
+    with patch("api.services.agent_tools.get_events", return_value=[]) as mock_get:
+        from api.services.agent_tools import execute_get_calendar
+        execute_get_calendar(date.today().isoformat(), user_ctx)
+
+    mock_get.assert_called_once()
+    _, kwargs = mock_get.call_args
+    assert kwargs["calendar_ids"] == ["primary", "work@co.com"]
+
+
+def test_execute_get_calendar_falls_back_to_primary(user_ctx):
+    """execute_get_calendar falls back to ['primary'] when no calendar config set."""
+    user_ctx["config"].pop("source_calendar_ids", None)
+    user_ctx["config"].pop("calendar_ids", None)
+
+    with patch("api.services.agent_tools.get_events", return_value=[]) as mock_get:
+        from api.services.agent_tools import execute_get_calendar
+        execute_get_calendar(date.today().isoformat(), user_ctx)
+
+    _, kwargs = mock_get.call_args
+    assert kwargs["calendar_ids"] == ["primary"]

@@ -43,7 +43,7 @@ def cmd_check(context: dict) -> None:
     events = []
     try:
         extra_cal_ids = context.get("calendar_ids", [])
-        events = get_events(today, tz_str, extra_calendar_ids=extra_cal_ids)
+        events = get_events(today, tz_str, calendar_ids=extra_cal_ids)
         if events:
             for e in events:
                 time_str = (
@@ -64,7 +64,7 @@ def cmd_check(context: dict) -> None:
         tz = ZoneInfo(tz_str_norm)
         threshold_dt = _late_night_threshold_dt(yesterday, context, tz)
         yesterday_events = get_events(
-            yesterday, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+            yesterday, tz_str, calendar_ids=context.get("calendar_ids", [])
         )
         for ev in yesterday_events:
             ev_end = ev.end if ev.end.tzinfo else ev.end.replace(tzinfo=tz)

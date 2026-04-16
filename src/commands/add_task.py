@@ -56,7 +56,7 @@ def _handle_no_room(
     tomorrow_events = []
     try:
         tomorrow_events = get_events(
-            tomorrow, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+            tomorrow, tz_str, calendar_ids=context.get("calendar_ids", [])
         )
     except Exception:
         pass
@@ -177,7 +177,7 @@ def cmd_add_task(context: dict, search_text: str, target_date: date) -> None:
     events = []
     try:
         events = get_events(
-            target_date, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+            target_date, tz_str, calendar_ids=context.get("calendar_ids", [])
         )
         print(f"[GCal] {len(events)} event(s)")
     except Exception as exc:

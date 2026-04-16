@@ -137,12 +137,16 @@ def plan_day(
 
     prod_science = _load_prod_science()
     tz_str: str = context.get("user", {}).get("timezone", "America/Vancouver")
-    extra_cal_ids: list[str] = context.get("calendar_ids", [])
+    cal_ids: list[str] = (
+        context.get("source_calendar_ids")
+        or context.get("calendar_ids")
+        or ["primary"]
+    )
 
     # ── GCal — today + day_before for late-night detection ────────────────────
     events = []
     try:
-        events = get_events(target_date, tz_str, extra_calendar_ids=extra_cal_ids)
+        events = get_events(target_date, tz_str, calendar_ids=cal_ids)
     except Exception as exc:
         print(f"[plan-day] GCal fetch failed: {exc}")
 
@@ -154,7 +158,7 @@ def plan_day(
         day_before = target_date - timedelta(days=1)
         threshold_dt = datetime(day_before.year, day_before.month, day_before.day,
                                 h, m, tzinfo=tz)
-        for ev in get_events(day_before, tz_str, extra_calendar_ids=extra_cal_ids):
+        for ev in get_events(day_before, tz_str, calendar_ids=cal_ids):
             ev_end = ev.end if ev.end.tzinfo else ev.end.replace(tzinfo=tz)
             if not ev.is_all_day and ev_end >= threshold_dt:
                 late_night_prior = True
