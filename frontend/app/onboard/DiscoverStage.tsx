@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
@@ -33,7 +34,7 @@ type CategoryWithHint = ColorRule & { hint?: string }
 
 type Phase = "scanning" | "review" | "confirming" | "error";
 
-const LABEL: React.CSSProperties = {
+const LABEL: CSSProperties = {
   color: "var(--text-muted)",
   fontSize: 11,
   fontWeight: 500,
@@ -43,7 +44,7 @@ const LABEL: React.CSSProperties = {
   display: "block",
 };
 
-const INPUT: React.CSSProperties = {
+const INPUT: CSSProperties = {
   background: "var(--surface-raised)",
   border: "1px solid var(--border)",
   color: "var(--text)",
@@ -55,7 +56,7 @@ const INPUT: React.CSSProperties = {
   fontFamily: "var(--font-literata)",
 };
 
-const SECTION_HEADING: React.CSSProperties = {
+const SECTION_HEADING: CSSProperties = {
   color: "var(--text-muted)",
   fontSize: 11,
   fontWeight: 600,
@@ -68,6 +69,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
   const [phase, setPhase] = useState<Phase>("scanning");
+  const [retryCount, setRetryCount] = useState(0);
   const [proposedConfig, setProposedConfig] = useState<Record<string, unknown>>({});
   const [categories, setCategories] = useState<CategoryWithHint[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
@@ -126,7 +128,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
     };
     runScan();
     return () => { cancelled = true; };
-  }, [timezone, calendarIds]);
+  }, [timezone, calendarIds, retryCount]);
 
   const handleCategoryChange = (index: number, updated: ColorRule) => {
     setCategories(prev => {
@@ -355,7 +357,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             <motion.button
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
-              onClick={() => setPhase("scanning")}
+              onClick={() => { setPhase("scanning"); setRetryCount(c => c + 1); }}
               style={{
                 background: "var(--accent)",
                 color: "var(--bg)",

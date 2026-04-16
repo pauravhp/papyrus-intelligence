@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import {
   ColorRule,
   GCAL_COLOR_HEX,
@@ -22,7 +23,7 @@ const PRESETS: { label: string; value: 0 | 5 | 15 | 30 }[] = [
   { label: "Long · 30m", value: 30 },
 ];
 
-const LABEL: React.CSSProperties = {
+const LABEL: CSSProperties = {
   color: "var(--text-muted)",
   fontSize: 10,
   fontWeight: 500,
