@@ -201,7 +201,7 @@ def cmd_plan_day(context: dict, target_date: date) -> None:
     events = []
     try:
         extra_cal_ids = context.get("calendar_ids", [])
-        events = get_events(target_date, tz_str, extra_calendar_ids=extra_cal_ids)
+        events = get_events(target_date, tz_str, calendar_ids=extra_cal_ids)
         print(f"[GCal] {len(events)} event(s) found")
     except Exception as exc:
         print(f"[WARN] GCal fetch failed: {exc}")
@@ -211,7 +211,7 @@ def cmd_plan_day(context: dict, target_date: date) -> None:
         tz = ZoneInfo(tz_str)
         threshold_dt = _late_night_threshold_dt(day_before, context, tz)
         for ev in get_events(
-            day_before, tz_str, extra_calendar_ids=context.get("calendar_ids", [])
+            day_before, tz_str, calendar_ids=context.get("calendar_ids", [])
         ):
             ev_end = ev.end if ev.end.tzinfo else ev.end.replace(tzinfo=tz)
             if not ev.is_all_day and ev_end >= threshold_dt:

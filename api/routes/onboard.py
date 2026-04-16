@@ -174,7 +174,7 @@ def onboard_scan(
             day_events = get_events(
                 target_date=target,
                 timezone_str=body.timezone,
-                extra_calendar_ids=body.calendar_ids,
+                calendar_ids=body.calendar_ids,
                 service=gcal_service,
             )
             events_by_date[target] = day_events

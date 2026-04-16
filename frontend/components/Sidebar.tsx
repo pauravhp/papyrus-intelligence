@@ -10,6 +10,7 @@ import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ConfigCard from "@/components/ConfigCard";
 import HowToGuide from "@/components/HowToGuide";
+import CalendarSection from "@/components/CalendarSection";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
@@ -48,6 +49,12 @@ export default function Sidebar() {
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  useEffect(() => {
+    const handler = () => setPrefsOpen(true);
+    window.addEventListener("papyrus:open-prefs", handler);
+    return () => window.removeEventListener("papyrus:open-prefs", handler);
+  }, []);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -227,6 +234,26 @@ export default function Sidebar() {
                 />
               ) : (
                 <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading</p>
+              )}
+
+              {config && (
+                <>
+                  <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "20px 0 16px" }} />
+                  <p style={{
+                    color: "var(--text-muted)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 12,
+                  }}>
+                    Calendars
+                  </p>
+                  <CalendarSection
+                    config={config}
+                    onConfigUpdate={(patch) => setConfig((prev) => prev ? { ...prev, ...patch } : prev)}
+                  />
+                </>
               )}
             </motion.div>
           </>

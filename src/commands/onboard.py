@@ -79,7 +79,7 @@ def cmd_onboard(context: dict) -> None:
             day_events = get_events(
                 target_date=target,
                 timezone_str=timezone_str,
-                extra_calendar_ids=extra_cal_ids,
+                calendar_ids=extra_cal_ids,
             )
             events_by_date[target] = day_events
             all_events.extend(day_events)
@@ -310,7 +310,7 @@ def _run_stage_3(draft: dict, draft_path: Path, scan_timezone: str, scan_cal_ids
         events = get_events(
             target_date=today,
             timezone_str=scan_timezone,
-            extra_calendar_ids=scan_cal_ids,
+            calendar_ids=scan_cal_ids,
         )
         print(f"{len(events)} event(s) found.")
     except Exception as e:

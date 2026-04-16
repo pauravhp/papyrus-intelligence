@@ -67,12 +67,16 @@ def execute_get_calendar(target_date_str: str, user_ctx: dict) -> list[dict]:
     """Fetch GCal events for a given date (YYYY-MM-DD)."""
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
-    cal_ids = config.get("calendar_ids", [])
+    cal_ids = (
+        config.get("source_calendar_ids")
+        or config.get("calendar_ids")
+        or ["primary"]
+    )
     target_date = date.fromisoformat(target_date_str)
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
-        extra_calendar_ids=cal_ids,
+        calendar_ids=cal_ids,
         service=user_ctx["gcal_service"],
     )
     return [
@@ -99,7 +103,11 @@ def execute_schedule_day(
     """
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
-    cal_ids = config.get("calendar_ids", [])
+    cal_ids = (
+        config.get("source_calendar_ids")
+        or config.get("calendar_ids")
+        or ["primary"]
+    )
     target_date = date.fromisoformat(target_date_str)
 
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
@@ -135,7 +143,7 @@ def execute_schedule_day(
     events = get_events(
         target_date=target_date,
         timezone_str=tz_str,
-        extra_calendar_ids=cal_ids,
+        calendar_ids=cal_ids,
         service=user_ctx["gcal_service"],
     )
     logger.info("[schedule_day] gcal_service=%s cal_ids=%s tz=%s events=%d",
@@ -217,6 +225,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
     """
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
+    write_cal_id = config.get("write_calendar_id", "primary")
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
     gcal_count = 0
     todoist_count = 0
@@ -232,6 +241,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
                 start_dt=start_dt,
                 end_dt=end_dt,
                 timezone_str=tz_str,
+                calendar_id=write_cal_id,
             )
             gcal_event_ids.append(gcal_id)
             gcal_count += 1
@@ -259,6 +269,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
         "confirmed": 1,
         "confirmed_at": _dt.now().isoformat(),
         "gcal_event_ids": _json.dumps(gcal_event_ids),
+        "gcal_write_calendar_id": write_cal_id,
     }).execute()
 
     return {

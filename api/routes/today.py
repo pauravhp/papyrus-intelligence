@@ -76,7 +76,7 @@ def _fetch_gcal_for_date(
         events = get_events(
             target_date=target_date,
             timezone_str=tz_str,
-            extra_calendar_ids=cal_ids,
+            calendar_ids=cal_ids,
             service=gcal_service,
         )
     except Exception as exc:
@@ -208,7 +208,15 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
 
     # Fetch GCal events for each day
     tz_str = config.get("user", {}).get("timezone", "UTC")
-    cal_ids = config.get("calendar_ids", [])
+    cal_ids = (
+        config.get("source_calendar_ids")
+        or config.get("calendar_ids")
+        or ["primary"]
+    )
+    show_calendar_nudge = (
+        not config.get("source_calendar_ids")
+        and not (config.get("nudges") or {}).get("calendar_dismissed")
+    )
     date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
 
     gcal_results: list[tuple[list, list]] = []
@@ -223,4 +231,5 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         "today":     _parse_day(by_date.get(dates[1]), dates[1], gcal_results[1][0], gcal_results[1][1]),
         "tomorrow":  _parse_day(by_date.get(dates[2]), dates[2], gcal_results[2][0], gcal_results[2][1]),
         "review_available": _compute_review_available(config, has_confirmed_schedule),
+        "show_calendar_nudge": show_calendar_nudge,
     }

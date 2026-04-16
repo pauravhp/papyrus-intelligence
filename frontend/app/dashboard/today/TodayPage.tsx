@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import { apiFetch } from "@/utils/api";
+import NudgeBanner from "@/components/NudgeBanner";
 import DayColumn from "./DayColumn";
 import TodaySkeleton from "./TodaySkeleton";
 import ResearchSnippet from "./ResearchSnippet";
@@ -46,6 +47,7 @@ interface TodayResponse {
   today: DayData | null;
   tomorrow: DayData | null;
   review_available: boolean;
+  show_calendar_nudge: boolean;
 }
 
 const FADE = {
@@ -67,6 +69,7 @@ export default function TodayPage() {
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
   const [modalOpen, setModalOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [showCalendarNudge, setShowCalendarNudge] = useState(false);
 
   const load = useCallback(async () => {
     const { data: session } = await supabase.auth.getSession();
@@ -75,6 +78,7 @@ export default function TodayPage() {
     try {
       const result = await apiFetch<TodayResponse>("/api/today", tok);
       setData(result);
+      setShowCalendarNudge(result.show_calendar_nudge ?? false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load schedule");
     } finally {
@@ -108,6 +112,7 @@ export default function TodayPage() {
 
   return (
     <div style={{ padding: "32px 48px 48px" }}>
+      <NudgeBanner show={showCalendarNudge} />
       {/* Header */}
       <motion.div
         initial="hidden" animate="show" custom={0} variants={FADE}
