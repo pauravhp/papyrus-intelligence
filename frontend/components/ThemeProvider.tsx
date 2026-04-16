@@ -2,6 +2,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 
 type Theme = "light" | "dark";
 
@@ -33,7 +34,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider value={{ theme, toggle }}>
-      {children}
+      <Tooltip.Provider delayDuration={300}>
+        {children}
+      </Tooltip.Provider>
     </ThemeContext.Provider>
   );
 }
