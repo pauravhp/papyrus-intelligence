@@ -57,6 +57,7 @@ Rules:
 - Never call confirm_schedule unless the user explicitly approves.
 - Present schedules concisely: task name, time, duration.
 - One coaching nudge max per conversation.
+- Schedule results contain ISO 8601 timestamps with UTC offsets (e.g. "2026-04-16T09:15:00-07:00"). ALWAYS display times in the user's LOCAL time (use the wall-clock time from the timestamp, not UTC). For example, "2026-04-16T09:15:00-07:00" is 9:15 AM local — display it as "9:15 AM", never convert to UTC.
 """
 
 

@@ -155,34 +155,47 @@ def execute_schedule_day(
     # Enforce free-window constraints on LLM output (Rule 1: code enforces).
     # Any item whose proposed slot doesn't fall within a computed free window
     # is moved to pushed — this prevents scheduling on top of GCal events.
+    print(f"[schedule_day] free_windows: {[(w.start.isoformat(), w.end.isoformat()) for w in free_windows]}")
+    print(f"[schedule_day] LLM scheduled {len(result.get('scheduled', []))} items, pushed {len(result.get('pushed', []))} items")
     valid_scheduled = []
     overflow_pushed = []
     for item in result.get("scheduled", []):
         try:
             item_start = datetime.fromisoformat(item["start_time"])
             item_end = datetime.fromisoformat(item["end_time"])
-        except (KeyError, ValueError):
+        except (KeyError, ValueError) as e:
+            print(f"[schedule_day] parse error for {item.get('task_id')}: {e} — accepting as-is")
             valid_scheduled.append(item)
             continue
         in_window = any(
             item_start >= w.start and item_end <= w.end
             for w in free_windows
         )
+        print(f"[schedule_day] {item.get('task_id')} start={item['start_time']} end={item['end_time']} in_window={in_window}")
         if in_window:
             valid_scheduled.append(item)
         else:
             overflow_pushed.append({
                 "task_id": item.get("task_id", ""),
+                "task_name": item.get("task_name") or task_names.get(item.get("task_id", ""), item.get("task_id", "")),
                 "reason": "Proposed time falls outside available free windows (conflicts with existing calendar events or constraints)",
             })
     result["scheduled"] = valid_scheduled
     result["pushed"] = list(result.get("pushed", [])) + overflow_pushed
 
-    # Restore full task names (inner LLM only saw truncated versions)
+    # Restore full task names for scheduled items (inner LLM only saw truncated versions)
     for item in result.get("scheduled", []):
         tid = item.get("task_id")
         if tid and tid in task_names:
             item["task_name"] = task_names[tid]
+
+    # Restore full task names for pushed items
+    for item in result.get("pushed", []):
+        if "task_name" not in item or not item["task_name"]:
+            tid = item.get("task_id", "")
+            item["task_name"] = task_names.get(tid, tid)
+
+    print(f"[schedule_day] after validation: {len(result['scheduled'])} scheduled, {len(result['pushed'])} pushed")
 
     result["free_windows_used"] = [
         {"start": w.start.strftime("%H:%M"), "end": w.end.strftime("%H:%M"), "duration_minutes": w.duration_minutes}

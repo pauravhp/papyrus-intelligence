@@ -154,6 +154,9 @@ def google_oauth_callback(
         .maybe_single()
         .execute()
     )
+    if row is None or row.data is None:
+        # User row doesn't exist — stale session; redirect to login
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?error=session_expired")
     code_verifier = (row.data or {}).get("oauth_code_verifier")
 
     flow = Flow.from_client_config(

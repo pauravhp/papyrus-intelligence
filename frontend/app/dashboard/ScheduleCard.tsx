@@ -11,6 +11,7 @@ interface ScheduledItem {
 
 interface PushedItem {
   task_id: string;
+  task_name?: string;
   reason: string;
 }
 
@@ -114,7 +115,7 @@ export default function ScheduleCard({ schedule }: { schedule: Schedule }) {
               key={p.task_id}
               style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}
             >
-              {p.task_id} — {p.reason}
+              {p.task_name || p.task_id} — {p.reason}
             </p>
           ))}
         </div>

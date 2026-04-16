@@ -98,6 +98,7 @@ def _parse_with_retry(raw_fn, description: str) -> dict:
     for attempt in range(1, 3):
         try:
             last_content = raw_fn()
+            print(f"[schedule_day] raw LLM response (attempt {attempt}):\n{last_content}")
             return json.loads(_extract_json(last_content))
         except json.JSONDecodeError:
             if attempt < 2:
