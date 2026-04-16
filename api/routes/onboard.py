@@ -18,6 +18,7 @@ from api.auth import get_current_user
 from api.config import settings
 from api.db import supabase
 from src.calendar_client import WRITE_SCOPES, build_gcal_service_from_credentials, get_events
+from src.gcal_colors import GCAL_COLOR_IDS, GCAL_COLOR_NAMES
 from src.llm import _anthropic_json_call, _extract_json
 from src.onboard_patterns import build_pattern_summary
 from src.prompts.onboard import build_onboard_prompt
@@ -36,9 +37,76 @@ class ScanRequest(BaseModel):
     calendar_ids: list[str] = []
 
 
+class DetectedCategory(BaseModel):
+    name: str
+    color_name: str
+    color_id: str | None
+    event_samples: list[str]
+    buffer_before_minutes: int
+    buffer_after_minutes: int
+
+
 class ScanResponse(BaseModel):
     proposed_config: dict
     questions: list
+    detected_categories: list[DetectedCategory]
+
+
+def _translate_color_semantics(semantics: dict) -> dict:
+    """Replace raw color_id keys with human color names; drop entries with count < 2."""
+    return {
+        GCAL_COLOR_NAMES.get(cid, cid): data
+        for cid, data in semantics.items()
+        if data.get("count", 0) >= 2
+    }
+
+
+def _build_detected_categories(raw: list[dict]) -> list[DetectedCategory]:
+    result = []
+    for item in raw:
+        color_name = item.get("color_name", "")
+        color_id = GCAL_COLOR_IDS.get(color_name)  # None if unrecognised
+        buf_before = item.get("buffer_before_minutes", 15)
+        buf_after = item.get("buffer_after_minutes", 15)
+        valid = {0, 5, 15, 30}
+        result.append(DetectedCategory(
+            name=item.get("name", "Untitled"),
+            color_name=color_name,
+            color_id=color_id,
+            event_samples=item.get("event_samples", [])[:3],
+            buffer_before_minutes=buf_before if buf_before in valid else 15,
+            buffer_after_minutes=buf_after if buf_after in valid else 15,
+        ))
+    return result
+
+
+def _categories_to_calendar_rules(categories: list[DetectedCategory]) -> dict:
+    return {
+        cat.name: {
+            "color_id": cat.color_id,
+            "buffer_before_minutes": cat.buffer_before_minutes,
+            "buffer_after_minutes": cat.buffer_after_minutes,
+            "movable": False,
+        }
+        for cat in categories
+    }
+
+
+def _default_calendar_rules() -> dict:
+    return {
+        "Meetings & calls": {
+            "color_id": None,
+            "buffer_before_minutes": 15,
+            "buffer_after_minutes": 15,
+            "movable": False,
+        },
+        "Personal commitments": {
+            "color_id": None,
+            "buffer_before_minutes": 30,
+            "buffer_after_minutes": 30,
+            "movable": False,
+        },
+    }
 
 
 @router.post("/scan", response_model=ScanResponse)
@@ -116,6 +184,9 @@ def onboard_scan(
             events_by_date[target] = []
 
     patterns = build_pattern_summary(events_by_date, all_events)
+    patterns["color_semantics"] = _translate_color_semantics(
+        patterns.get("color_semantics", {})
+    )
     messages = build_onboard_prompt(patterns, context_for_prompt)
 
     try:
@@ -126,9 +197,16 @@ def onboard_scan(
     if not isinstance(raw, dict):
         raise HTTPException(status_code=502, detail="Unexpected LLM response shape.")
 
+    detected = _build_detected_categories(raw.get("detected_categories") or [])
+    calendar_rules = _categories_to_calendar_rules(detected) if detected else _default_calendar_rules()
+
+    proposed = raw.get("proposed_config") or {}
+    proposed["calendar_rules"] = calendar_rules
+
     return ScanResponse(
-        proposed_config=raw.get("proposed_config") or {},
+        proposed_config=proposed,
         questions=raw.get("questions_for_stage_2") or [],
+        detected_categories=detected,
     )
 
 
