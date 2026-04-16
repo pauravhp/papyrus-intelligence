@@ -253,6 +253,7 @@ def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_
     user_ctx = _load_user_context(user_id)
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
+    write_cal_id = config.get("write_calendar_id", "primary")
     tz = ZoneInfo(tz_str)
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
 
@@ -307,6 +308,7 @@ def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_
                 start_dt=start_dt,
                 end_dt=end_dt,
                 timezone_str=tz_str,
+                calendar_id=write_cal_id,
             )
             new_gcal_ids.append(gcal_id)
         except Exception as exc:
@@ -331,6 +333,7 @@ def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_
         "confirmed": 1,
         "confirmed_at": _dt.now().isoformat(),
         "gcal_event_ids": _json.dumps(new_gcal_ids),
+        "gcal_write_calendar_id": write_cal_id,
         "replan_trigger": "mid_day_replan",
     }).execute()
 

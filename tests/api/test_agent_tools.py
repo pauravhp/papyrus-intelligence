@@ -332,3 +332,36 @@ def test_execute_get_calendar_falls_back_to_primary(user_ctx):
 
     _, kwargs = mock_get.call_args
     assert kwargs["calendar_ids"] == ["primary"]
+
+
+def test_execute_confirm_schedule_uses_write_calendar_id(user_ctx):
+    """confirm_schedule passes write_calendar_id to create_event and stores it in schedule_log."""
+    user_ctx["config"]["write_calendar_id"] = "work@co.com"
+    schedule = {
+        "scheduled": [{
+            "task_id": "t1",
+            "task_name": "Deep Work",
+            "start_time": "2026-04-16T09:00:00-07:00",
+            "end_time": "2026-04-16T10:30:00-07:00",
+            "duration_minutes": 90,
+        }],
+        "pushed": [],
+        "reasoning_summary": "Scheduled.",
+    }
+    sb = user_ctx["supabase"]
+    sb.from_.return_value.insert.return_value.execute.return_value = MagicMock()
+
+    with patch("api.services.agent_tools.create_event", return_value="evt-1") as mock_create, \
+         patch("api.services.agent_tools.TodoistClient") as MockTD:
+        MockTD.return_value.schedule_task.return_value = None
+        from api.services.agent_tools import execute_confirm_schedule
+        execute_confirm_schedule(schedule, user_ctx)
+
+    # create_event must be called with the configured calendar
+    _, kwargs = mock_create.call_args
+    assert kwargs.get("calendar_id") == "work@co.com"
+
+    # schedule_log insert must include gcal_write_calendar_id
+    insert_call = sb.from_.return_value.insert.call_args
+    inserted_data = insert_call.args[0]
+    assert inserted_data["gcal_write_calendar_id"] == "work@co.com"

@@ -225,6 +225,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
     """
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
+    write_cal_id = config.get("write_calendar_id", "primary")
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
     gcal_count = 0
     todoist_count = 0
@@ -240,6 +241,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
                 start_dt=start_dt,
                 end_dt=end_dt,
                 timezone_str=tz_str,
+                calendar_id=write_cal_id,
             )
             gcal_event_ids.append(gcal_id)
             gcal_count += 1
@@ -267,6 +269,7 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
         "confirmed": 1,
         "confirmed_at": _dt.now().isoformat(),
         "gcal_event_ids": _json.dumps(gcal_event_ids),
+        "gcal_write_calendar_id": write_cal_id,
     }).execute()
 
     return {
