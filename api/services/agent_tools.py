@@ -15,8 +15,11 @@ TOOL_SCHEMAS is the list passed to Anthropic messages.create(tools=...).
 9 tools total — onboard_scan/apply/confirm handled by /api/onboard/* HTTP routes.
 """
 
+import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 from src.calendar_client import create_event, get_events
 from src.todoist_client import TodoistClient
@@ -135,6 +138,8 @@ def execute_schedule_day(
         extra_calendar_ids=cal_ids,
         service=user_ctx["gcal_service"],
     )
+    logger.info("[schedule_day] gcal_service=%s cal_ids=%s tz=%s events=%d",
+                "SET" if user_ctx["gcal_service"] else "NONE", cal_ids, tz_str, len(events))
 
     scheduled_tasks = todoist_client.get_todays_scheduled_tasks(target_date)
     free_windows = compute_free_windows(events, target_date, config, scheduled_tasks=scheduled_tasks)

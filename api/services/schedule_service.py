@@ -43,8 +43,17 @@ def _build_prompt(
                 + (f" due={t.deadline}" if t.deadline else "")
             )
     tasks_text = "\n".join(lines)
+
+    # Derive the real UTC offset from the free windows so the LLM never has to guess.
+    # Format: "+HH:MM" or "-HH:MM" (ISO 8601 offset notation)
+    if free_windows:
+        raw_offset = free_windows[0].start.strftime("%z")  # e.g. "-0700"
+        tz_offset = f"{raw_offset[:3]}:{raw_offset[3:]}" if len(raw_offset) == 5 else raw_offset
+    else:
+        tz_offset = "+00:00"
+
     windows_text = " | ".join(
-        f"{w.start.strftime('%H:%M')}-{w.end.strftime('%H:%M')}({w.duration_minutes}m)"
+        f"{w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')} (UTC{tz_offset}, {w.duration_minutes}m)"
         for w in free_windows
     )
     rules_text = "\n".join(f"- {r}" for r in rules_hard) if rules_hard else "None"
@@ -54,26 +63,27 @@ def _build_prompt(
     timed_events = [e for e in (events or []) if not e.is_all_day]
     if timed_events:
         events_lines = "\n".join(
-            f"{e.start.strftime('%H:%M')}-{e.end.strftime('%H:%M')} {e.summary}"
+            f"{e.start.strftime('%H:%M')}–{e.end.strftime('%H:%M')} {e.summary}"
             for e in sorted(timed_events, key=lambda e: e.start)
         )
         calendar_section = f"\nCALENDAR EVENTS (already blocked — do not schedule over these):\n{events_lines}\n"
     else:
         calendar_section = ""
 
-    return f"""Schedule tasks for {target_date} tz={tz}. {note}
+    return f"""Schedule tasks for {target_date} tz={tz} (UTC{tz_offset}). {note}
 
 TASKS (id name priority duration):
 {tasks_text}
 
-FREE WINDOWS: {windows_text}
+FREE WINDOWS (all times are LOCAL, UTC{tz_offset}): {windows_text}
 {calendar_section}
 HARD RULES: {rules_text}
 
 Reply ONLY with JSON:
 {{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
 
-- start_time/end_time: ISO 8601 with tz offset e.g. {target_date}T09:00:00-07:00
+- start_time/end_time: ISO 8601 with the SAME UTC offset (UTC{tz_offset}), e.g. {target_date}T09:00:00{tz_offset}
+- CRITICAL: The free window times are LOCAL (UTC{tz_offset}) — do NOT convert them to UTC. Use them exactly as shown.
 - Every task in exactly one list. Tasks that don't fit go in pushed.
 - For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room."""
 

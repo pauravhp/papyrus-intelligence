@@ -70,6 +70,7 @@ def _fetch_gcal_for_date(
     Returns ([], []) if service is None or the GCal call fails.
     """
     if not gcal_service:
+        logger.warning("[today] gcal_service is None for %s — skipping", target_date)
         return [], []
     try:
         events = get_events(
@@ -78,13 +79,17 @@ def _fetch_gcal_for_date(
             extra_calendar_ids=cal_ids,
             service=gcal_service,
         )
-    except Exception:
-        logger.warning("GCal read failed for %s", target_date)
+    except Exception as exc:
+        logger.warning("GCal read failed for %s: %s", target_date, exc)
         return [], []
+    logger.debug("[today] %s: fetched %d events (cal_ids=%s, tz=%s)", target_date, len(events), cal_ids, tz_str)
+    for e in events:
+        logger.debug("[today]   event: %s | start=%s | all_day=%s | id=%s", e.summary, e.start.isoformat(), e.is_all_day, e.id)
     timed: list[dict] = []
     all_day: list[str] = []
     for e in events:
         if e.id in papyrus_event_ids:
+            logger.debug("[today]   FILTERED (papyrus): %s", e.id)
             continue
         if e.is_all_day:
             all_day.append(e.summary)

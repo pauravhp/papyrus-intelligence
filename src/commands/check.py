@@ -19,10 +19,11 @@ _TZ_ALIASES = {
 def _late_night_threshold_dt(base_date: date, context: dict, tz: ZoneInfo):
     """Return the late-night threshold as a timezone-aware datetime."""
     from datetime import datetime
+    from src.scheduler import _parse_hm
     threshold_str = context.get("sleep", {}).get("late_night_threshold", "23:00")
     next_day = "next day" in threshold_str
     hm = threshold_str.replace("next day", "").strip()
-    h, m = map(int, hm.split(":"))
+    h, m = _parse_hm(hm)
     ref = base_date + timedelta(days=1) if next_day else base_date
     return datetime(ref.year, ref.month, ref.day, h, m, tzinfo=tz)
 

@@ -21,6 +21,7 @@ pack_schedule() owns all break insertion and ultradian cycle enforcement.
 from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
+import re
 
 from src.models import CalendarEvent, FreeWindow, ScheduledBlock, TodoistTask
 
@@ -41,21 +42,41 @@ def _normalize_tz(tz_str: str) -> str:
     return _TIMEZONE_ALIASES.get(tz_str, tz_str)
 
 
+def _parse_hm(time_str: str) -> tuple[int, int]:
+    """Parse a time string into (hour, minute) in 24-hour values.
+
+    Handles both 24-hour ('HH:MM') and 12-hour ('H:MMam', 'H:MM AM', etc.) formats
+    so user-entered config values like '2:30am' work alongside ISO-style '02:30'.
+    """
+    s = time_str.strip().lower()
+    m = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)?$', s)
+    if not m:
+        raise ValueError(f"Cannot parse time string: {time_str!r} — expected HH:MM or H:MMam/pm")
+    h, minute, period = int(m.group(1)), int(m.group(2)), m.group(3)
+    if period == "am":
+        if h == 12:
+            h = 0
+    elif period == "pm":
+        if h != 12:
+            h += 12
+    return h, minute
+
+
 def _parse_time(time_str: str, target_date: date, tz: ZoneInfo) -> datetime:
-    """Parse 'HH:MM' into a timezone-aware datetime on target_date."""
-    h, m = map(int, time_str.split(":"))
+    """Parse 'HH:MM' (or '12h am/pm') into a timezone-aware datetime on target_date."""
+    h, m = _parse_hm(time_str)
     return datetime(target_date.year, target_date.month, target_date.day, h, m, 0, tzinfo=tz)
 
 
 def _parse_time_extended(time_str: str, target_date: date, tz: ZoneInfo) -> datetime:
-    """Parse 'HH:MM' or 'HH:MM next day' into a timezone-aware datetime.
+    """Parse 'HH:MM' or 'HH:MM next day' (or 12-hour equivalents) into a timezone-aware datetime.
 
     'next day' means the time falls on target_date + 1 — used for windows
-    that extend past midnight (e.g. no_tasks_after: '00:30 next day').
+    that extend past midnight (e.g. no_tasks_after: '02:30 next day' or '2:30am next day').
     """
     next_day = "next day" in time_str
-    hm = time_str.replace("next day", "").strip()
-    h, m = map(int, hm.split(":"))
+    hm_str = time_str.replace("next day", "").strip()
+    h, m = _parse_hm(hm_str)
     base = target_date + timedelta(days=1) if next_day else target_date
     return datetime(base.year, base.month, base.day, h, m, 0, tzinfo=tz)
 

@@ -48,6 +48,30 @@ def _get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
+def _get_user_calendar_ids(service) -> list[str]:
+    """Return all calendar IDs the user owns or can write to (excluding read-only)."""
+    try:
+        items = service.calendarList().list().execute().get("items", [])
+        return [
+            cal["id"]
+            for cal in items
+            if cal.get("accessRole") in ("owner", "writer")
+        ]
+    except Exception as exc:
+        import sys
+        print(f"[get_events] calendarList failed: {exc}", file=sys.stderr)
+        return ["primary"]
+
+
+def _detect_user_timezone(service) -> str | None:
+    """Fetch the timezone set on the user's primary GCal calendar."""
+    try:
+        cal = service.calendars().get(calendarId="primary").execute()
+        return cal.get("timeZone")
+    except Exception:
+        return None
+
+
 def get_events(
     target_date: date,
     timezone_str: str = "America/Vancouver",
@@ -55,20 +79,28 @@ def get_events(
     service=None,
 ) -> list[CalendarEvent]:
     """
-    Fetch events from the primary calendar plus any IDs listed in extra_calendar_ids.
+    Fetch events from all user-owned calendars for target_date.
 
-    extra_calendar_ids come from context.json["calendar_ids"] and let the user
-    whitelist specific non-primary calendars without reading every calendar they
-    have access to.
+    extra_calendar_ids is kept for backwards compatibility but is no longer
+    used as a whitelist — we always query every calendar the user owns/writes.
+    If timezone_str is "UTC" (unset default), we auto-detect from the primary
+    calendar's timezone to ensure correct day boundaries.
 
     service — pre-built googleapiclient service object. When None (CLI path),
     _get_calendar_service() reads credentials from token.json on disk.
     Pass an explicit service to use caller-managed credentials (API path).
     """
-    tz_str = _normalize_timezone(timezone_str)
-    tz = ZoneInfo(tz_str)
     if service is None:
         service = _get_calendar_service()
+
+    tz_str = _normalize_timezone(timezone_str)
+    # Auto-detect timezone from GCal when config is unset (UTC default)
+    if tz_str == "UTC":
+        detected = _detect_user_timezone(service)
+        if detected:
+            tz_str = _normalize_timezone(detected)
+
+    tz = ZoneInfo(tz_str)
 
     start_of_day = datetime(target_date.year, target_date.month, target_date.day,
                             0, 0, 0, tzinfo=tz)
@@ -78,7 +110,9 @@ def get_events(
     time_min = start_of_day.isoformat()
     time_max = end_of_day.isoformat()
 
-    cal_ids = ["primary"] + (extra_calendar_ids or [])
+    # Always fetch from every calendar the user owns/can write to.
+    # This catches events in non-primary calendars without requiring manual config.
+    cal_ids = _get_user_calendar_ids(service)
 
     seen_ids: set[str] = set()
     events: list[CalendarEvent] = []
@@ -92,7 +126,9 @@ def get_events(
                 singleEvents=True,
                 orderBy="startTime",
             ).execute()
-        except Exception:
+        except Exception as exc:
+            import sys
+            print(f"[get_events] calendar {cal_id!r} failed: {exc}", file=sys.stderr)
             continue  # skip calendars we can't read
 
         for item in result.get("items", []):
