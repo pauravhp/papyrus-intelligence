@@ -9,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ConfigCard from "@/components/ConfigCard";
+import CalendarSection from "@/components/CalendarSection";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
@@ -208,6 +209,26 @@ export default function Sidebar() {
                 />
               ) : (
                 <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Loading</p>
+              )}
+
+              {config && (
+                <>
+                  <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "20px 0 16px" }} />
+                  <p style={{
+                    color: "var(--text-muted)",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: 12,
+                  }}>
+                    Calendars
+                  </p>
+                  <CalendarSection
+                    config={config}
+                    onConfigUpdate={(patch) => setConfig((prev) => prev ? { ...prev, ...patch } : prev)}
+                  />
+                </>
               )}
             </motion.div>
           </>
