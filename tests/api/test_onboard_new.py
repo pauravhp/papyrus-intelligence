@@ -56,7 +56,7 @@ def test_scan_returns_proposed_config(client, monkeypatch):
          patch("api.routes.onboard.build_pattern_summary", return_value={}), \
          patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
          patch("api.routes.onboard._anthropic_json_call",
-               return_value={"proposed_config": mock_proposed, "questions_for_stage_2": []}):
+               return_value={"proposed_config": mock_proposed, "questions_for_stage_2": [], "detected_categories": []}):
         resp = client.post(
             "/api/onboard/scan",
             json={"timezone": "America/Vancouver", "calendar_ids": []},
@@ -67,6 +67,7 @@ def test_scan_returns_proposed_config(client, monkeypatch):
     data = resp.json()
     assert "proposed_config" in data
     assert "questions" in data
+    assert "detected_categories" in data
 
 
 def test_scan_raises_400_if_no_gcal_creds(client, monkeypatch):
@@ -213,3 +214,127 @@ def test_promote_500_on_supabase_error(client, monkeypatch):
 
     assert resp.status_code == 500
     assert "Supabase write failed" in resp.json()["detail"]
+
+
+# ── new tests for detected_categories ──────────────────────────────────────
+
+def test_scan_returns_detected_categories(client, monkeypatch):
+    """scan includes detected_categories in response with color_id resolved."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+    mock_llm = {
+        "proposed_config": {"sleep": {}},
+        "detected_categories": [
+            {
+                "name": "Meetings & calls",
+                "color_name": "Flamingo",
+                "event_samples": ["standup", "1:1"],
+                "buffer_before_minutes": 15,
+                "buffer_after_minutes": 15,
+            }
+        ],
+        "questions_for_stage_2": [],
+    }
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._anthropic_json_call", return_value=mock_llm):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/Vancouver", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "detected_categories" in data
+    cats = data["detected_categories"]
+    assert len(cats) == 1
+    assert cats[0]["name"] == "Meetings & calls"
+    assert cats[0]["color_name"] == "Flamingo"
+    assert cats[0]["color_id"] == "4"
+
+
+def test_scan_unknown_color_name_yields_null_color_id(client, monkeypatch):
+    """If LLM outputs an unrecognised color name, color_id is null."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+    mock_llm = {
+        "proposed_config": {"sleep": {}},
+        "detected_categories": [
+            {
+                "name": "Some category",
+                "color_name": "NotARealColor",
+                "event_samples": [],
+                "buffer_before_minutes": 15,
+                "buffer_after_minutes": 15,
+            }
+        ],
+        "questions_for_stage_2": [],
+    }
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._anthropic_json_call", return_value=mock_llm):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/Vancouver", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+    assert resp.status_code == 200
+    cats = resp.json()["detected_categories"]
+    assert cats[0]["color_id"] is None
+
+
+def test_scan_falls_back_to_defaults_when_no_categories(client, monkeypatch):
+    """When LLM returns empty detected_categories, proposed_config.calendar_rules has defaults."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+    mock_llm = {
+        "proposed_config": {"sleep": {}},
+        "detected_categories": [],
+        "questions_for_stage_2": [],
+    }
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._anthropic_json_call", return_value=mock_llm):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/Vancouver", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    rules = data["proposed_config"]["calendar_rules"]
+    assert "Meetings & calls" in rules
+    assert "Personal commitments" in rules
+
+
+def test_translate_color_semantics_maps_ids_to_names():
+    """_translate_color_semantics replaces raw IDs with names and filters < 2 count."""
+    from api.routes.onboard import _translate_color_semantics
+    semantics = {
+        "4": {"count": 5, "top_names": ["standup"]},
+        "5": {"count": 1, "top_names": ["gym"]},   # filtered out
+        "99": {"count": 3, "top_names": ["unknown"]},  # unknown ID kept as-is
+    }
+    result = _translate_color_semantics(semantics)
+    assert "Flamingo" in result
+    assert "Banana" not in result
+    assert "99" in result
+    assert result["Flamingo"]["count"] == 5
