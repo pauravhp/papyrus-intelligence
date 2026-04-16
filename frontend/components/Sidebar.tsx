@@ -1,14 +1,15 @@
 // frontend/components/Sidebar.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, CalendarDays, Activity, Settings2, X, Sun, Moon, LogOut } from "lucide-react";
+import { MessageSquare, CalendarDays, Activity, Settings2, X, Sun, Moon, LogOut, HelpCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ConfigCard from "@/components/ConfigCard";
+import HowToGuide from "@/components/HowToGuide";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
@@ -35,6 +36,15 @@ export default function Sidebar() {
   const router = useRouter();
   const { theme, toggle } = useTheme();
   const [prefsOpen, setPrefsOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
+
+  useEffect(() => {
+    const seen = localStorage.getItem("howto_seen");
+    if (!seen) {
+      const t = setTimeout(() => setGuideOpen(true), 800);
+      return () => clearTimeout(t);
+    }
+  }, []);
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
@@ -125,6 +135,21 @@ export default function Sidebar() {
           {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
         </motion.button>
 
+        {/* How-to guide */}
+        <motion.button
+          onClick={() => setGuideOpen(true)}
+          title="How-to guide"
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.92 }}
+          style={{
+            ...ICON_BTN,
+            color: guideOpen ? "var(--accent)" : "var(--text-muted)",
+            background: guideOpen ? "var(--accent-tint)" : "transparent",
+          }}
+        >
+          <HelpCircle size={18} />
+        </motion.button>
+
         {/* Preferences button */}
         <motion.button
           onClick={handleOpenPrefs}
@@ -207,6 +232,10 @@ export default function Sidebar() {
           </>
         )}
       </AnimatePresence>
+      <HowToGuide
+        open={guideOpen}
+        onClose={() => setGuideOpen(false)}
+      />
     </>
   );
 }
