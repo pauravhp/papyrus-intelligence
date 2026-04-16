@@ -82,7 +82,7 @@ def _load_today_schedule(user_id: str) -> dict | None:
     """Load most recent confirmed schedule_log row for today."""
     result = (
         supabase.from_("schedule_log")
-        .select("id, proposed_json, gcal_event_ids, schedule_date, confirmed_at")
+        .select("id, proposed_json, gcal_event_ids, gcal_write_calendar_id, schedule_date, confirmed_at")
         .eq("user_id", user_id)
         .eq("confirmed", 1)
         .order("id", desc=True)
@@ -268,11 +268,13 @@ def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_
     # Load today's schedule_log to get stored gcal_event_ids
     today_row = _load_today_schedule(user_id)
     gcal_event_ids: list[str] = []
+    write_cal_from_log = "primary"
     if today_row:
         try:
             gcal_event_ids = json.loads(today_row.get("gcal_event_ids") or "[]")
         except (json.JSONDecodeError, TypeError):
             gcal_event_ids = []
+        write_cal_from_log = (today_row or {}).get("gcal_write_calendar_id") or "primary"
 
     # Delete only afternoon GCal events (start_time >= now)
     now_aware = datetime.now().astimezone(tz)
@@ -280,13 +282,13 @@ def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_
         try:
             # Fetch event to check its start time before deleting
             event = user_ctx["gcal_service"].events().get(
-                calendarId="primary", eventId=event_id
+                calendarId=write_cal_from_log, eventId=event_id
             ).execute()
             start_str = event.get("start", {}).get("dateTime") or event.get("start", {}).get("date")
             if start_str:
                 start_dt = datetime.fromisoformat(start_str).astimezone(tz)
                 if start_dt >= now_aware:
-                    delete_event(user_ctx["gcal_service"], event_id)
+                    delete_event(user_ctx["gcal_service"], event_id, calendar_id=write_cal_from_log)
         except Exception as exc:
             # 404 = already deleted by user; skip gracefully
             if "404" not in str(exc) and "notFound" not in str(exc):
