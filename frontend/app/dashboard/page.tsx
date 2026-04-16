@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import ChatWindow from "./ChatWindow";
 import Sidebar from "@/components/Sidebar";
+import NudgeBanner from "@/components/NudgeBanner";
 
 export default async function DashboardPage() {
   const cookieStore = await cookies();
@@ -35,10 +36,16 @@ export default async function DashboardPage() {
     redirect("/onboard");
   }
 
+  const config = userRow?.config as Record<string, unknown> | null ?? {};
+  const showCalendarNudge =
+    !config?.source_calendar_ids &&
+    !(config?.nudges as Record<string, unknown>)?.calendar_dismissed;
+
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       <Sidebar />
       <main style={{ flex: 1, marginLeft: 56 }}>
+        <NudgeBanner show={showCalendarNudge} />
         <ChatWindow />
       </main>
     </div>

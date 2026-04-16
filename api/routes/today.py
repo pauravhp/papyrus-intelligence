@@ -213,6 +213,10 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         or config.get("calendar_ids")
         or ["primary"]
     )
+    show_calendar_nudge = (
+        not config.get("source_calendar_ids")
+        and not (config.get("nudges") or {}).get("calendar_dismissed")
+    )
     date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
 
     gcal_results: list[tuple[list, list]] = []
@@ -227,4 +231,5 @@ def get_today_view(user: dict = Depends(get_current_user)) -> dict:
         "today":     _parse_day(by_date.get(dates[1]), dates[1], gcal_results[1][0], gcal_results[1][1]),
         "tomorrow":  _parse_day(by_date.get(dates[2]), dates[2], gcal_results[2][0], gcal_results[2][1]),
         "review_available": _compute_review_available(config, has_confirmed_schedule),
+        "show_calendar_nudge": show_calendar_nudge,
     }

@@ -1,7 +1,7 @@
 // frontend/components/Sidebar.tsx
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MessageSquare, CalendarDays, Activity, Settings2, X, Sun, Moon, LogOut } from "lucide-react";
 import Link from "next/link";
@@ -38,6 +38,12 @@ export default function Sidebar() {
   const [config, setConfig] = useState<Record<string, unknown> | null>(null);
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
+
+  useEffect(() => {
+    const handler = () => setPrefsOpen(true);
+    window.addEventListener("papyrus:open-prefs", handler);
+    return () => window.removeEventListener("papyrus:open-prefs", handler);
+  }, []);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
