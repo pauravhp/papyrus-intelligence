@@ -194,6 +194,16 @@ API gotchas and architectural decisions. Read before touching any API client cod
 
 ---
 
+## BUG-3 — GCal calendar selection (discovered 2026-04-16)
+
+**`get_events` originally only queried `"primary"` + an explicit `calendar_ids` whitelist from Supabase config.** The whitelist was always empty (not populated during onboarding), so only primary calendar was queried — missing events in non-primary calendars (e.g. work meetings in a shared org calendar).
+
+**Fix applied**: `_get_user_calendar_ids(service)` auto-discovers all calendars the user owns/writes via `calendarList().list()`, bypassing the whitelist entirely. **Side effect**: this now pulls ALL user calendars including ones the user may not want (e.g. a hobby calendar that pollutes the scheduler).
+
+**Correct long-term fix**: let users select which calendars to read from (source calendars) and which to write to (target calendar for new events). These are different choices — a user may want to read from both their work and personal calendars but write new events only to personal. Store selections as `source_calendar_ids` and `target_calendar_id` in Supabase config. The current `_get_user_calendar_ids` approach is a useful fallback/default but needs a UI for explicit control.
+
+---
+
 ## BUG-1 — schedule_day / GCal integration (fixed 2026-04-15)
 
 Three issues found and fixed together:

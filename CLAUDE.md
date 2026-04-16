@@ -14,7 +14,7 @@ Hub-and-spoke:
 - **This app** → active hub (all scheduling happens here)
 - **GCal** → passive output (app writes events directly)
 
-No Todoist Pro. Direct GCal writes. BYOK (users bring their own Groq or Anthropic key).
+No Todoist Pro. Direct GCal writes. BYOK for scheduling (users bring their own Anthropic key). Server-side key used only for onboarding scan (pre-BYOK stage).
 
 ---
 
@@ -37,7 +37,7 @@ DO NOT build a hardcoded pipeline. No pack_schedule(). No enrich→order→pack.
 - Python 3.10+ / FastAPI
 - Next.js 15 / TypeScript / app router
 - Supabase (Postgres + Auth + encrypted credential storage)
-- Anthropic SDK (Claude Haiku default) + Groq fallback — BYOK
+- Anthropic SDK (Claude Haiku default) — BYOK for scheduling; server-side key for onboard scan
 - Google Calendar API (read + write, `calendar.events` scope)
 - Todoist REST API v1 (read + `due_datetime` writes only, no Pro features)
 
@@ -65,8 +65,9 @@ LLM gets pre-computed free windows as guidance, not walls.
  Never rely on Todoist's GCal sync. Write GCal events directly.  
  Set due_datetime in Todoist for task organisation only.
 
-**Rule 6: BYOK always.**  
- Never use server-side LLM keys in production. Always use user's Supabase-stored key.  
+**Rule 6: BYOK for scheduling; server-side for onboarding scan.**  
+ All scheduling operations (`schedule_day`, agent tools) must use the user's Supabase-stored Anthropic key.  
+ `/api/onboard/scan` uses server-side `ANTHROPIC_API_KEY` — intentional, users haven't configured their key yet at that point.  
  Dev fallback to env vars is allowed locally only (log a warning).
 
 **Rule 7: JSON validation on all LLM outputs.**  
