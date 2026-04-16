@@ -14,13 +14,23 @@ export default async function DashboardPage() {
   }
 
   const userId = data.claims.sub as string;
-  const { data: userRow } = await supabase
+  const { data: userRow, error: dbError } = await supabase
     .from("users")
-    .select("config")
+    .select("config, google_credentials, todoist_oauth_token")
     .eq("id", userId)
     .maybeSingle();
 
-  const isOnboarded = userRow?.config && Object.keys(userRow.config).length > 0;
+  if (dbError) {
+    console.error("[DashboardPage] failed to load user row:", dbError.message);
+    redirect("/login");
+  }
+
+  const hasGcal    = !!userRow?.google_credentials;
+  const hasTodoist = !!userRow?.todoist_oauth_token;
+  const isOnboarded =
+    hasGcal &&
+    hasTodoist &&
+    Object.keys(userRow?.config ?? {}).length > 0;
   if (!isOnboarded) {
     redirect("/onboard");
   }
