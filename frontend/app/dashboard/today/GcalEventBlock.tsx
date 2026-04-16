@@ -24,8 +24,9 @@ export default function GcalEventBlock({ event }: Props) {
         left: 2,
         right: 4,
         height,
-        background: "var(--surface)",
-        border: "1px solid var(--border)",
+        background: "var(--accent-tint)",
+        border: "1px solid var(--border-strong)",
+        borderLeft: "3px solid var(--accent)",
         borderRadius: 4,
         padding: "2px 6px",
         overflow: "hidden",
@@ -36,7 +37,7 @@ export default function GcalEventBlock({ event }: Props) {
       <p
         style={{
           fontSize: 11,
-          color: "var(--text-faint)",
+          color: "var(--text-muted)",
           fontFamily: "var(--font-literata)",
           lineHeight: 1.3,
           overflow: "hidden",

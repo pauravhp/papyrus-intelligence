@@ -48,7 +48,10 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
     (dayData?.all_day_events?.length ?? 0) > 0;
 
   const crossMidnight = hasCrossMidnightTask(scheduled);
-  const gridEnd = crossMidnight ? 25 : GRID_DEFAULT_END;
+  // When it's today, extend the grid to include the current hour so the now indicator is always visible
+  const nowHour = isToday ? new Date().getHours() : 0;
+  const dynamicEnd = isToday ? Math.max(GRID_DEFAULT_END, nowHour + 1) : GRID_DEFAULT_END;
+  const gridEnd = crossMidnight ? 25 : dynamicEnd;
   const gridHeight = (gridEnd - GRID_START) * PX_PER_HOUR;
 
   // Hour markers: one line + label per hour from GRID_START to gridEnd (inclusive start, exclusive end)
