@@ -48,19 +48,23 @@ def _get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def _get_user_calendar_ids(service) -> list[str]:
-    """Return all calendar IDs the user owns or can write to (excluding read-only)."""
+def list_calendars(service) -> list[dict]:
+    """List all GCal calendars with metadata. Used by GET /api/calendars — never at scheduling time."""
     try:
         items = service.calendarList().list().execute().get("items", [])
         return [
-            cal["id"]
+            {
+                "id": cal["id"],
+                "summary": cal.get("summary", cal["id"]),
+                "background_color": cal.get("backgroundColor", "#4285f4"),
+                "access_role": cal.get("accessRole", "reader"),
+            }
             for cal in items
-            if cal.get("accessRole") in ("owner", "writer")
         ]
     except Exception as exc:
         import sys
-        print(f"[get_events] calendarList failed: {exc}", file=sys.stderr)
-        return ["primary"]
+        print(f"[list_calendars] calendarList failed: {exc}", file=sys.stderr)
+        return [{"id": "primary", "summary": "Primary", "background_color": "#4285f4", "access_role": "owner"}]
 
 
 def _detect_user_timezone(service) -> str | None:
@@ -75,21 +79,24 @@ def _detect_user_timezone(service) -> str | None:
 def get_events(
     target_date: date,
     timezone_str: str = "America/Vancouver",
-    extra_calendar_ids: list[str] | None = None,
+    calendar_ids: list[str] | None = None,
     service=None,
 ) -> list[CalendarEvent]:
     """
-    Fetch events from all user-owned calendars for target_date.
+    Fetch GCal events for target_date from the given calendar_ids.
 
-    extra_calendar_ids is kept for backwards compatibility but is no longer
-    used as a whitelist — we always query every calendar the user owns/writes.
-    If timezone_str is "UTC" (unset default), we auto-detect from the primary
-    calendar's timezone to ensure correct day boundaries.
+    calendar_ids — explicit list of calendar IDs to query. Callers are responsible
+    for applying the fallback chain:
+        config.get("source_calendar_ids") or config.get("calendar_ids") or ["primary"]
+    If empty or None, returns [] immediately.
 
     service — pre-built googleapiclient service object. When None (CLI path),
     _get_calendar_service() reads credentials from token.json on disk.
     Pass an explicit service to use caller-managed credentials (API path).
     """
+    if not calendar_ids:
+        return []
+
     if service is None:
         service = _get_calendar_service()
 
@@ -110,9 +117,7 @@ def get_events(
     time_min = start_of_day.isoformat()
     time_max = end_of_day.isoformat()
 
-    # Always fetch from every calendar the user owns/can write to.
-    # This catches events in non-primary calendars without requiring manual config.
-    cal_ids = _get_user_calendar_ids(service)
+    cal_ids = calendar_ids
 
     seen_ids: set[str] = set()
     events: list[CalendarEvent] = []
