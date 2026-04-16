@@ -1,7 +1,13 @@
-// frontend/components/ConfigCard.tsx
 "use client";
 
 import { useState } from "react";
+import ColorRuleCard from "@/components/ColorRuleCard";
+import {
+  ColorRule,
+  calendarRulesToCategories,
+  categoriesToCalendarRules,
+  clearDuplicateColor,
+} from "@/lib/gcalColors";
 
 interface ConfigCardProps {
   config: Record<string, unknown>;
@@ -64,12 +70,17 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
   const [draft, setDraft] = useState<Record<string, unknown>>(
     JSON.parse(JSON.stringify(config))
   );
+  const [categories, setCategories] = useState<ColorRule[]>(() => {
+    const rules = config.calendar_rules as Record<string, unknown> | undefined;
+    return rules && Object.keys(rules).length > 0
+      ? calendarRulesToCategories(rules)
+      : [];
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const sleep = (draft.sleep ?? {}) as Record<string, unknown>;
   const scheduling = (draft.scheduling ?? {}) as Record<string, unknown>;
-  const calRules = (draft.calendar_rules ?? {}) as Record<string, Record<string, unknown>>;
 
   const setSleep = (key: string, value: unknown) =>
     setDraft((d) => {
@@ -83,23 +94,40 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
       return { ...d, scheduling: { ...prev, [key]: value } };
     });
 
-  const setCalRule = (ruleName: string, key: string, value: unknown) =>
-    setDraft((d) => {
-      const rules = (d.calendar_rules ?? {}) as Record<string, Record<string, unknown>>;
-      return {
-        ...d,
-        calendar_rules: {
-          ...rules,
-          [ruleName]: { ...(rules[ruleName] ?? {}), [key]: value },
-        },
-      };
+  const handleCategoryChange = (index: number, updated: ColorRule) => {
+    setCategories(prev => {
+      let next = [...prev];
+      if (updated.colorId !== null && updated.colorId !== prev[index].colorId) {
+        next = clearDuplicateColor(next, updated.colorId, index);
+      }
+      next[index] = updated;
+      return next;
     });
+  };
+
+  const handleCategoryDelete = (index: number) => {
+    setCategories(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddCategory = () => {
+    setCategories(prev => [
+      ...prev,
+      { name: "", colorId: null, bufferBefore: 15, bufferAfter: 15 },
+    ]);
+  };
+
+  const canSave = categories.every(c => c.name.trim() !== "");
 
   const handleSave = async () => {
+    if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
-      await onSave(draft);
+      const updated = {
+        ...draft,
+        calendar_rules: categoriesToCalendarRules(categories),
+      };
+      await onSave(updated);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -135,47 +163,35 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
         onChange={(v) => setSleep("no_tasks_after", v)}
       />
 
-      {/* Calendar rules */}
-      {Object.keys(calRules).length > 0 && (
-        <>
-          <p style={{ ...SECTION_HEADING, marginTop: 20 }}>Calendar Rules</p>
-          {Object.entries(calRules).map(([name, rule]) => (
-            <div
-              key={name}
-              style={{
-                background: "var(--surface-raised)",
-                border: "1px solid var(--border)",
-                borderRadius: 10,
-                padding: "12px 14px",
-                marginBottom: 10,
-              }}
-            >
-              <p style={{ color: "var(--accent)", fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-                {name}
-              </p>
-              <Field
-                label="Color ID"
-                value={(rule.color_id as string) ?? ""}
-                onChange={(v) => setCalRule(name, "color_id", v)}
-              />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <Field
-                  label="Buffer before (min)"
-                  type="number"
-                  value={(rule.buffer_before_minutes as number) ?? 0}
-                  onChange={(v) => setCalRule(name, "buffer_before_minutes", parseInt(v, 10) || 0)}
-                />
-                <Field
-                  label="Buffer after (min)"
-                  type="number"
-                  value={(rule.buffer_after_minutes as number) ?? 0}
-                  onChange={(v) => setCalRule(name, "buffer_after_minutes", parseInt(v, 10) || 0)}
-                />
-              </div>
-            </div>
-          ))}
-        </>
-      )}
+      {/* Event categories */}
+      <p style={{ ...SECTION_HEADING, marginTop: 20 }}>Event categories</p>
+
+      {categories.map((cat, i) => (
+        <ColorRuleCard
+          key={i}
+          rule={cat}
+          onChange={updated => handleCategoryChange(i, updated)}
+          onDelete={() => handleCategoryDelete(i)}
+        />
+      ))}
+
+      <button
+        onClick={handleAddCategory}
+        style={{
+          width: "100%",
+          padding: 11,
+          borderRadius: 10,
+          border: "1px dashed var(--border-strong)",
+          background: "transparent",
+          color: "var(--text-faint)",
+          fontSize: 13,
+          cursor: "pointer",
+          marginBottom: 4,
+          fontFamily: "var(--font-literata)",
+        }}
+      >
+        + Add event category
+      </button>
 
       {/* Scheduling */}
       <p style={{ ...SECTION_HEADING, marginTop: 20 }}>Scheduling</p>
@@ -200,19 +216,18 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
 
       <button
         onClick={handleSave}
-        disabled={saving}
+        disabled={saving || !canSave}
         style={{
           marginTop: 20,
           width: "100%",
           padding: "11px 0",
           borderRadius: 10,
-          background: saving ? "var(--accent-tint)" : "var(--accent)",
-          color: saving ? "var(--accent)" : "var(--bg)",
+          background: saving || !canSave ? "var(--accent-tint)" : "var(--accent)",
+          color: saving || !canSave ? "var(--accent)" : "var(--bg)",
           border: "none",
           fontSize: 14,
           fontWeight: 500,
-          cursor: saving ? "not-allowed" : "pointer",
-          boxShadow: "none",
+          cursor: saving || !canSave ? "not-allowed" : "pointer",
         }}
       >
         {saving ? "Saving…" : saveLabel}
