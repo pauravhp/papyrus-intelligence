@@ -2,65 +2,27 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const supabase = createClient();
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleSignIn = async () => {
     setError(null);
-    setMessage(null);
     setLoading(true);
-
-    if (mode === "signin") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message);
-      } else {
-        router.push("/dashboard");
-        router.refresh();
-      }
-    } else {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        setError(error.message);
-      } else {
-        setMessage("Check your email to confirm your account, then sign in.");
-      }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) {
+      setError(error.message);
+      setLoading(false);
     }
-
-    setLoading(false);
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    background: "var(--surface-raised)",
-    border: "1px solid var(--border)",
-    borderRadius: 8,
-    padding: "8px 12px",
-    fontSize: 13,
-    color: "var(--text)",
-    outline: "none",
-    fontFamily: "var(--font-literata)",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: 11,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.08em",
-    color: "var(--text-muted)",
-    marginBottom: 6,
+    // On success, browser navigates away — no need to setLoading(false)
   };
 
   return (
@@ -89,93 +51,50 @@ export default function LoginPage() {
           style={{
             fontSize: 26,
             color: "var(--text)",
-            marginBottom: 28,
+            marginBottom: 8,
             fontWeight: 400,
             letterSpacing: "-0.01em",
           }}
         >
-          {mode === "signin" ? "Sign in" : "Create account"}
+          Papyrus
         </h1>
-
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <label style={labelStyle}>Email</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Password</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
-
-          {error && (
-            <p style={{ fontSize: 13, color: "var(--danger)" }}>{error}</p>
-          )}
-          {message && (
-            <p style={{ fontSize: 13, color: "var(--accent)" }}>{message}</p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: "100%",
-              padding: "10px 0",
-              borderRadius: 8,
-              background: "var(--accent)",
-              color: "var(--bg)",
-              border: "none",
-              fontSize: 14,
-              fontFamily: "var(--font-literata)",
-              cursor: loading ? "not-allowed" : "pointer",
-              opacity: loading ? 0.6 : 1,
-              transition: "opacity 0.15s",
-            }}
-          >
-            {loading ? "Loading" : mode === "signin" ? "Sign in" : "Sign up"}
-          </button>
-        </form>
-
         <p
           style={{
             fontSize: 13,
-            textAlign: "center",
             color: "var(--text-muted)",
-            marginTop: 20,
+            marginBottom: 28,
+            fontFamily: "var(--font-literata)",
           }}
         >
-          {mode === "signin" ? "No account?" : "Already have one?"}{" "}
-          <button
-            onClick={() => {
-              setMode(mode === "signin" ? "signup" : "signin");
-              setError(null);
-              setMessage(null);
-            }}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--accent)",
-              fontSize: 13,
-              textDecoration: "underline",
-              textUnderlineOffset: 3,
-              fontFamily: "var(--font-literata)",
-            }}
-          >
-            {mode === "signin" ? "Sign up" : "Sign in"}
-          </button>
+          Your scheduling coach
         </p>
+
+        {error && (
+          <p style={{ fontSize: 13, color: "var(--danger)", marginBottom: 16 }}>
+            {error}
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={handleGoogleSignIn}
+          disabled={loading}
+          style={{
+            width: "100%",
+            padding: "10px 0",
+            borderRadius: 8,
+            background: "var(--accent)",
+            color: "var(--bg)",
+            border: "none",
+            fontSize: 14,
+            fontFamily: "var(--font-literata)",
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.6 : 1,
+            transition: "opacity 0.15s",
+          }}
+        >
+          {loading ? "Redirecting…" : "Sign in with Google"}
+        </button>
       </div>
     </div>
   );
