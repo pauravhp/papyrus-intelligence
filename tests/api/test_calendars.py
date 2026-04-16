@@ -2,10 +2,10 @@ import os
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
-os.environ.setdefault("GOOGLE_CLIENT_ID", "test-gcal-id")
-os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-gcal-secret")
-os.environ.setdefault("TODOIST_CLIENT_ID", "test-td-id")
-os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-td-secret")
+os.environ.setdefault("GOOGLE_CLIENT_ID", "test-gcal-client-id")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-gcal-client-secret")
+os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-client-id")
+os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-client-secret")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
 
 from unittest.mock import MagicMock, patch
