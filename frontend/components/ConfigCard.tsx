@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ColorRuleCard from "@/components/ColorRuleCard";
+import FieldTooltip from "@/components/FieldTooltip";
 import {
   ColorRule,
   calendarRulesToCategories,
@@ -47,15 +48,19 @@ const SECTION_HEADING: React.CSSProperties = {
   marginTop: 4,
 };
 
-function Field({ label, value, onChange, type = "text" }: {
+function Field({ label, value, onChange, type = "text", tooltip }: {
   label: string;
   value: string | number;
   onChange: (v: string) => void;
   type?: string;
+  tooltip?: string;
 }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={LABEL}>{label}</label>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+        <label style={{ ...LABEL, marginBottom: 0 }}>{label}</label>
+        {tooltip && <FieldTooltip content={tooltip} />}
+      </div>
       <input
         type={type}
         value={value ?? ""}
@@ -150,17 +155,21 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
         type="number"
         value={(sleep.morning_buffer_minutes as number) ?? 90}
         onChange={(v) => setSleep("morning_buffer_minutes", parseInt(v, 10) || 0)}
+        tooltip="Time you protect after waking before any task begins. For coffee, a walk, easing in."
       />
       <Field
         label="First task not before"
         type="time"
         value={(sleep.first_task_not_before as string) ?? ""}
         onChange={(v) => setSleep("first_task_not_before", v)}
+        tooltip="A hard floor. No task will be scheduled before this, even if your morning buffer ends earlier."
       />
       <Field
         label="No tasks after"
+        type="time"
         value={(sleep.no_tasks_after as string) ?? ""}
         onChange={(v) => setSleep("no_tasks_after", v)}
+        tooltip="Your wind-down boundary. No tasks or meetings will be scheduled past this time."
       />
 
       {/* Event categories */}
@@ -201,12 +210,14 @@ export default function ConfigCard({ config, onSave, saveLabel = "Save" }: Confi
           type="number"
           value={(scheduling.min_gap_between_tasks_minutes as number) ?? 5}
           onChange={(v) => setScheduling("min_gap_between_tasks_minutes", parseInt(v, 10) || 0)}
+          tooltip="Breathing room between tasks. Time to transition, think, or just exist between blocks."
         />
         <Field
           label="Max tasks/day"
           type="number"
           value={(scheduling.max_tasks_per_day as number) ?? 10}
           onChange={(v) => setScheduling("max_tasks_per_day", parseInt(v, 10) || 0)}
+          tooltip="The most tasks Papyrus will schedule in one day. Keeps your plan realistic, not aspirational."
         />
       </div>
 

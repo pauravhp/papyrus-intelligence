@@ -8,6 +8,7 @@ import {
   NAME_MAX_LENGTH,
   NAME_REGEX,
 } from "@/lib/gcalColors";
+import FieldTooltip from "@/components/FieldTooltip";
 
 interface ColorRuleCardProps {
   rule: ColorRule;
@@ -149,7 +150,10 @@ export default function ColorRuleCard({
       )}
 
       {/* Buffer before */}
-      <span style={LABEL}>Buffer before</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
+        <span style={{ ...LABEL, marginBottom: 0 }}>Buffer before</span>
+        <FieldTooltip content="Free time reserved before any event in this category. So you can prepare, not scramble." />
+      </div>
       <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
         {PRESETS.map(({ label, value }) => (
           <button
@@ -174,7 +178,10 @@ export default function ColorRuleCard({
       </div>
 
       {/* Buffer after */}
-      <span style={LABEL}>Buffer after</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
+        <span style={{ ...LABEL, marginBottom: 0 }}>Buffer after</span>
+        <FieldTooltip content="Recovery time after events in this category. To decompress, capture notes, or just breathe." />
+      </div>
       <div style={{ display: "flex", gap: 6 }}>
         {PRESETS.map(({ label, value }) => (
           <button
