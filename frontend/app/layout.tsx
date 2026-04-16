@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Gilda_Display, Literata } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { Analytics } from "@vercel/analytics/react";
 
 const gildaDisplay = Gilda_Display({
   weight: "400",
@@ -21,6 +22,29 @@ export const metadata: Metadata = {
   title: "Papyrus — AI-powered scheduling",
   description:
     "A calm scheduling coach that plans your day, respects your energy, and adapts when things slip.",
+  openGraph: {
+    title: "Papyrus — AI-powered scheduling",
+    description:
+      "A calm scheduling coach that plans your day, respects your energy, and adapts when things slip.",
+    url: "https://getpapyrus.app",
+    siteName: "Papyrus",
+    images: [
+      {
+        url: "https://getpapyrus.app/og-image.jpeg",
+        width: 1200,
+        height: 630,
+        alt: "Papyrus — AI-powered scheduling",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Papyrus — AI-powered scheduling",
+    description:
+      "A calm scheduling coach that plans your day, respects your energy, and adapts when things slip.",
+    images: ["https://getpapyrus.app/og-image.jpeg"],
+  },
 };
 
 export default function RootLayout({
@@ -34,6 +58,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <ThemeProvider>{children}</ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );

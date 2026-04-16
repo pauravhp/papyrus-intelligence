@@ -1,7 +1,6 @@
 // frontend/components/LandingClient.tsx
 "use client";
 
-import Link from "next/link";
 import { motion } from "framer-motion";
 import { ScanLine, CalendarCheck, MessageSquare } from "lucide-react";
 import InkWash from "./InkWash";
@@ -31,8 +30,10 @@ function Nav() {
       >
         Papyrus
       </span>
-      <Link
-        href="/login"
+      <a
+        href="https://forms.gle/sSpeWWJFEp48qANE6"
+        target="_blank"
+        rel="noopener noreferrer"
         style={{
           fontSize: 13,
           color: "var(--text-muted)",
@@ -52,8 +53,8 @@ function Nav() {
             "var(--border-strong)";
         }}
       >
-        Sign in
-      </Link>
+        Join the waitlist
+      </a>
     </nav>
   );
 }
@@ -126,8 +127,10 @@ function Hero() {
           transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           style={{ marginTop: 36, display: "flex", gap: 12, flexWrap: "wrap" }}
         >
-          <Link
-            href="/login"
+          <a
+            href="https://forms.gle/sSpeWWJFEp48qANE6"
+            target="_blank"
+            rel="noopener noreferrer"
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -150,8 +153,8 @@ function Hero() {
                 "var(--accent)")
             }
           >
-            Get started
-          </Link>
+            Join the waitlist
+          </a>
           <button
             onClick={scrollToHowItWorks}
             style={{
@@ -374,8 +377,10 @@ function CTAStrip() {
         >
           Ready to take back your time?
         </h2>
-        <Link
-          href="/login"
+        <a
+          href="https://forms.gle/sSpeWWJFEp48qANE6"
+          target="_blank"
+          rel="noopener noreferrer"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -397,8 +402,8 @@ function CTAStrip() {
             ((e.currentTarget as HTMLElement).style.background = "var(--accent)")
           }
         >
-          Start for free
-        </Link>
+          Join the waitlist
+        </a>
       </motion.div>
     </section>
   );

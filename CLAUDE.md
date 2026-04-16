@@ -1,5 +1,9 @@
 # CLAUDE.md — papyrus-intelligence
 
+## Worktrees
+
+Worktree directory: `../` (sibling directories, e.g. `../papyrus-intelligence-<branch-name>`)
+
 ## What This Is
 
 A scheduling coach and personal productivity hub. Three moments:
