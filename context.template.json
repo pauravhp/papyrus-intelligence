@@ -15,16 +15,14 @@
     "no_tasks_after": "00:30 next day"
   },
   "calendar_rules": {
-    "flamingo": {
+    "Meetings & calls": {
       "color_id": null,
-      "type": "meeting_call",
       "buffer_before_minutes": 15,
       "buffer_after_minutes": 15,
       "movable": false
     },
-    "banana": {
+    "Personal commitments": {
       "color_id": null,
-      "type": "event",
       "buffer_before_minutes": 30,
       "buffer_after_minutes": 30,
       "movable": false
@@ -56,8 +54,7 @@
     "hard": [
       "Never schedule anything during the 90-minute morning buffer after wake",
       "Meetings, calls, and events are immovable — task blocks always move around them",
-      "Always add 15-minute buffer before and after Flamingo (meeting/call) events",
-      "Always add 30-minute buffer before and after Banana (event) events",
+      "Apply buffer_before_minutes and buffer_after_minutes from calendar_rules for any event whose color matches a defined category",
       "Never schedule tasks after 11pm",
       "Minimum 5-minute gap between any two task blocks",
       "On weekends (Sat/Sun), nothing before 1pm regardless of calendar",
