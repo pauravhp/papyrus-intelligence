@@ -113,6 +113,7 @@ def _load_user_context(user_id: str) -> dict:
         "todoist_api_key": tod_token,   # kept as "todoist_api_key" — TodoistClient uses Bearer auth either way
         "gcal_service": gcal_service,
         "supabase": supabase,
+        "anthropic_api_key": settings.ANTHROPIC_API_KEY,
     }
 
 
