@@ -26,11 +26,11 @@ export const metadata: Metadata = {
     title: "Papyrus — AI-powered scheduling",
     description:
       "A calm scheduling coach that plans your day, respects your energy, and adapts when things slip.",
-    url: "https://getpapyrus.app",
+    url: "https://papyrus-intelligence-tau.vercel.app",
     siteName: "Papyrus",
     images: [
       {
-        url: "https://getpapyrus.app/og-image.jpeg",
+        url: "https://papyrus-intelligence-tau.vercel.app/og-image.jpeg",
         width: 1200,
         height: 630,
         alt: "Papyrus — AI-powered scheduling",
@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     title: "Papyrus — AI-powered scheduling",
     description:
       "A calm scheduling coach that plans your day, respects your energy, and adapts when things slip.",
-    images: ["https://getpapyrus.app/og-image.jpeg"],
+    images: ["https://papyrus-intelligence-tau.vercel.app/og-image.jpeg"],
   },
 };
 
