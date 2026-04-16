@@ -5,9 +5,8 @@ os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-secret")
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 from datetime import date
-import pytest
 
 
 def _make_event_response(items=None):
@@ -33,12 +32,10 @@ def test_get_events_queries_each_calendar_id():
 
     get_events(date.today(), calendar_ids=["primary", "work@co.com"], service=mock_svc)
 
-    calls = mock_svc.events.return_value.list.call_args_list
-    cal_ids_queried = [c.kwargs.get("calendarId") or c.args[0] for c in calls
-                       if "calendarId" in (c.kwargs or {})]
-    # Ensure both calendars were queried
-    assert "primary" in str(mock_svc.events.return_value.list.call_args_list)
-    assert "work@co.com" in str(mock_svc.events.return_value.list.call_args_list)
+    list_mock = mock_svc.events.return_value.list
+    assert list_mock.call_count == 2
+    called_ids = {c.kwargs["calendarId"] for c in list_mock.call_args_list}
+    assert called_ids == {"primary", "work@co.com"}
 
 
 def test_get_events_empty_calendar_ids_returns_empty():
