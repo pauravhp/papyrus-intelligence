@@ -18,3 +18,5 @@ skills-lock.json
 frontend/package-lock.json
 .superpowers/
 docs/
+.claude/
+.impeccable.md
