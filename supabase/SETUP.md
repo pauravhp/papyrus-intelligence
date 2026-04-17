@@ -29,26 +29,13 @@ supabase login
 
 ---
 
-## Encryption key setup (required before first user signup)
+## Encryption / credentials
 
-API keys (`todoist_api_key`, `groq_api_key`) and `google_credentials` are encrypted
-at rest using `pgcrypto`'s `pgp_sym_encrypt`. The symmetric passphrase is never
-stored in the database — the FastAPI backend sets it per-session via:
+`google_credentials` is stored as plain `jsonb` in the `users` table. No pgcrypto encryption is applied to it (deferred — see LEARNINGS.md for rationale).
 
-```sql
-SET app.encryption_key = '<secret>';
-```
+The `ENCRYPTION_KEY` env var is still required, but it is used exclusively for **HMAC state signing in the Google OAuth flow** — not for database-level encryption.
 
-To wire this up:
-
-1. Go to **Supabase dashboard → Settings → Vault** and create a secret named
-   `app_encryption_key` with a strong random value.
-
-2. In the FastAPI startup code, fetch this secret via the Supabase Management API
-   or environment variable and set it on each database connection before any
-   `encrypt_field` / `decrypt_field` call.
-
-Do **not** store the encryption key in `.env` or commit it anywhere.
+The `encrypt_field` / `decrypt_field` / `set_encryption_key` SQL functions and the `todoist_api_key`, `groq_api_key`, `anthropic_api_key` columns were all removed in migrations 006–007. There is no per-user LLM key storage.
 
 ---
 

@@ -238,7 +238,6 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
         config=config_with_time,
         context_note=combined_note,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        groq_api_key=None,
         target_date=today_str,
     )
 

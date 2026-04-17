@@ -57,10 +57,7 @@ API gotchas and architectural decisions. Read before touching any API client cod
 
 ## Model
 
-**Default model: `claude-haiku-4-5-20251001` (Anthropic SDK).** Groq fallback:  
- `meta-llama/llama-4-scout-17b-16e-instruct`. Both are BYOK — read from  
- user's Supabase row, never from server env in production. Dev fallback to  
- env vars allowed locally with a log warning.
+**Default model: `claude-haiku-4-5-20251001` (Anthropic SDK).** All LLM calls use the server-side `ANTHROPIC_API_KEY` from settings. No per-user keys, no BYOK, no Groq fallback. The key columns (`anthropic_api_key`, `groq_api_key`) were dropped in migrations 006–007.
 
 ---
 
