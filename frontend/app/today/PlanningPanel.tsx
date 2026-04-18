@@ -190,7 +190,143 @@ export default function PlanningPanel({
     );
   }
 
-  // Proposal + confirmed states rendered in Tasks 10 and 11
+  // ── RENDER: Proposal state ───────────────────────────────────────
+  if (status === "proposal") {
+    return (
+      <div style={panelShell}>
+        <PanelHeader onClose={onClose} />
+
+        {/* Reasoning stream */}
+        <div
+          ref={streamRef}
+          style={{ flex: 1, overflowY: "auto", padding: "18px 18px 12px", display: "flex", flexDirection: "column", gap: 14, scrollbarWidth: "none" }}
+        >
+          {/* User context note (if provided) */}
+          {contextNote && (
+            <div
+              style={{
+                alignSelf: "flex-end",
+                maxWidth: "90%",
+                padding: "8px 13px",
+                borderRadius: "12px 12px 3px 12px",
+                background: "var(--accent-tint)",
+                border: "1px solid rgba(196,130,26,0.18)",
+                fontSize: 13,
+                color: "var(--text)",
+                lineHeight: 1.5,
+                fontFamily: "var(--font-literata)",
+              }}
+            >
+              {contextNote}
+            </div>
+          )}
+
+          {/* Agent reasoning — prose, not bubbles */}
+          {reasoning && (
+            <div>
+              <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 8, fontFamily: "var(--font-literata)" }}>
+                Papyrus
+              </p>
+              <p style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text-muted)", fontStyle: "italic", fontFamily: "var(--font-literata)", whiteSpace: "pre-wrap" }}>
+                {reasoning}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "12px 16px 18px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+          <button
+            onClick={handleConfirm}
+            style={{
+              width: "100%",
+              padding: "10px 0",
+              background: "var(--accent)",
+              color: "var(--bg)",
+              border: "none",
+              borderRadius: 9,
+              fontFamily: "var(--font-literata)",
+              fontSize: 13,
+              cursor: "pointer",
+              letterSpacing: "0.01em",
+            }}
+          >
+            Confirm schedule
+          </button>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-end",
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 11,
+                padding: "7px 8px 7px 13px",
+              }}
+            >
+              <textarea
+                ref={refinementRef}
+                value={refinementInput}
+                onChange={(e) => {
+                  setRefinementInput(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 80)}px`;
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleRefinement();
+                  }
+                }}
+                placeholder="Move gym to 7am, remove a task…"
+                disabled={refineLoading}
+                rows={1}
+                style={{
+                  flex: 1,
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  fontFamily: "var(--font-literata)",
+                  fontSize: 13,
+                  color: "var(--text)",
+                  resize: "none",
+                  overflow: "hidden",
+                  height: 20,
+                }}
+              />
+              <button
+                onClick={handleRefinement}
+                disabled={refineLoading || !refinementInput.trim()}
+                style={{
+                  width: 26, height: 26,
+                  borderRadius: 7,
+                  background: refineLoading || !refinementInput.trim() ? "var(--accent-tint)" : "var(--accent)",
+                  border: "none",
+                  color: refineLoading || !refinementInput.trim() ? "var(--accent)" : "var(--bg)",
+                  cursor: refineLoading || !refinementInput.trim() ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}
+                aria-label="Send refinement"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="12" y1="19" x2="12" y2="5"/>
+                  <polyline points="5 12 12 5 19 12"/>
+                </svg>
+              </button>
+            </div>
+            <p style={{ fontSize: 10, color: "var(--text-faint)", fontStyle: "italic", paddingLeft: 3, fontFamily: "var(--font-literata)" }}>
+              Refine the schedule above or ask a question
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Confirmed state rendered in Task 11
   return null;
 }
 
