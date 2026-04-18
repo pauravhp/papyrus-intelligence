@@ -4,6 +4,9 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-id")
+os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-secret")
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -18,7 +21,7 @@ _USER = {"sub": "user-123"}
 _ROW = {
     "id": 1, "rhythm_name": "Zotero Reading", "sessions_per_week": 2,
     "session_min_minutes": 120, "session_max_minutes": 180,
-    "end_date": None, "sort_order": 0,
+    "end_date": None, "sort_order": 0, "description": None,
     "created_at": "2026-04-13T00:00:00+00:00", "updated_at": "2026-04-13T00:00:00+00:00",
 }
 
@@ -90,3 +93,67 @@ def test_delete_rhythm():
         resp = client.delete("/api/rhythms/1")
     _clear_auth()
     assert resp.status_code == 204
+
+
+def test_create_rhythm_with_description():
+    _override_auth()
+    row_with_desc = {**_ROW, "description": "Best in the morning"}
+    with patch("api.routes.rhythms.create_rhythm", return_value=row_with_desc) as mock_create:
+        resp = client.post("/api/rhythms", json={
+            "name": "Morning run",
+            "sessions_per_week": 4,
+            "description": "Best in the morning",
+        })
+    _clear_auth()
+    assert resp.status_code == 201
+    assert resp.json()["description"] == "Best in the morning"
+    _, kwargs = mock_create.call_args
+    assert kwargs["description"] == "Best in the morning"
+
+
+def test_create_rhythm_description_empty_string_becomes_none():
+    _override_auth()
+    with patch("api.routes.rhythms.create_rhythm", return_value=_ROW) as mock_create:
+        resp = client.post("/api/rhythms", json={
+            "name": "Morning run",
+            "sessions_per_week": 4,
+            "description": "",
+        })
+    _clear_auth()
+    assert resp.status_code == 201
+    _, kwargs = mock_create.call_args
+    assert kwargs["description"] is None
+
+
+def test_update_rhythm_sets_description():
+    _override_auth()
+    updated = {**_ROW, "description": "After lunch works well"}
+    with patch("api.routes.rhythms.update_rhythm", return_value=updated) as mock_update:
+        resp = client.patch("/api/rhythms/1", json={"description": "After lunch works well"})
+    _clear_auth()
+    assert resp.status_code == 200
+    assert resp.json()["description"] == "After lunch works well"
+    _, kwargs = mock_update.call_args
+    assert kwargs["description"] == "After lunch works well"
+
+
+def test_update_rhythm_clears_description_with_empty_string():
+    _override_auth()
+    with patch("api.routes.rhythms.update_rhythm", return_value=_ROW) as mock_update:
+        resp = client.patch("/api/rhythms/1", json={"description": ""})
+    _clear_auth()
+    assert resp.status_code == 200
+    _, kwargs = mock_update.call_args
+    assert kwargs["description"] is None
+
+
+def test_update_rhythm_omitting_description_passes_unset():
+    """PATCH with only sort_order must not touch description in the service."""
+    from api.services.rhythm_service import _DESCRIPTION_UNSET
+    _override_auth()
+    with patch("api.routes.rhythms.update_rhythm", return_value=_ROW) as mock_update:
+        resp = client.patch("/api/rhythms/1", json={"sort_order": 2})
+    _clear_auth()
+    assert resp.status_code == 200
+    _, kwargs = mock_update.call_args
+    assert kwargs["description"] is _DESCRIPTION_UNSET
