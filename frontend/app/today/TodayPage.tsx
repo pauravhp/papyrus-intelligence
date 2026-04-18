@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import { apiFetch } from "@/utils/api";
 import NudgeBanner from "@/components/NudgeBanner";
@@ -12,6 +12,18 @@ import ReplanButton from "./ReplanButton";
 import ReplanModal from "./ReplanModal";
 import ReviewButton from "./ReviewButton";
 import ReviewModal from "./ReviewModal";
+
+function useWindowWidth(): number {
+  const [width, setWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1280
+  );
+  useEffect(() => {
+    const handler = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  return width;
+}
 
 export interface ScheduledItem {
   task_id: string;
@@ -112,6 +124,11 @@ export default function TodayPage() {
     { key: "tomorrow",  label: "Tomorrow" },
   ];
 
+  // TEMPORARY — Task 13 replaces planningOpen/todayColumnData with real state
+  const planningOpen = false;
+  const windowWidth = useWindowWidth();
+  const todayColumnData = data?.today ?? null;
+
   return (
     <div style={{ padding: "32px 48px 48px" }}>
       <NudgeBanner show={showCalendarNudge} />
@@ -139,26 +156,48 @@ export default function TodayPage() {
         )}
       </motion.div>
 
-      {/* Desktop: 3-column */}
-      <div
+      {/* Desktop: 3-column (animated) */}
+      <motion.div
+        layout
         className="today-desktop"
         style={{ display: "flex", gap: 24 }}
       >
-        <motion.div custom={0} variants={FADE} initial="hidden" animate="show"
-          style={{ width: 220, opacity: 0.6, flexShrink: 0 }}>
-          <DayColumn label="Yesterday" dayData={data?.yesterday ?? null} isToday={false} />
+        <AnimatePresence initial={false}>
+          {!planningOpen && (
+            <motion.div
+              key="yesterday"
+              layout
+              initial={{ opacity: 0, x: -30 }}
+              animate={{ opacity: 0.6, x: 0 }}
+              exit={{ opacity: 0, x: -40 }}
+              transition={{ type: "spring", stiffness: 260, damping: 26 }}
+              style={{ width: 220, flexShrink: 0 }}
+            >
+              <DayColumn label="Yesterday" dayData={data?.yesterday ?? null} isToday={false} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.div layout style={{ flex: 1 }}>
+          <DayColumn label="Today" dayData={todayColumnData} isToday={true} />
         </motion.div>
 
-        <motion.div custom={1} variants={FADE} initial="hidden" animate="show"
-          style={{ flex: 1 }}>
-          <DayColumn label="Today" dayData={data?.today ?? null} isToday={true} />
-        </motion.div>
-
-        <motion.div custom={2} variants={FADE} initial="hidden" animate="show"
-          style={{ width: 220, opacity: 0.8, flexShrink: 0 }}>
-          <DayColumn label="Tomorrow" dayData={data?.tomorrow ?? null} isToday={false} />
-        </motion.div>
-      </div>
+        <AnimatePresence initial={false}>
+          {(!planningOpen || windowWidth >= 1100) && (
+            <motion.div
+              key="tomorrow"
+              layout
+              initial={{ opacity: 0, x: 30 }}
+              animate={{ opacity: planningOpen ? 0.65 : 0.75, x: 0 }}
+              exit={{ opacity: 0, x: 40 }}
+              transition={{ type: "spring", stiffness: 260, damping: 26 }}
+              style={{ width: planningOpen ? 172 : 220, flexShrink: 0 }}
+            >
+              <DayColumn label="Tomorrow" dayData={data?.tomorrow ?? null} isToday={false} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
       {/* Mobile: tabs */}
       <div className="today-mobile">
