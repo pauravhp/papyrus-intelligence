@@ -1,4 +1,5 @@
 // frontend/app/dashboard/today/DayColumn.tsx
+import { motion } from "framer-motion";
 import { type DayData, type ScheduledItem, type GCalEvent } from "./TodayPage";
 import TaskBlock from "./TaskBlock";
 import NowIndicator from "./NowIndicator";
@@ -13,6 +14,7 @@ interface DayColumnProps {
   label: string;
   dayData: DayData | null;
   isToday: boolean;
+  planningStatus?: "idle" | "working" | "proposal";
 }
 
 function fmtDate(isoDate: string): string {
@@ -38,7 +40,8 @@ function hasCrossMidnightTask(scheduled: ScheduledItem[]): boolean {
   );
 }
 
-export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
+export default function DayColumn({ label, dayData, isToday, planningStatus }: DayColumnProps) {
+  const showSkeleton = isToday && planningStatus === "working";
   const scheduled = dayData?.scheduled ?? [];
   const pushed = dayData?.pushed ?? [];
   const isEmpty = scheduled.length === 0;
@@ -254,10 +257,39 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
               </div>
             )}
 
-            {/* Task blocks */}
-            {scheduled.map((item) => (
-              <TaskBlock key={item.task_id} item={item} />
-            ))}
+            {/* Task blocks — or skeleton while planning */}
+            {showSkeleton ? (
+              [
+                { top: 0 * 72, h: 72, type: "deep" },
+                { top: 1.5 * 72, h: 28, type: "admin" },
+                { top: 2.25 * 72, h: 44, type: "deep" },
+                { top: 4 * 72, h: 44, type: "admin" },
+              ].map((s, i) => (
+                <motion.div
+                  key={i}
+                  animate={{ opacity: [0.3, 0.6, 0.3] }}
+                  transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.2 }}
+                  style={{
+                    position: "absolute",
+                    top: s.top,
+                    left: 4,
+                    right: 4,
+                    height: s.h,
+                    borderRadius: 6,
+                    borderLeft: `3px solid ${s.type === "deep" ? "rgba(122,98,80,0.4)" : "rgba(196,130,26,0.35)"}`,
+                    background: s.type === "deep" ? "rgba(122,98,80,0.12)" : "rgba(196,130,26,0.08)",
+                  }}
+                />
+              ))
+            ) : (
+              scheduled.map((item) => (
+                <TaskBlock
+                  key={item.task_id}
+                  item={item}
+                  isProposed={planningStatus === "proposal"}
+                />
+              ))
+            )}
 
             {/* GCal event blocks (read-only, behind confirmed task blocks) */}
             {(dayData?.gcal_events ?? []).map((event) => (

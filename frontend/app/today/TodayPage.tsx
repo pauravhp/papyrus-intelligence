@@ -12,6 +12,8 @@ import ReplanButton from "./ReplanButton";
 import ReplanModal from "./ReplanModal";
 import ReviewButton from "./ReviewButton";
 import ReviewModal from "./ReviewModal";
+import SplitPlanButton from "./SplitPlanButton";
+import PlanningPanel from "./PlanningPanel";
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(
@@ -85,6 +87,13 @@ export default function TodayPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [showCalendarNudge, setShowCalendarNudge] = useState(false);
 
+  const [planningOpen, setPlanningOpen] = useState(false);
+  const [planningContext, setPlanningContext] = useState<string | undefined>();
+  const [planningStatus, setPlanningStatus] = useState<"idle" | "working" | "proposal">("idle");
+  const [proposedSchedule, setProposedSchedule] = useState<ScheduledItem[] | null>(null);
+
+  const windowWidth = useWindowWidth();
+
   const load = useCallback(async () => {
     const { data: session } = await supabase.auth.getSession();
     const tok = session.session?.access_token ?? "";
@@ -124,149 +133,223 @@ export default function TodayPage() {
     { key: "tomorrow",  label: "Tomorrow" },
   ];
 
-  // TEMPORARY — Task 13 replaces planningOpen/todayColumnData with real state
-  const planningOpen = false;
-  const windowWidth = useWindowWidth();
-  const todayColumnData = data?.today ?? null;
+  // Determine what to show in the Today column:
+  // - while working: show skeleton (handled inside DayColumn via planningStatus prop)
+  // - while proposal: show proposed blocks
+  // - confirmed/idle: show actual data from API
+  const todayColumnData: DayData | null =
+    planningStatus === "proposal" && proposedSchedule
+      ? {
+          ...(data?.today ?? {
+            schedule_date: new Date().toISOString().split("T")[0],
+            pushed: [],
+            confirmed_at: null,
+            gcal_events: data?.today?.gcal_events ?? [],
+            all_day_events: data?.today?.all_day_events ?? [],
+          }),
+          scheduled: proposedSchedule,
+        }
+      : data?.today ?? null;
+
+  // Single source of truth: confirmed_at on today's DayData
+  const isConfirmed = !!data?.today?.confirmed_at;
+
+  const handlePlan = (contextNote?: string) => {
+    setPlanningContext(contextNote);
+    setPlanningOpen(true);
+    setPlanningStatus("working");
+    setProposedSchedule(null);
+  };
+
+  const handlePanelClose = () => {
+    setPlanningOpen(false);
+    setPlanningStatus("idle");
+    setProposedSchedule(null);
+    setPlanningContext(undefined);
+  };
+
+  const handlePanelConfirm = () => {
+    setPlanningOpen(false);
+    setPlanningStatus("idle");
+    setProposedSchedule(null);
+    setPlanningContext(undefined);
+    setLoading(true);
+    load();
+  };
+
+  const handleScheduleProposed = (schedule: ScheduledItem[]) => {
+    setProposedSchedule(schedule);
+    setPlanningStatus("proposal");
+  };
 
   return (
-    <div style={{ padding: "32px 48px 48px" }}>
-      <NudgeBanner show={showCalendarNudge} />
-      {/* Header */}
-      <motion.div
-        initial="hidden" animate="show" custom={0} variants={FADE}
-        style={{ marginBottom: 32, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}
-      >
-        <div>
-          <h1
-            className="font-display"
-            style={{ fontSize: 32, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 4 }}
-          >
-            Schedule
-          </h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-literata)" }}>
-            Yesterday, today, and what&apos;s ahead.
-          </p>
-        </div>
-        {showReplanButton && (
-          <ReplanButton onClick={() => setModalOpen(true)} />
-        )}
-        {data?.review_available && (
-          <ReviewButton onClick={() => setReviewOpen(true)} />
-        )}
-      </motion.div>
-
-      {/* Desktop: 3-column (animated) */}
-      <motion.div
-        layout
-        className="today-desktop"
-        style={{ display: "flex", gap: 24 }}
-      >
-        <AnimatePresence initial={false}>
-          {!planningOpen && (
-            <motion.div
-              key="yesterday"
-              layout
-              initial={{ opacity: 0, x: -30 }}
-              animate={{ opacity: 0.6, x: 0 }}
-              exit={{ opacity: 0, x: -40 }}
-              transition={{ type: "spring", stiffness: 260, damping: 26 }}
-              style={{ width: 220, flexShrink: 0 }}
+    <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
+      {/* Main today content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "32px 48px 48px" }}>
+        <NudgeBanner show={showCalendarNudge} />
+        {/* Header */}
+        <motion.div
+          initial="hidden" animate="show" custom={0} variants={FADE}
+          style={{ marginBottom: 32, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}
+        >
+          <div>
+            <h1
+              className="font-display"
+              style={{ fontSize: 32, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 4 }}
             >
-              <DayColumn label="Yesterday" dayData={data?.yesterday ?? null} isToday={false} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <motion.div layout style={{ flex: 1 }}>
-          <DayColumn label="Today" dayData={todayColumnData} isToday={true} />
+              Schedule
+            </h1>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, fontFamily: "var(--font-literata)" }}>
+              Yesterday, today, and what&apos;s ahead.
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            {data?.review_available && (
+              <ReviewButton onClick={() => setReviewOpen(true)} />
+            )}
+            <SplitPlanButton
+              confirmed={isConfirmed}
+              disabled={planningOpen}
+              onPlan={handlePlan}
+            />
+          </div>
         </motion.div>
 
-        <AnimatePresence initial={false}>
-          {(!planningOpen || windowWidth >= 1100) && (
-            <motion.div
-              key="tomorrow"
-              layout
-              initial={{ opacity: 0, x: 30 }}
-              animate={{ opacity: planningOpen ? 0.65 : 0.75, x: 0 }}
-              exit={{ opacity: 0, x: 40 }}
-              transition={{ type: "spring", stiffness: 260, damping: 26 }}
-              style={{ width: planningOpen ? 172 : 220, flexShrink: 0 }}
-            >
-              <DayColumn label="Tomorrow" dayData={data?.tomorrow ?? null} isToday={false} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+        {/* Desktop: 3-column (animated) */}
+        <motion.div
+          layout
+          className="today-desktop"
+          style={{ display: "flex", gap: 24 }}
+        >
+          <AnimatePresence initial={false}>
+            {!planningOpen && (
+              <motion.div
+                key="yesterday"
+                layout
+                initial={{ opacity: 0, x: -30 }}
+                animate={{ opacity: 0.6, x: 0 }}
+                exit={{ opacity: 0, x: -40 }}
+                transition={{ type: "spring", stiffness: 260, damping: 26 }}
+                style={{ width: 220, flexShrink: 0 }}
+              >
+                <DayColumn label="Yesterday" dayData={data?.yesterday ?? null} isToday={false} />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-      {/* Mobile: tabs */}
-      <div className="today-mobile">
-        <div
-          role="tablist"
-          style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 24 }}
-        >
-          {days.map((d) => (
-            <button
-              key={d.key}
-              id={`tab-${d.key}`}
-              role="tab"
-              aria-selected={activeTab === d.key}
-              aria-controls="today-tabpanel"
-              onClick={() => setActiveTab(d.key)}
-              style={{
-                flex: 1,
-                padding: "10px 0",
-                background: "none",
-                border: "none",
-                borderBottom: activeTab === d.key ? "2px solid var(--accent)" : "2px solid transparent",
-                color: activeTab === d.key ? "var(--accent)" : "var(--text-muted)",
-                fontSize: 13,
-                fontFamily: "var(--font-literata)",
-                cursor: "pointer",
-                marginBottom: -1,
-              }}
-            >
-              {d.label}
-            </button>
-          ))}
+          <motion.div layout style={{ flex: 1 }}>
+            <DayColumn label="Today" dayData={todayColumnData} isToday={true} planningStatus={planningStatus} />
+          </motion.div>
+
+          <AnimatePresence initial={false}>
+            {(!planningOpen || windowWidth >= 1100) && (
+              <motion.div
+                key="tomorrow"
+                layout
+                initial={{ opacity: 0, x: 30 }}
+                animate={{ opacity: planningOpen ? 0.65 : 0.75, x: 0 }}
+                exit={{ opacity: 0, x: 40 }}
+                transition={{ type: "spring", stiffness: 260, damping: 26 }}
+                style={{ width: planningOpen ? 172 : 220, flexShrink: 0 }}
+              >
+                <DayColumn label="Tomorrow" dayData={data?.tomorrow ?? null} isToday={false} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+
+        {/* Mobile: tabs */}
+        <div className="today-mobile">
+          <div
+            role="tablist"
+            style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 24 }}
+          >
+            {days.map((d) => (
+              <button
+                key={d.key}
+                id={`tab-${d.key}`}
+                role="tab"
+                aria-selected={activeTab === d.key}
+                aria-controls="today-tabpanel"
+                onClick={() => setActiveTab(d.key)}
+                style={{
+                  flex: 1,
+                  padding: "10px 0",
+                  background: "none",
+                  border: "none",
+                  borderBottom: activeTab === d.key ? "2px solid var(--accent)" : "2px solid transparent",
+                  color: activeTab === d.key ? "var(--accent)" : "var(--text-muted)",
+                  fontSize: 13,
+                  fontFamily: "var(--font-literata)",
+                  cursor: "pointer",
+                  marginBottom: -1,
+                }}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <div
+            id="today-tabpanel"
+            role="tabpanel"
+            aria-labelledby={`tab-${activeTab}`}
+          >
+            <DayColumn
+              label={days.find(d => d.key === activeTab)!.label}
+              dayData={data?.[activeTab] ?? null}
+              isToday={activeTab === "today"}
+            />
+          </div>
         </div>
-        <div
-          id="today-tabpanel"
-          role="tabpanel"
-          aria-labelledby={`tab-${activeTab}`}
-        >
-          <DayColumn
-            label={days.find(d => d.key === activeTab)!.label}
-            dayData={data?.[activeTab] ?? null}
-            isToday={activeTab === "today"}
+
+        <ResearchSnippet />
+
+        {/* Replan modal */}
+        {modalOpen && (
+          <ReplanModal
+            afternoonTasks={afternoonTasks}
+            token={token}
+            onClose={() => setModalOpen(false)}
+            onConfirm={() => {
+              setModalOpen(false);
+              setLoading(true);
+              load();
+            }}
           />
-        </div>
+        )}
+
+        {/* Review modal */}
+        {reviewOpen && (
+          <ReviewModal
+            token={token}
+            onClose={() => setReviewOpen(false)}
+          />
+        )}
       </div>
 
-      <ResearchSnippet />
-
-      {/* Replan modal */}
-      {modalOpen && (
-        <ReplanModal
-          afternoonTasks={afternoonTasks}
-          token={token}
-          onClose={() => setModalOpen(false)}
-          onConfirm={() => {
-            setModalOpen(false);
-            setLoading(true);
-            load();
-          }}
-        />
-      )}
-
-      {/* Review modal */}
-      {reviewOpen && (
-        <ReviewModal
-          token={token}
-          onClose={() => setReviewOpen(false)}
-        />
-      )}
+      {/* Planning panel — slides in when open */}
+      <AnimatePresence>
+        {planningOpen && (
+          <motion.div
+            key="planning-panel"
+            initial={{ x: 340, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 340, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 280, damping: 28 }}
+            style={{ flexShrink: 0 }}
+          >
+            <PlanningPanel
+              token={token}
+              contextNote={planningContext}
+              onScheduleProposed={handleScheduleProposed}
+              onConfirm={handlePanelConfirm}
+              onClose={handlePanelClose}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
 
