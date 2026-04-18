@@ -1,13 +1,151 @@
 // frontend/components/LandingClient.tsx
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { ScanLine, CalendarCheck, MessageSquare } from "lucide-react";
+import { Sun, RefreshCw, BookOpen } from "lucide-react";
 import InkWash from "./InkWash";
 
-// ── Navigation ──────────────────────────────────────────────────────────────
+// ── Waitlist Form ─────────────────────────────────────────────────────────────
+
+function WaitlistForm() {
+  const [firstName, setFirstName] = useState("");
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || status === "loading") return;
+    setStatus("loading");
+    setErrorMsg("");
+
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, firstName: firstName.trim() }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setErrorMsg((data as { error?: string }).error ?? "Something went wrong. Try again.");
+        setStatus("error");
+        return;
+      }
+
+      setStatus("success");
+    } catch {
+      setErrorMsg("Something went wrong. Try again.");
+      setStatus("error");
+    }
+  };
+
+  if (status === "success") {
+    return (
+      <motion.p
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        style={{
+          fontSize: 15,
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-literata)",
+          fontStyle: "italic",
+        }}
+      >
+        You&apos;re on the list. We&apos;ll be in touch.
+      </motion.p>
+    );
+  }
+
+  const inputStyle: React.CSSProperties = {
+    padding: "11px 16px",
+    borderRadius: 8,
+    border: "1px solid var(--border-strong)",
+    background: "var(--bg)",
+    color: "var(--text)",
+    fontSize: 14,
+    fontFamily: "var(--font-literata)",
+    outline: "none",
+    transition: "border-color 0.15s",
+    width: "100%",
+  };
+
+  return (
+    <div style={{ width: "100%" }}>
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", gap: 8, alignItems: "stretch" }}
+      >
+        <input
+          type="text"
+          placeholder="First name"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          style={{ ...inputStyle, flex: "0 0 130px" }}
+          onFocus={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--accent)")}
+          onBlur={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--border-strong)")}
+        />
+        <input
+          type="email"
+          placeholder="Email address"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          style={{ ...inputStyle, flex: "1 1 0" }}
+          onFocus={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--accent)")}
+          onBlur={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--border-strong)")}
+        />
+        <button
+          type="submit"
+          disabled={status === "loading"}
+          style={{
+            flex: "0 0 auto",
+            padding: "11px 24px",
+            borderRadius: 8,
+            background: "var(--accent)",
+            color: "var(--bg)",
+            fontSize: 14,
+            border: "none",
+            cursor: status === "loading" ? "default" : "pointer",
+            fontFamily: "var(--font-literata)",
+            opacity: status === "loading" ? 0.7 : 1,
+            transition: "background 0.15s, opacity 0.15s",
+            whiteSpace: "nowrap",
+          }}
+          onMouseEnter={(e) => {
+            if (status !== "loading")
+              (e.currentTarget as HTMLElement).style.background = "var(--accent-hover)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "var(--accent)";
+          }}
+        >
+          {status === "loading" ? "Joining…" : "Join the waitlist"}
+        </button>
+      </form>
+      <p
+        style={{
+          marginTop: 10,
+          fontSize: 12,
+          color: status === "error" ? "var(--danger)" : "var(--text-faint)",
+          fontFamily: "var(--font-literata)",
+        }}
+      >
+        {status === "error" ? errorMsg : "No spam. Just early access when it\u2019s ready."}
+      </p>
+    </div>
+  );
+}
+
+// ── Navigation ────────────────────────────────────────────────────────────────
 
 function Nav() {
+  const scrollToWaitlist = () => {
+    document.getElementById("waitlist")?.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
     <nav
       style={{
@@ -30,17 +168,17 @@ function Nav() {
       >
         Papyrus
       </span>
-      <a
-        href="https://forms.gle/sSpeWWJFEp48qANE6"
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        onClick={scrollToWaitlist}
         style={{
           fontSize: 13,
           color: "var(--text-muted)",
-          textDecoration: "none",
+          background: "none",
           border: "1px solid var(--border-strong)",
           borderRadius: 8,
           padding: "6px 16px",
+          cursor: "pointer",
+          fontFamily: "var(--font-literata)",
           transition: "color 0.15s, border-color 0.15s",
         }}
         onMouseEnter={(e) => {
@@ -49,19 +187,21 @@ function Nav() {
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLElement).style.color = "var(--text-muted)";
-          (e.currentTarget as HTMLElement).style.borderColor =
-            "var(--border-strong)";
+          (e.currentTarget as HTMLElement).style.borderColor = "var(--border-strong)";
         }}
       >
         Join the waitlist
-      </a>
+      </button>
     </nav>
   );
 }
 
-// ── Hero ─────────────────────────────────────────────────────────────────────
+// ── Hero ──────────────────────────────────────────────────────────────────────
 
 function Hero() {
+  const scrollToWaitlist = () => {
+    document.getElementById("waitlist")?.scrollIntoView({ behavior: "smooth" });
+  };
   const scrollToHowItWorks = () => {
     document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -100,9 +240,7 @@ function Hero() {
             margin: 0,
           }}
         >
-          Your schedule,
-          <br />
-          finally intelligent.
+          Your to-do list and your calendar don&apos;t talk to each other.
         </motion.h1>
 
         <motion.p
@@ -111,14 +249,14 @@ function Hero() {
           transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
           style={{
             marginTop: 24,
-            maxWidth: "58ch",
+            maxWidth: "52ch",
             color: "var(--text-muted)",
             fontSize: "clamp(1rem, 2vw, 1.1rem)",
             lineHeight: 1.65,
           }}
         >
-          A calm scheduling coach that plans your day, respects your energy,
-          and adapts gracefully when things slip.
+          Papyrus is the conversation. Describe your day, and it builds a
+          schedule around your real day, not your ideal one.
         </motion.p>
 
         <motion.div
@@ -127,10 +265,8 @@ function Hero() {
           transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           style={{ marginTop: 36, display: "flex", gap: 12, flexWrap: "wrap" }}
         >
-          <a
-            href="https://forms.gle/sSpeWWJFEp48qANE6"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={scrollToWaitlist}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -140,21 +276,20 @@ function Hero() {
               background: "var(--accent)",
               color: "var(--bg)",
               fontSize: 14,
-              textDecoration: "none",
+              border: "none",
+              cursor: "pointer",
               fontFamily: "var(--font-literata)",
               transition: "background 0.15s",
             }}
             onMouseEnter={(e) =>
-              ((e.currentTarget as HTMLElement).style.background =
-                "var(--accent-hover)")
+              ((e.currentTarget as HTMLElement).style.background = "var(--accent-hover)")
             }
             onMouseLeave={(e) =>
-              ((e.currentTarget as HTMLElement).style.background =
-                "var(--accent)")
+              ((e.currentTarget as HTMLElement).style.background = "var(--accent)")
             }
           >
             Join the waitlist
-          </a>
+          </button>
           <button
             onClick={scrollToHowItWorks}
             style={{
@@ -173,13 +308,11 @@ function Hero() {
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLElement).style.color = "var(--text)";
-              (e.currentTarget as HTMLElement).style.borderColor =
-                "var(--accent)";
+              (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)";
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.color = "var(--text-muted)";
-              (e.currentTarget as HTMLElement).style.borderColor =
-                "var(--border-strong)";
+              (e.currentTarget as HTMLElement).style.borderColor = "var(--border-strong)";
             }}
           >
             See how it works
@@ -187,7 +320,6 @@ function Hero() {
         </motion.div>
       </div>
 
-      {/* Scroll indicator */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 0.35 }}
@@ -212,27 +344,30 @@ function Hero() {
   );
 }
 
-// ── How it works ──────────────────────────────────────────────────────────────
+// ── A day with Papyrus ────────────────────────────────────────────────────────
 
 const STEPS = [
   {
-    icon: ScanLine,
-    title: "Connect your calendar",
-    body: "Link Google Calendar in one click. Papyrus reads your events and learns your existing commitments and patterns.",
+    Icon: Sun,
+    time: "Morning",
+    title: "Start with intention, not anxiety",
+    body: "Tell Papyrus how your day looks. It reads your tasks and calendar and proposes a time-blocked schedule. You confirm it. Then you start.",
   },
   {
-    icon: MessageSquare,
-    title: "Chat to plan",
-    body: "Each morning, describe your day in plain language — energy, context, constraints. Papyrus schedules around what matters.",
+    Icon: RefreshCw,
+    time: "Mid-day",
+    title: "When things slip, adapt. Not spiral.",
+    body: "Mark what's done, decide what moves, get a revised afternoon in seconds. The goal was never a perfect plan. It was a day that bends without breaking.",
   },
   {
-    icon: CalendarCheck,
-    title: "Confirm, done",
-    body: "Review the proposed schedule and confirm. Events are written directly to your calendar. No syncing, no guessing.",
+    Icon: BookOpen,
+    time: "End of day",
+    title: "See what you actually built",
+    body: "Not what you planned. What you did. A short reflection that compounds over time: your patterns, your capacity, the wins that are easy to miss.",
   },
 ];
 
-function HowItWorks() {
+function ADayWithPapyrus() {
   return (
     <section
       id="how-it-works"
@@ -254,7 +389,7 @@ function HowItWorks() {
             marginBottom: 16,
           }}
         >
-          How it works
+          A day with Papyrus
         </motion.p>
 
         <motion.h2
@@ -271,7 +406,7 @@ function HowItWorks() {
             marginBottom: 64,
           }}
         >
-          Three steps to a calmer day
+          Plan it. Adapt it. Learn from it.
         </motion.h2>
 
         <div
@@ -281,67 +416,76 @@ function HowItWorks() {
             gap: 24,
           }}
         >
-          {STEPS.map((step, i) => {
-            const Icon = step.icon;
-            return (
-              <motion.div
-                key={step.title}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: i * 0.1 }}
-                viewport={{ once: true }}
+          {STEPS.map(({ Icon, time, title, body }, i) => (
+            <motion.div
+              key={title}
+              initial={{ opacity: 0, y: 24 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: i * 0.1 }}
+              viewport={{ once: true }}
+              style={{
+                position: "relative",
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 12,
+                padding: "28px 24px",
+              }}
+            >
+              <p
                 style={{
-                  position: "relative",
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 12,
-                  padding: "28px 24px",
+                  fontSize: 10,
+                  fontWeight: 500,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: "var(--accent)",
+                  marginBottom: 14,
                 }}
               >
-                <Icon
-                  size={20}
-                  strokeWidth={1.5}
-                  style={{ color: "var(--accent)", marginBottom: 16 }}
-                />
-                <h3
-                  className="font-display"
-                  style={{
-                    fontSize: 18,
-                    color: "var(--text)",
-                    marginBottom: 10,
-                    letterSpacing: "-0.01em",
-                  }}
-                >
-                  {step.title}
-                </h3>
-                <p
-                  style={{
-                    fontSize: 14,
-                    lineHeight: 1.65,
-                    color: "var(--text-muted)",
-                    maxWidth: "48ch",
-                  }}
-                >
-                  {step.body}
-                </p>
-                <span
-                  className="font-display"
-                  style={{
-                    position: "absolute",
-                    top: 20,
-                    right: 20,
-                    fontSize: 56,
-                    lineHeight: 1,
-                    color: "var(--border)",
-                    userSelect: "none",
-                    pointerEvents: "none",
-                  }}
-                >
-                  {i + 1}
-                </span>
-              </motion.div>
-            );
-          })}
+                {time}
+              </p>
+              <Icon
+                size={20}
+                strokeWidth={1.5}
+                style={{ color: "var(--accent)", marginBottom: 16 }}
+              />
+              <h3
+                className="font-display"
+                style={{
+                  fontSize: 18,
+                  color: "var(--text)",
+                  marginBottom: 10,
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                {title}
+              </h3>
+              <p
+                style={{
+                  fontSize: 14,
+                  lineHeight: 1.65,
+                  color: "var(--text-muted)",
+                  maxWidth: "48ch",
+                }}
+              >
+                {body}
+              </p>
+              <span
+                className="font-display"
+                style={{
+                  position: "absolute",
+                  top: 20,
+                  right: 20,
+                  fontSize: 56,
+                  lineHeight: 1,
+                  color: "var(--border)",
+                  userSelect: "none",
+                  pointerEvents: "none",
+                }}
+              >
+                {i + 1}
+              </span>
+            </motion.div>
+          ))}
         </div>
       </div>
     </section>
@@ -353,9 +497,9 @@ function HowItWorks() {
 function CTAStrip() {
   return (
     <section
+      id="waitlist"
       style={{
         padding: "96px 48px",
-        textAlign: "center",
         background: "var(--bg)",
       }}
     >
@@ -372,38 +516,14 @@ function CTAStrip() {
             fontSize: "clamp(1.75rem, 4vw, 2.25rem)",
             letterSpacing: "-0.02em",
             color: "var(--text)",
-            marginBottom: 28,
+            marginBottom: 32,
           }}
         >
-          Ready to take back your time?
+          Your day is already complicated.
+          <br />
+          Planning it shouldn&apos;t be.
         </h2>
-        <a
-          href="https://forms.gle/sSpeWWJFEp48qANE6"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "12px 36px",
-            borderRadius: 8,
-            background: "var(--accent)",
-            color: "var(--bg)",
-            fontSize: 14,
-            textDecoration: "none",
-            fontFamily: "var(--font-literata)",
-            transition: "background 0.15s",
-          }}
-          onMouseEnter={(e) =>
-            ((e.currentTarget as HTMLElement).style.background =
-              "var(--accent-hover)")
-          }
-          onMouseLeave={(e) =>
-            ((e.currentTarget as HTMLElement).style.background = "var(--accent)")
-          }
-        >
-          Join the waitlist
-        </a>
+        <WaitlistForm />
       </motion.div>
     </section>
   );
@@ -416,7 +536,7 @@ export default function LandingClient() {
     <main style={{ display: "flex", flexDirection: "column" }}>
       <Nav />
       <Hero />
-      <HowItWorks />
+      <ADayWithPapyrus />
       <CTAStrip />
     </main>
   );
