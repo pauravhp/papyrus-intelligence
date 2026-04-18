@@ -20,6 +20,10 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
     if (contextOpen) inputRef.current?.focus();
   }, [contextOpen]);
 
+  useEffect(() => {
+    if (disabled) { setContextOpen(false); setContextNote(""); }
+  }, [disabled]);
+
   const handleMainClick = () => {
     if (disabled) return;
     setContextOpen(false);
@@ -126,6 +130,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
                 onChange={(e) => setContextNote(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Tired today, travelling, light day…"
+                disabled={disabled}
                 style={{
                   flex: 1,
                   background: "transparent",
@@ -138,6 +143,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
               />
               <button
                 onClick={handleSubmitContext}
+                disabled={disabled}
                 style={{
                   padding: "4px 10px",
                   background: "var(--accent)",
@@ -146,7 +152,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
                   borderRadius: 6,
                   fontFamily: "var(--font-literata)",
                   fontSize: 12,
-                  cursor: "pointer",
+                  cursor: disabled ? "not-allowed" : "pointer",
                   flexShrink: 0,
                 }}
               >
