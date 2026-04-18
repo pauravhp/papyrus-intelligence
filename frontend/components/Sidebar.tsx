@@ -14,9 +14,9 @@ import CalendarSection from "@/components/CalendarSection";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
-  { icon: MessageSquare, label: "Chat",    href: "/dashboard" },
-  { icon: CalendarDays,  label: "Today",   href: "/dashboard/today" },
-  { icon: Activity,      label: "Rhythms", href: "/dashboard/rhythms" },
+  { icon: CalendarDays,  label: "Today",   href: "/today" },
+  { icon: MessageSquare, label: "Chat",    href: "/chat" },
+  { icon: Activity,      label: "Rhythms", href: "/rhythms" },
 ] as const;
 
 const ICON_BTN: React.CSSProperties = {
