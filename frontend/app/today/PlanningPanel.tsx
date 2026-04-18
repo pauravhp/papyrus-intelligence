@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { type ScheduledItem } from "./TodayPage";
 
 export type PanelStatus = "working" | "proposal" | "confirmed";
@@ -39,9 +39,12 @@ export default function PlanningPanel({
   const [reasoning, setReasoning] = useState<string>("");
   const [refinementInput, setRefinementInput] = useState("");
   const [refineLoading, setRefineLoading] = useState(false);
+  const [wireMessages, setWireMessages] = useState<Array<{ role: string; content: unknown }>>([]);
+  const [planError, setPlanError] = useState<string | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const refinementRef = useRef<HTMLTextAreaElement>(null);
   const hasFired = useRef(false);
+  const isConfirmingRef = useRef(false);
 
   // Advance progress steps on a timer while working
   useEffect(() => {
@@ -76,13 +79,14 @@ export default function PlanningPanel({
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ messages: msgs.map((m) => ({ role: m.role, content: m.content })) }),
+          body: JSON.stringify({ messages: wireMessages.length > 0 ? wireMessages : msgs.map((m) => ({ role: m.role, content: m.content })) }),
         }
       );
 
       if (!res.ok) throw new Error(`API error: ${res.status}`);
 
       const data = await res.json();
+      if (data.messages) setWireMessages(data.messages);
       const assistantMsg: Message = { role: "assistant", content: data.message };
       const nextMessages = [...msgs, assistantMsg];
       setMessages(nextMessages);
@@ -95,12 +99,14 @@ export default function PlanningPanel({
 
       setStatus("proposal");
     } catch (err) {
-      setReasoning(`Something went wrong: ${(err as Error).message}`);
+      setPlanError(`Planning failed: ${(err as Error).message}`);
       setStatus("proposal");
     }
   }
 
   async function handleConfirm() {
+    if (isConfirmingRef.current) return;
+    isConfirmingRef.current = true;
     const confirmMessages: Message[] = [
       ...messages,
       { role: "user", content: "Looks good, please confirm the schedule." },
@@ -126,6 +132,8 @@ export default function PlanningPanel({
       setTimeout(() => onConfirm(), 1200);
     } catch (err) {
       console.error("Confirm failed:", err);
+      isConfirmingRef.current = false;
+      setReasoning("Confirm failed — please try again.");
     }
   }
 
@@ -222,37 +230,45 @@ export default function PlanningPanel({
           )}
 
           {/* Agent reasoning — prose, not bubbles */}
-          {reasoning && (
-            <div>
-              <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 8, fontFamily: "var(--font-literata)" }}>
-                Papyrus
-              </p>
-              <p style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text-muted)", fontStyle: "italic", fontFamily: "var(--font-literata)", whiteSpace: "pre-wrap" }}>
-                {reasoning}
-              </p>
-            </div>
+          {planError ? (
+            <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-literata)", fontStyle: "italic" }}>
+              {planError} — close the panel and try again.
+            </p>
+          ) : (
+            reasoning && (
+              <div>
+                <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)", marginBottom: 8, fontFamily: "var(--font-literata)" }}>
+                  Papyrus
+                </p>
+                <p style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text-muted)", fontStyle: "italic", fontFamily: "var(--font-literata)", whiteSpace: "pre-wrap" }}>
+                  {reasoning}
+                </p>
+              </div>
+            )
           )}
         </div>
 
         {/* Footer */}
         <div style={{ padding: "12px 16px 18px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-          <button
-            onClick={handleConfirm}
-            style={{
-              width: "100%",
-              padding: "10px 0",
-              background: "var(--accent)",
-              color: "var(--bg)",
-              border: "none",
-              borderRadius: 9,
-              fontFamily: "var(--font-literata)",
-              fontSize: 13,
-              cursor: "pointer",
-              letterSpacing: "0.01em",
-            }}
-          >
-            Confirm schedule
-          </button>
+          {!planError && (
+            <button
+              onClick={handleConfirm}
+              style={{
+                width: "100%",
+                padding: "10px 0",
+                background: "var(--accent)",
+                color: "var(--bg)",
+                border: "none",
+                borderRadius: 9,
+                fontFamily: "var(--font-literata)",
+                fontSize: 13,
+                cursor: "pointer",
+                letterSpacing: "0.01em",
+              }}
+            >
+              Confirm schedule
+            </button>
+          )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <div
