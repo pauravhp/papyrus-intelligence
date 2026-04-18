@@ -353,6 +353,7 @@ export default function HowToGuide({ open, onClose }: HowToGuideProps) {
   };
 
   const handleClose = () => {
+    localStorage.setItem("howto_seen", "true");
     setStepIndex(0);
     setDirection(1);
     setCopied(false);
