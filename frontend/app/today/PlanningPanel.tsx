@@ -326,8 +326,40 @@ export default function PlanningPanel({
     );
   }
 
-  // Confirmed state rendered in Task 11
-  return null;
+  // ── RENDER: Confirmed state ──────────────────────────────────────
+  return (
+    <div style={panelShell}>
+      <PanelHeader onClose={onClose} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "32px 24px" }}>
+        <motion.div
+          initial={{ scale: 0.7, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 200, damping: 16 }}
+          style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent-tint)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)" }}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </motion.div>
+        <motion.p
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          style={{ fontSize: 15, color: "var(--text)", fontFamily: "var(--font-literata)", fontStyle: "italic" }}
+        >
+          Scheduled
+        </motion.p>
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          style={{ fontSize: 12, color: "var(--text-faint)", fontFamily: "var(--font-literata)" }}
+        >
+          Events written to Google Calendar
+        </motion.p>
+      </div>
+    </div>
+  );
 }
 
 // ── Shared shell style ───────────────────────────────────────────
