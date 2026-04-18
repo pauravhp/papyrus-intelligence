@@ -125,7 +125,11 @@ def execute_schedule_day(
     for rhythm in active_rhythms:
         synthetic = _TodoistTask(
             id=f"proj_{rhythm['id']}",
-            content=rhythm["rhythm_name"],
+            content=(
+                f"{rhythm['rhythm_name']}: {rhythm['description']}"
+                if rhythm.get("description")
+                else rhythm["rhythm_name"]
+            ),
             project_id="rhythm",
             priority=0,
             due_datetime=None,
@@ -137,7 +141,11 @@ def execute_schedule_day(
             session_max_minutes=int(rhythm["session_max_minutes"]),
             sessions_per_week=int(rhythm["sessions_per_week"]),
         )
-        task_names[f"proj_{rhythm['id']}"] = rhythm["rhythm_name"]
+        task_names[f"proj_{rhythm['id']}"] = (
+            f"{rhythm['rhythm_name']}: {rhythm['description']}"
+            if rhythm.get("description")
+            else rhythm["rhythm_name"]
+        )
         synthetic_rhythms.append(synthetic)
     tasks_raw = synthetic_rhythms + tasks_raw
     events = get_events(
@@ -374,8 +382,11 @@ def execute_manage_rhythm(inp: dict, user_ctx: dict) -> dict:
             session_max=int(inp.get("session_max", 120)),
             end_date=inp.get("end_date"),
             sort_order=int(inp.get("sort_order", 0)),
+            description=inp.get("description"),
         )
     elif action == "update":
+        from api.services.rhythm_service import _DESCRIPTION_UNSET
+        desc = inp["description"] if "description" in inp else _DESCRIPTION_UNSET
         return update_rhythm(
             uid, sb,
             rhythm_id=int(inp["rhythm_id"]),
@@ -384,6 +395,7 @@ def execute_manage_rhythm(inp: dict, user_ctx: dict) -> dict:
             session_max=inp.get("session_max"),
             end_date=inp.get("end_date"),
             sort_order=inp.get("sort_order"),
+            description=desc,
         )
     elif action == "delete":
         delete_rhythm(uid, sb, int(inp["rhythm_id"]))
@@ -490,6 +502,7 @@ TOOL_SCHEMAS = [  # onboard_scan/apply/confirm intentionally excluded — handle
                 "session_max": {"type": "integer", "description": "Max session minutes (default 120)"},
                 "end_date": {"type": "string", "description": "Optional ISO date e.g. 2026-08-01 — soft end, rhythm stops being injected after this"},
                 "sort_order": {"type": "integer", "description": "Lower = scheduled first when multiple rhythms exist (default 0)"},
+                "description": {"type": "string", "description": "One-line scheduling hint passed to the agent when planning the day (e.g. 'mornings only', 'before deep work'). Max 80 chars. Optional."},
             },
             "required": ["action"],
         },

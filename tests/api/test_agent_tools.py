@@ -365,3 +365,93 @@ def test_execute_confirm_schedule_uses_write_calendar_id(user_ctx):
     insert_call = sb.from_.return_value.insert.call_args
     inserted_data = insert_call.args[0]
     assert inserted_data["gcal_write_calendar_id"] == "work@co.com"
+
+
+def test_manage_rhythm_schema_has_description_property():
+    from api.services.agent_tools import TOOL_SCHEMAS
+    schema = next(s for s in TOOL_SCHEMAS if s["name"] == "manage_rhythm")
+    assert "description" in schema["input_schema"]["properties"]
+    desc_prop = schema["input_schema"]["properties"]["description"]
+    assert desc_prop["type"] == "string"
+
+
+def test_schedule_day_injects_rhythm_with_description_in_content():
+    """When a rhythm has a description, content = 'name: description'."""
+    from api.services.agent_tools import execute_schedule_day
+    from unittest.mock import MagicMock, patch
+
+    captured_tasks = []
+
+    def fake_schedule_day(**kwargs):
+        captured_tasks.extend(kwargs["tasks"])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    ctx = {
+        "user_id": "user-123",
+        "todoist_api_key": "tok",
+        "gcal_service": MagicMock(),
+        "config": {"timezone": "UTC", "calendar_ids": [], "work_start": "09:00", "work_end": "17:00", "sleep_end": "07:00", "sleep_start": "23:00", "buffer_minutes": 15},
+        "supabase": MagicMock(),
+    }
+
+    rhythm_row = {
+        "id": 8, "rhythm_name": "Morning run",
+        "sessions_per_week": 4, "session_min_minutes": 30, "session_max_minutes": 45,
+        "end_date": None, "sort_order": 0,
+        "description": "Best before deep work",
+        "created_at": "x", "updated_at": "x",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
+         patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[rhythm_row]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        execute_schedule_day("", "2026-04-18", ctx)
+
+    proj_tasks = [t for t in captured_tasks if t.id == "proj_8"]
+    assert len(proj_tasks) == 1
+    assert proj_tasks[0].content == "Morning run: Best before deep work"
+
+
+def test_schedule_day_injects_rhythm_without_description_uses_name_only():
+    """When a rhythm has no description, content = rhythm_name (unchanged behaviour)."""
+    from api.services.agent_tools import execute_schedule_day
+    from unittest.mock import MagicMock, patch
+
+    captured_tasks = []
+
+    def fake_schedule_day(**kwargs):
+        captured_tasks.extend(kwargs["tasks"])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    ctx = {
+        "user_id": "user-123",
+        "todoist_api_key": "tok",
+        "gcal_service": MagicMock(),
+        "config": {"timezone": "UTC", "calendar_ids": [], "work_start": "09:00", "work_end": "17:00", "sleep_end": "07:00", "sleep_start": "23:00", "buffer_minutes": 15},
+        "supabase": MagicMock(),
+    }
+
+    rhythm_row = {
+        "id": 9, "rhythm_name": "Evening reading",
+        "sessions_per_week": 3, "session_min_minutes": 20, "session_max_minutes": 30,
+        "end_date": None, "sort_order": 1,
+        "description": None,
+        "created_at": "x", "updated_at": "x",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
+         patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[rhythm_row]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        execute_schedule_day("", "2026-04-18", ctx)
+
+    proj_tasks = [t for t in captured_tasks if t.id == "proj_9"]
+    assert len(proj_tasks) == 1
+    assert proj_tasks[0].content == "Evening reading"
