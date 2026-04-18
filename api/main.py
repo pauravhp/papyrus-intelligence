@@ -12,7 +12,7 @@ Routes:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import calendars, chat, google_auth, health, onboard, plan, replan, review, rhythms, todoist_auth, today
+from api.routes import calendars, chat, google_auth, health, onboard, plan, replan, review, rhythms, settings, todoist_auth, today
 
 app = FastAPI(title="schedule-for-me API", version="0.1.0")
 
@@ -35,3 +35,4 @@ app.include_router(todoist_auth.router)
 app.include_router(today.router)
 app.include_router(replan.router)
 app.include_router(review.router)
+app.include_router(settings.router)
