@@ -101,6 +101,13 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
             the plan to your calendar.
             <br /><br />
             For it to plan well, your tasks need to speak its language. This guide covers exactly that.
+            <p style={{ marginTop: 12 }}>
+              On the{" "}
+              <strong style={{ fontWeight: 600 }}>Rhythms</strong>{" "}
+              page you can set recurring commitments — exercise, reading, deep work — with
+              a <em>Scheduling hint</em> that tells Papyrus when they fit best (e.g.{" "}
+              <em>"mornings only"</em> or <em>"before deep work"</em>).
+            </p>
           </div>
         </div>
       );
