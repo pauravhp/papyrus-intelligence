@@ -1,5 +1,4 @@
 // frontend/app/dashboard/today/DayColumn.tsx
-import Link from "next/link";
 import { type DayData, type ScheduledItem, type GCalEvent } from "./TodayPage";
 import TaskBlock from "./TaskBlock";
 import NowIndicator from "./NowIndicator";
@@ -143,12 +142,9 @@ export default function DayColumn({ label, dayData, isToday }: DayColumnProps) {
           {isToday ? (
             <>
               No schedule yet.{" "}
-              <Link
-                href="/dashboard"
-                style={{ color: "var(--accent)", textDecoration: "none" }}
-              >
-                Plan your day →
-              </Link>
+              <span style={{ color: "var(--accent)" }}>
+                Use the Plan button above to get started →
+              </span>
             </>
           ) : (
             "No schedule planned."
