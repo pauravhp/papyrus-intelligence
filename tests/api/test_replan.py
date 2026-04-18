@@ -333,6 +333,52 @@ def test_replan_preflight_returns_completed_ids(client, monkeypatch):
     assert data["completed_ids"] == ["t1"]
 
 
+def test_replan_confirm_fires_analytics(client, monkeypatch):
+    from unittest.mock import patch
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
+    row, _ = _mock_schedule_log_today(mock_sb)
+
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    (
+        mock_sb.from_.return_value
+        .insert.return_value
+        .execute.return_value
+    ).data = [{"id": 2}]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_gcal = MagicMock()
+    body = {
+        "schedule": {"scheduled": [
+            {"task_id": "t1", "task_name": "Deep work", "start_time": "2026-04-17T14:00:00",
+             "end_time": "2026-04-17T15:30:00", "duration_minutes": 90}
+        ], "pushed": []},
+        "tomorrow_task_ids": [],
+    }
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.routes.replan.capture") as mock_capture, \
+         patch("api.routes.replan.create_event", return_value="gcal-id"):
+        MockTodoist.return_value.schedule_task.return_value = None
+        resp = client.post("/api/replan/confirm", json=body, headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    mock_capture.assert_called_once()
+    assert mock_capture.call_args[0][1] == "replan_confirmed"
+
+
 def test_replan_confirm_deletes_from_correct_calendar(client, monkeypatch):
     """POST /api/replan/confirm deletes old events using gcal_write_calendar_id from the log row."""
     mock_sb = MagicMock()

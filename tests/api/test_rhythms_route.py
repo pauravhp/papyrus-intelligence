@@ -90,3 +90,19 @@ def test_delete_rhythm():
         resp = client.delete("/api/rhythms/1")
     _clear_auth()
     assert resp.status_code == 204
+
+
+def test_create_rhythm_fires_analytics():
+    from unittest.mock import patch
+    _override_auth()
+    body = {"name": "Morning run", "sessions_per_week": 3, "session_min": 30, "session_max": 60}
+    with patch("api.routes.rhythms.capture") as mock_capture, \
+         patch("api.routes.rhythms.create_rhythm", return_value=_ROW):
+        resp = client.post("/api/rhythms", json=body)
+    _clear_auth()
+    assert resp.status_code == 201
+    mock_capture.assert_called_once()
+    args = mock_capture.call_args[0]
+    assert args[1] == "rhythm_created"
+    assert args[2]["sessions_per_week"] == 3
+    assert args[2]["has_end_date"] is False

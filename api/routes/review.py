@@ -5,12 +5,13 @@ import logging
 from datetime import date, datetime, timezone
 
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.auth import get_current_user
 from api.config import settings
 from api.db import supabase
+from api.services.analytics import capture
 from src.todoist_client import TodoistClient
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ def _generate_summary_line(tasks: list[ReviewSubmitTask], rhythms: list[ReviewSu
 
 
 @router.post("/review/submit")
-def review_submit(body: ReviewSubmitRequest, user: dict = Depends(get_current_user)) -> dict:
+def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)) -> dict:
     user_id = user["sub"]
     today = date.today().isoformat()
 
@@ -215,6 +216,18 @@ def review_submit(body: ReviewSubmitRequest, user: dict = Depends(get_current_us
     except Exception:
         logger.warning("LLM summary generation failed, using fallback")
         summary_line = f"{completed_count} of {total_count} tasks done."
+
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "review_submitted",
+        {
+            "tasks_total": len(body.tasks),
+            "tasks_completed": sum(1 for t in body.tasks if t.completed),
+            "rhythms_total": len(body.rhythms),
+            "rhythms_completed": sum(1 for r in body.rhythms if r.completed),
+        },
+    )
 
     return {"saved": True, "summary_line": summary_line}
 

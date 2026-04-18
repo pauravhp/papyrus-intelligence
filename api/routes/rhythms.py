@@ -4,11 +4,12 @@
 All routes require Bearer JWT. user_id comes from the verified token.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel
 
 from api.auth import get_current_user
 from api.db import supabase
+from api.services.analytics import capture
 from api.services.rhythm_service import (
     create_rhythm,
     delete_rhythm,
@@ -42,8 +43,8 @@ def list_rhythms(user: dict = Depends(get_current_user)):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_rhythm_route(body: CreateRhythmRequest, user: dict = Depends(get_current_user)):
-    return create_rhythm(
+def create_rhythm_route(body: CreateRhythmRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+    result = create_rhythm(
         user["sub"], supabase,
         name=body.name,
         sessions_per_week=body.sessions_per_week,
@@ -52,6 +53,16 @@ def create_rhythm_route(body: CreateRhythmRequest, user: dict = Depends(get_curr
         end_date=body.end_date,
         sort_order=body.sort_order,
     )
+    background_tasks.add_task(
+        capture,
+        user["sub"],
+        "rhythm_created",
+        {
+            "sessions_per_week": body.sessions_per_week,
+            "has_end_date": body.end_date is not None,
+        },
+    )
+    return result
 
 
 @router.patch("/{rhythm_id}")
