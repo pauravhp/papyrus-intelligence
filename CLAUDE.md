@@ -83,7 +83,7 @@ LLM gets pre-computed free windows as guidance, not walls.
 | Tool               | R/W | Purpose                                   |
 | ------------------ | --- | ----------------------------------------- |
 | `get_tasks`        | R   | Todoist tasks with filter                 |
-| `get_calendar`     | R   | GCal events (all calendars)               |
+| `get_calendar`     | R   | GCal events (user-selected calendars)     |
 | `schedule_day`     | R   | Inner LLM call → proposed schedule        |
 | `confirm_schedule` | W   | Write GCal events + Todoist due_datetimes |
 | `push_task`        | W   | Clear due + add comment                   |
