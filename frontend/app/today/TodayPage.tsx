@@ -8,8 +8,6 @@ import NudgeBanner from "@/components/NudgeBanner";
 import DayColumn from "./DayColumn";
 import TodaySkeleton from "./TodaySkeleton";
 import ResearchSnippet from "./ResearchSnippet";
-import ReplanButton from "./ReplanButton";
-import ReplanModal from "./ReplanModal";
 import ReviewButton from "./ReviewButton";
 import ReviewModal from "./ReviewModal";
 import SplitPlanButton from "./SplitPlanButton";
@@ -83,7 +81,6 @@ export default function TodayPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
-  const [modalOpen, setModalOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [showCalendarNudge, setShowCalendarNudge] = useState(false);
 
@@ -110,15 +107,6 @@ export default function TodayPage() {
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
-
-  const now = new Date();
-  const isPastNoon = now.getHours() >= 12;
-  const showReplanButton = isPastNoon && !!data?.today;
-
-  // Afternoon tasks: start_time >= now
-  const afternoonTasks: ScheduledItem[] = (data?.today?.scheduled ?? []).filter((item) => {
-    return new Date(item.start_time) >= now;
-  });
 
   if (loading) return <TodaySkeleton />;
   if (error) return (
@@ -303,20 +291,6 @@ export default function TodayPage() {
         </div>
 
         <ResearchSnippet />
-
-        {/* Replan modal */}
-        {modalOpen && (
-          <ReplanModal
-            afternoonTasks={afternoonTasks}
-            token={token}
-            onClose={() => setModalOpen(false)}
-            onConfirm={() => {
-              setModalOpen(false);
-              setLoading(true);
-              load();
-            }}
-          />
-        )}
 
         {/* Review modal */}
         {reviewOpen && (

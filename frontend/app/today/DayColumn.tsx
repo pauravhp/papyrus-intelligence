@@ -155,8 +155,8 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
         </p>
       )}
 
-      {/* Calendar grid — shown when there are tasks, GCal events, or it's Today (for now line) */}
-      {(!isEmpty || isToday || hasGcal) && (
+      {/* Calendar grid — shown when there are tasks, GCal events, skeleton active, or it's Today (for now line) */}
+      {(!isEmpty || isToday || hasGcal || showSkeleton) && (
         <div style={{ display: "flex" }}>
           {/* Time gutter */}
           <div
