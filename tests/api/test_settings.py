@@ -79,10 +79,26 @@ def test_patch_calendars_updates_source_and_write(mock_sb):
     assert data["write_calendar_id"] == "cal-a"
 
 
+@patch("api.routes.settings.supabase")
+def test_patch_calendars_preserves_existing_keys(mock_sb):
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"config": {"source_calendar_ids": ["cal-x"], "write_calendar_id": "cal-x"}}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    resp = client.patch("/api/settings/calendars", json={"write_calendar_id": "cal-y"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source_calendar_ids"] == ["cal-x"]  # untouched
+    assert data["write_calendar_id"] == "cal-y"       # updated
+
+
 def test_patch_calendars_requires_auth():
     # Clear the override to test real auth rejection
     app.dependency_overrides.clear()
-    resp = client.patch("/api/settings/calendars", json={})
-    assert resp.status_code in (401, 403, 422)
-    # Restore for other tests
-    app.dependency_overrides[get_current_user] = lambda: FAKE_USER
+    try:
+        resp = client.patch("/api/settings/calendars", json={})
+        assert resp.status_code in (401, 403, 422)
+    finally:
+        app.dependency_overrides[get_current_user] = lambda: FAKE_USER
