@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     TODOIST_CLIENT_ID: str        # new — required
     TODOIST_CLIENT_SECRET: str    # new — required
     ANTHROPIC_API_KEY: str        # now required (was Optional)
+    FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(
         env_file=".env",
