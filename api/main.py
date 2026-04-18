@@ -3,18 +3,24 @@ FastAPI application entry point.
 
 Start with:
     uvicorn api.main:app --reload
-
-Routes:
-    GET  /health                  — unauthenticated liveness check
-    POST /api/onboard/stage1      — authenticated; calendar scan + LLM draft
 """
 
+from contextlib import asynccontextmanager
+
+import posthog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import calendars, chat, google_auth, health, onboard, plan, replan, review, rhythms, todoist_auth, today
 
-app = FastAPI(title="schedule-for-me API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    posthog.shutdown()  # flush any queued events before process exits
+
+
+app = FastAPI(title="schedule-for-me API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
