@@ -3,6 +3,7 @@ import { Gilda_Display, Literata } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Analytics } from "@vercel/analytics/react";
+import PostHogProvider from "@/components/PostHogProvider";
 
 const gildaDisplay = Gilda_Display({
   weight: "400",
@@ -57,7 +58,9 @@ export default function RootLayout({
       className={`${gildaDisplay.variable} ${literata.variable} h-full`}
     >
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>{children}</ThemeProvider>
+        <PostHogProvider>
+          <ThemeProvider>{children}</ThemeProvider>
+        </PostHogProvider>
         <Analytics />
       </body>
     </html>
