@@ -4,6 +4,7 @@
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
+import { usePostHog } from "posthog-js/react";
 import ScheduleCard from "./ScheduleCard";
 import ConfirmButtons from "./ConfirmButtons";
 
@@ -57,6 +58,7 @@ export default function ChatWindow() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
+  const posthog = usePostHog();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -72,6 +74,7 @@ export default function ChatWindow() {
     setMessages(newMessages);
     setInput("");
     setLoading(true);
+    posthog?.capture("chat_message_sent");
 
     try {
       const { data } = await supabase.auth.getSession();
@@ -104,7 +107,12 @@ export default function ChatWindow() {
       };
 
       setMessages([...newMessages, assistantMsg]);
-      if (data2.schedule_card) setPendingSchedule(data2.schedule_card);
+      if (data2.schedule_card) {
+        setPendingSchedule(data2.schedule_card);
+        posthog?.capture("schedule_proposed", {
+          task_count: ((data2.schedule_card as { scheduled?: unknown[] }).scheduled ?? []).length,
+        });
+      }
     } catch (err) {
       setMessages([
         ...newMessages,
