@@ -1,8 +1,8 @@
-// frontend/app/dashboard/today/TaskBlock.tsx
 "use client";
 
 import { useRef, useState } from "react";
 import { type ScheduledItem } from "./TodayPage";
+import { durationTier } from "./utils/durationTier";
 import TaskCard from "./TaskCard";
 
 const GRID_START_HOUR = 8;
@@ -22,11 +22,42 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+const CATEGORY_STYLES: Record<
+  "deep_work" | "admin" | "untagged",
+  { border: string; fills: Record<"sm" | "md" | "lg", string> }
+> = {
+  deep_work: {
+    border: "#7a6250",
+    fills: {
+      sm: "rgba(122,98,80,0.10)",
+      md: "rgba(122,98,80,0.20)",
+      lg: "rgba(122,98,80,0.35)",
+    },
+  },
+  admin: {
+    border: "#c4821a",
+    fills: {
+      sm: "rgba(196,130,26,0.08)",
+      md: "rgba(196,130,26,0.18)",
+      lg: "rgba(196,130,26,0.30)",
+    },
+  },
+  untagged: {
+    border: "rgba(44,26,14,0.28)",
+    fills: {
+      sm: "rgba(44,26,14,0.05)",
+      md: "rgba(44,26,14,0.05)",
+      lg: "rgba(44,26,14,0.07)",
+    },
+  },
+};
+
 interface TaskBlockProps {
   item: ScheduledItem;
+  isProposed?: boolean;
 }
 
-export default function TaskBlock({ item }: TaskBlockProps) {
+export default function TaskBlock({ item, isProposed = false }: TaskBlockProps) {
   const blockRef = useRef<HTMLDivElement>(null);
   const [cardOpen, setCardOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -34,6 +65,16 @@ export default function TaskBlock({ item }: TaskBlockProps) {
   const top = blockTop(item.start_time);
   const height = blockHeight(item.duration_minutes);
   const showTimeLabel = height >= 36;
+
+  const categoryKey =
+    item.category === "deep_work" ? "deep_work"
+    : item.category === "admin" ? "admin"
+    : "untagged";
+  const tier = durationTier(item.duration_minutes);
+  const styles = CATEGORY_STYLES[categoryKey];
+  const bgColor = hovered
+    ? styles.fills[tier].replace(/[\d.]+\)$/, (n) => String(Math.min(1, parseFloat(n) + 0.08)) + ")")
+    : styles.fills[tier];
 
   return (
     <>
@@ -43,9 +84,7 @@ export default function TaskBlock({ item }: TaskBlockProps) {
         tabIndex={0}
         aria-label={`${item.task_name}, ${fmtTime(item.start_time)}`}
         onClick={() => setCardOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setCardOpen(true);
-        }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCardOpen(true); }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -54,15 +93,20 @@ export default function TaskBlock({ item }: TaskBlockProps) {
           left: 4,
           right: 4,
           height,
-          background: hovered ? "var(--accent-light-hover, #eedabb)" : "var(--accent-light)",
-          border: "1px solid var(--accent-border)",
+          background: bgColor,
+          borderLeft: `3px solid ${styles.border}`,
+          borderTop: "none",
+          borderRight: "none",
+          borderBottom: "none",
           borderRadius: 6,
           padding: "3px 6px",
           overflow: "hidden",
           cursor: "pointer",
           boxSizing: "border-box",
           zIndex: hovered ? 6 : 4,
-          boxShadow: hovered ? "0 2px 10px rgba(192,122,47,0.2)" : "none",
+          boxShadow: isProposed
+            ? `0 0 0 1px rgba(196,130,26,0.18), ${hovered ? "0 2px 10px rgba(44,26,14,0.12)" : "none"}`
+            : hovered ? "0 2px 10px rgba(44,26,14,0.12)" : "none",
           transition: "background 0.12s, box-shadow 0.12s",
         }}
       >
