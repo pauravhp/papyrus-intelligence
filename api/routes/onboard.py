@@ -10,11 +10,12 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import anthropic
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel
 
 from api.auth import get_current_user
+from api.services.analytics import capture
 from api.config import settings
 from api.db import supabase
 from src.calendar_client import WRITE_SCOPES, build_gcal_service_from_credentials, get_events
@@ -224,6 +225,7 @@ class PromoteResponse(BaseModel):
 @router.post("/promote", response_model=PromoteResponse)
 def onboard_promote(
     body: PromoteRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> PromoteResponse:
     """
@@ -238,5 +240,15 @@ def onboard_promote(
         supabase.from_("users").update({"config": clean}).eq("id", user_id).execute()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Supabase write failed: {exc}")
+
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "onboarding_completed",
+        {
+            "timezone": (clean.get("user") or {}).get("timezone", ""),
+            "has_google_calendar": bool(clean.get("source_calendar_ids") or clean.get("calendar_ids")),
+        },
+    )
 
     return PromoteResponse(success=True)

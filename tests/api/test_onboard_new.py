@@ -338,3 +338,26 @@ def test_translate_color_semantics_maps_ids_to_names():
     assert "Banana" not in result
     assert "99" in result
     assert result["Flamingo"]["count"] == 5
+
+
+def test_onboard_promote_fires_analytics(client, monkeypatch):
+    """promote should enqueue an onboarding_completed event."""
+    from unittest.mock import MagicMock, patch
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(error=None)
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.capture") as mock_capture:
+        resp = client.post(
+            "/api/onboard/promote",
+            json={"config": {"user": {"timezone": "America/Vancouver"}}},
+            headers=_auth_header(),
+        )
+    assert resp.status_code == 200
+    mock_capture.assert_called_once()
+    args = mock_capture.call_args
+    assert args[0][1] == "onboarding_completed"
+    props = args[0][2]
+    assert "timezone" in props
+    assert "has_google_calendar" in props
