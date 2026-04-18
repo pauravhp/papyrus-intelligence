@@ -73,7 +73,7 @@ export default function TaskBlock({ item, isProposed = false }: TaskBlockProps) 
   const tier = durationTier(item.duration_minutes);
   const styles = CATEGORY_STYLES[categoryKey];
   const bgColor = hovered
-    ? styles.fills[tier].replace(/[\d.]+\)$/, (n) => String(Math.min(1, parseFloat(n) + 0.08)) + ")")
+    ? styles.fills[tier].replace(/,\s*([\d.]+)\)$/, (_, n) => `, ${Math.min(1, parseFloat(n) + 0.08).toFixed(2)})`)
     : styles.fills[tier];
 
   return (
