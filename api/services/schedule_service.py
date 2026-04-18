@@ -80,12 +80,13 @@ FREE WINDOWS (all times are LOCAL, UTC{tz_offset}): {windows_text}
 HARD RULES: {rules_text}
 
 Reply ONLY with JSON:
-{{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
+{{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
 
 - start_time/end_time: ISO 8601 with the SAME UTC offset (UTC{tz_offset}), e.g. {target_date}T09:00:00{tz_offset}
 - CRITICAL: The free window times are LOCAL (UTC{tz_offset}) — do NOT convert them to UTC. Use them exactly as shown.
 - Every task in exactly one list. Tasks that don't fit go in pushed.
-- For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room."""
+- For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room.
+- category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous."""
 
 
 def _extract_json(text: str) -> str:

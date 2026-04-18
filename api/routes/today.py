@@ -19,6 +19,13 @@ from src.calendar_client import build_gcal_service_from_credentials, get_events
 
 logger = logging.getLogger(__name__)
 
+# Maps GCal event colorId strings to hex colors (Google Calendar palette)
+GCAL_COLOR_HEX: dict[str, str] = {
+    "1": "#ac725e", "2": "#d06b64", "3": "#f83a22", "4": "#fa573c",
+    "5": "#ff7537", "6": "#ffad46", "7": "#42d692", "8": "#16a765",
+    "9": "#7bd148", "10": "#b3dc6c", "11": "#fbe983",
+}
+
 router = APIRouter(prefix="/api")
 
 
@@ -99,6 +106,7 @@ def _fetch_gcal_for_date(
                 "summary": e.summary,
                 "start_time": e.start.isoformat(),
                 "end_time": e.end.isoformat(),
+                "color_hex": GCAL_COLOR_HEX.get(e.color_id) if e.color_id else None,
             })
     return timed, all_day
 

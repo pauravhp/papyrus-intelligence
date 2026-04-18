@@ -19,6 +19,7 @@ export interface ScheduledItem {
   start_time: string;
   end_time: string;
   duration_minutes: number;
+  category: "deep_work" | "admin" | null;
 }
 
 export interface PushedItem {
@@ -31,6 +32,7 @@ export interface GCalEvent {
   summary: string;
   start_time: string;
   end_time: string;
+  color_hex: string | null;  // from GCal event colorId mapped to hex
 }
 
 export interface DayData {
