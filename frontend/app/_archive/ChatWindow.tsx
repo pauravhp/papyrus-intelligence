@@ -6,11 +6,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import ScheduleCard from "./ScheduleCard";
 import ConfirmButtons from "./ConfirmButtons";
+import NudgeCard, { type NudgeCardData } from "./NudgeCard";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   schedule_card?: Record<string, unknown> | null;
+  nudge?: NudgeCardData | null;
 }
 
 function ThinkingIndicator() {
@@ -54,6 +56,9 @@ export default function ChatWindow() {
   const [loading, setLoading] = useState(false);
   const [pendingSchedule, setPendingSchedule] =
     useState<Record<string, unknown> | null>(null);
+  const [nudge, setNudge] = useState<NudgeCardData | null>(null);
+  const [nudgeShown, setNudgeShown] = useState(false);
+  const [token, setToken] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const supabase = createClient();
@@ -75,7 +80,8 @@ export default function ChatWindow() {
 
     try {
       const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? "";
+      const sessionToken = data.session?.access_token ?? "";
+      setToken(sessionToken);
 
       const apiMessages = newMessages.map((m) => ({ role: m.role, content: m.content }));
 
@@ -85,7 +91,7 @@ export default function ChatWindow() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${sessionToken}`,
           },
           body: JSON.stringify({ messages: apiMessages }),
         }
@@ -105,6 +111,9 @@ export default function ChatWindow() {
 
       setMessages([...newMessages, assistantMsg]);
       if (data2.schedule_card) setPendingSchedule(data2.schedule_card);
+      if (data2.nudge && !nudgeShown) {
+        setNudge(data2.nudge);
+      }
     } catch (err) {
       setMessages([
         ...newMessages,
@@ -197,6 +206,21 @@ export default function ChatWindow() {
                           disabled={loading}
                         />
                       )}
+                    </div>
+                  )}
+                  {/* Coaching nudge — once per session, last assistant message only */}
+                  {i === messages.length - 1 && nudge && !nudgeShown && (
+                    <div style={{ marginTop: 12 }}>
+                      <NudgeCard
+                        nudge={nudge}
+                        token={token}
+                        apiBase={process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}
+                        onDismiss={() => setNudgeShown(true)}
+                        onAction={(label) => {
+                          setNudgeShown(true);
+                          sendMessage(label);
+                        }}
+                      />
                     </div>
                   )}
                 </div>
