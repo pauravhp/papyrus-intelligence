@@ -102,3 +102,34 @@ def test_patch_calendars_requires_auth():
         assert resp.status_code in (401, 403, 422)
     finally:
         app.dependency_overrides[get_current_user] = lambda: FAKE_USER
+
+
+@patch("api.routes.settings.supabase")
+def test_patch_nudges_sets_disabled_types(mock_sb):
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"config": {"nudges": {"coaching_enabled": True}}}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    resp = client.patch("/api/settings/nudges", json={"disabled_types": ["habit_skipped", "no_deadline"]})
+
+    assert resp.status_code == 200
+    nudges = resp.json()["nudges"]
+    assert nudges["disabled_types"] == ["habit_skipped", "no_deadline"]
+    assert nudges["coaching_enabled"] is True  # untouched
+
+
+@patch("api.routes.settings.supabase")
+def test_patch_nudges_disabled_types_replaces_full_list(mock_sb):
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"config": {"nudges": {"disabled_types": ["habit_skipped"]}}}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    resp = client.patch("/api/settings/nudges", json={"disabled_types": ["no_deadline"]})
+
+    assert resp.status_code == 200
+    nudges = resp.json()["nudges"]
+    # Full replacement — not append
+    assert nudges["disabled_types"] == ["no_deadline"]
+    assert "habit_skipped" not in nudges["disabled_types"]

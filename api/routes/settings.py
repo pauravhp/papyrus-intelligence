@@ -19,6 +19,7 @@ router = APIRouter()
 class NudgesPayload(BaseModel):
     coaching_enabled: Optional[bool] = None
     weekly_reflection_enabled: Optional[bool] = None
+    disabled_types: Optional[list[str]] = None
 
 
 @router.patch("/api/settings/nudges")
@@ -42,6 +43,8 @@ def patch_nudges(
         nudges["coaching_enabled"] = payload.coaching_enabled
     if payload.weekly_reflection_enabled is not None:
         nudges["weekly_reflection_enabled"] = payload.weekly_reflection_enabled
+    if payload.disabled_types is not None:
+        nudges["disabled_types"] = payload.disabled_types
 
     config["nudges"] = nudges
     supabase.from_("users").update({"config": config}).eq("id", user_id).execute()
