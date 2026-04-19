@@ -1,4 +1,5 @@
 import { type GCalEvent } from "./TodayPage";
+import { gcalColorToPapyrus } from "./utils/gcalColor";
 
 const GRID_START = 8;
 const PX_PER_HOUR = 72;
@@ -16,6 +17,8 @@ export default function GcalEventBlock({ event }: Props) {
   const top = (startHour - GRID_START) * PX_PER_HOUR;
   const height = Math.max(18, (durationMin / 60) * PX_PER_HOUR);
 
+  const colors = gcalColorToPapyrus(event.color_hex ?? "");
+
   return (
     <div
       style={{
@@ -24,9 +27,11 @@ export default function GcalEventBlock({ event }: Props) {
         left: 2,
         right: 4,
         height,
-        background: "var(--accent-tint)",
-        border: "1px solid var(--border-strong)",
-        borderLeft: "3px solid var(--accent)",
+        background: colors.fill,
+        borderLeft: `3px solid ${colors.border}`,
+        borderTop: "none",
+        borderRight: "none",
+        borderBottom: "none",
         borderRadius: 4,
         padding: "2px 6px",
         overflow: "hidden",
@@ -37,7 +42,7 @@ export default function GcalEventBlock({ event }: Props) {
       <p
         style={{
           fontSize: 11,
-          color: "var(--text-muted)",
+          color: colors.border,
           fontFamily: "var(--font-literata)",
           lineHeight: 1.3,
           overflow: "hidden",

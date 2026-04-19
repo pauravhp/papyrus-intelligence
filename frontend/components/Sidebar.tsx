@@ -11,9 +11,9 @@ import HowToGuide from "@/components/HowToGuide";
 import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
-  { icon: MessageSquare, label: "Chat",     href: "/dashboard"          },
-  { icon: CalendarDays,  label: "Today",    href: "/dashboard/today"    },
-  { icon: Activity,      label: "Rhythms",  href: "/dashboard/rhythms"  },
+  { icon: CalendarDays,  label: "Today",    href: "/today"              },
+  { icon: MessageSquare, label: "Chat",     href: "/chat"               },
+  { icon: Activity,      label: "Rhythms",  href: "/rhythms"            },
   { icon: Settings2,     label: "Settings", href: "/dashboard/settings" },
 ] as const;
 

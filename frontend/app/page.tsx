@@ -9,7 +9,7 @@ export default async function HomePage() {
   const { data } = await supabase.auth.getClaims();
 
   if (data?.claims) {
-    redirect("/dashboard");
+    redirect("/today");
   }
 
   return <LandingClient />;
