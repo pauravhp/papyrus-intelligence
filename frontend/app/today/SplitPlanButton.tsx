@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 interface SplitPlanButtonProps {
   confirmed: boolean;   // true → label is "Adjust", false → "Plan today"
   disabled?: boolean;
-  onPlan: (contextNote?: string) => void;
+  onPlan: (contextNote?: string, target?: "today" | "tomorrow") => void;
 }
 
 export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPlanButtonProps) {
@@ -40,7 +40,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
     const note = contextNote.trim() || undefined;
     setContextOpen(false);
     setContextNote("");
-    onPlan(note);
+    onPlan(note, "today");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -51,6 +51,25 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
       {/* Button row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <button
+        onClick={() => { if (!disabled) onPlan(undefined, "tomorrow"); }}
+        disabled={disabled}
+        style={{
+          padding: "8px 14px",
+          background: "transparent",
+          color: "var(--text-muted)",
+          border: "1px solid var(--border-strong)",
+          borderRadius: 10,
+          fontFamily: "var(--font-literata)",
+          fontSize: 13,
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.5 : 1,
+          letterSpacing: "0.01em",
+        }}
+      >
+        Plan tomorrow
+      </button>
       <div
         style={{
           display: "flex",
@@ -99,6 +118,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
             <path d="M1 3l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
           </svg>
         </button>
+      </div>
       </div>
 
       {/* Inline context field */}

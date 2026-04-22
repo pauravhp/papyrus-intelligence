@@ -65,7 +65,7 @@ Rules:
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list  # list when replaying tool-use/tool-result blocks
 
 
 class ChatRequest(BaseModel):

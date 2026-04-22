@@ -86,6 +86,7 @@ export default function TodayPage() {
 
   const [planningOpen, setPlanningOpen] = useState(false);
   const [planningContext, setPlanningContext] = useState<string | undefined>();
+  const [planningTarget, setPlanningTarget] = useState<"today" | "tomorrow">("today");
   const [planningStatus, setPlanningStatus] = useState<"idle" | "working" | "proposal">("idle");
   const [proposedSchedule, setProposedSchedule] = useState<ScheduledItem[] | null>(null);
 
@@ -126,7 +127,7 @@ export default function TodayPage() {
   // - while proposal: show proposed blocks
   // - confirmed/idle: show actual data from API
   const todayColumnData: DayData | null =
-    planningStatus === "proposal" && proposedSchedule
+    planningStatus === "proposal" && proposedSchedule && planningTarget === "today"
       ? {
           ...(data?.today ?? {
             schedule_date: new Date().toISOString().split("T")[0],
@@ -139,11 +140,26 @@ export default function TodayPage() {
         }
       : data?.today ?? null;
 
+  const tomorrowColumnData: DayData | null =
+    planningStatus === "proposal" && proposedSchedule && planningTarget === "tomorrow"
+      ? {
+          ...(data?.tomorrow ?? {
+            schedule_date: (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split("T")[0]; })(),
+            pushed: [],
+            confirmed_at: null,
+            gcal_events: data?.tomorrow?.gcal_events ?? [],
+            all_day_events: data?.tomorrow?.all_day_events ?? [],
+          }),
+          scheduled: proposedSchedule,
+        }
+      : data?.tomorrow ?? null;
+
   // Single source of truth: confirmed_at on today's DayData
   const isConfirmed = !!data?.today?.confirmed_at;
 
-  const handlePlan = (contextNote?: string) => {
+  const handlePlan = (contextNote?: string, target: "today" | "tomorrow" = "today") => {
     setPlanningContext(contextNote);
+    setPlanningTarget(target);
     setPlanningOpen(true);
     setPlanningStatus("working");
     setProposedSchedule(null);
@@ -154,6 +170,7 @@ export default function TodayPage() {
     setPlanningStatus("idle");
     setProposedSchedule(null);
     setPlanningContext(undefined);
+    setPlanningTarget("today");
   };
 
   const handlePanelConfirm = () => {
@@ -161,6 +178,7 @@ export default function TodayPage() {
     setPlanningStatus("idle");
     setProposedSchedule(null);
     setPlanningContext(undefined);
+    setPlanningTarget("today");
     setLoading(true);
     load();
   };
@@ -240,7 +258,7 @@ export default function TodayPage() {
                 transition={{ type: "spring", stiffness: 260, damping: 26 }}
                 style={{ width: planningOpen ? 172 : 220, flexShrink: 0 }}
               >
-                <DayColumn label="Tomorrow" dayData={data?.tomorrow ?? null} isToday={false} />
+                <DayColumn label="Tomorrow" dayData={tomorrowColumnData} isToday={false} planningStatus={planningTarget === "tomorrow" ? planningStatus : undefined} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -315,6 +333,7 @@ export default function TodayPage() {
             <PlanningPanel
               token={token}
               contextNote={planningContext}
+              targetDate={planningTarget}
               onScheduleProposed={handleScheduleProposed}
               onConfirm={handlePanelConfirm}
               onClose={handlePanelClose}

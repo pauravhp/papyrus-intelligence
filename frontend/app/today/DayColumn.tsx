@@ -6,7 +6,7 @@ import NowIndicator from "./NowIndicator";
 import GcalEventBlock from "./GcalEventBlock";
 
 const GRID_START = 8;
-const GRID_DEFAULT_END = 20;
+const GRID_DEFAULT_END = 24;
 const PX_PER_HOUR = 72;
 const GUTTER_WIDTH = 44;
 

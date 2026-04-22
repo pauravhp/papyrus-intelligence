@@ -14,8 +14,10 @@ function blockTop(startIso: string): number {
   return (d.getHours() + d.getMinutes() / 60 - GRID_START_HOUR) * PX_PER_HOUR;
 }
 
+const BLOCK_GAP = 2; // visual breathing room between adjacent blocks
+
 function blockHeight(minutes: number): number {
-  return Math.max(MIN_HEIGHT, (minutes / 60) * PX_PER_HOUR);
+  return Math.max(MIN_HEIGHT, (minutes / 60) * PX_PER_HOUR - BLOCK_GAP);
 }
 
 function fmtTime(iso: string): string {

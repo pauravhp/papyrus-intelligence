@@ -102,6 +102,17 @@ def execute_schedule_day(
     Returns {scheduled, pushed, reasoning_summary, free_windows_used}.
     """
     config = user_ctx["config"]
+
+    # Inject default meal blocks if the user's config has none.
+    # These become hard blocked windows in compute_free_windows AND
+    # are surfaced in the scheduling prompt so the LLM respects them.
+    DEFAULT_MEAL_BLOCKS = [
+        {"name": "Lunch",  "start": "12:30", "end": "13:30", "days": "all", "movable": False, "buffer_before_minutes": 0, "buffer_after_minutes": 0},
+        {"name": "Dinner", "start": "19:00", "end": "20:00", "days": "all", "movable": False, "buffer_before_minutes": 0, "buffer_after_minutes": 0},
+    ]
+    if not config.get("daily_blocks"):
+        config = {**config, "daily_blocks": DEFAULT_MEAL_BLOCKS}
+
     tz_str = config.get("user", {}).get("timezone", "UTC")
     cal_ids = (
         config.get("source_calendar_ids")
@@ -178,6 +189,11 @@ def execute_schedule_day(
     # is moved to pushed — this prevents scheduling on top of GCal events.
     print(f"[schedule_day] free_windows: {[(w.start.isoformat(), w.end.isoformat()) for w in free_windows]}")
     print(f"[schedule_day] LLM scheduled {len(result.get('scheduled', []))} items, pushed {len(result.get('pushed', []))} items")
+    # Hard validation: only reject items that directly conflict with a real GCal event.
+    # Meal blocks, min-gap, and sleep buffers are soft guidance passed to the LLM —
+    # the LLM may override them when task load or user context warrants it.
+    timed_events = [e for e in (events or []) if not e.is_all_day]
+
     valid_scheduled = []
     overflow_pushed = []
     for item in result.get("scheduled", []):
@@ -188,19 +204,23 @@ def execute_schedule_day(
             print(f"[schedule_day] parse error for {item.get('task_id')}: {e} — accepting as-is")
             valid_scheduled.append(item)
             continue
+        gcal_conflict = any(
+            item_start < e.end and item_end > e.start
+            for e in timed_events
+        )
         in_window = any(
             item_start >= w.start and item_end <= w.end
             for w in free_windows
         )
-        print(f"[schedule_day] {item.get('task_id')} start={item['start_time']} end={item['end_time']} in_window={in_window}")
-        if in_window:
-            valid_scheduled.append(item)
-        else:
+        print(f"[schedule_day] {item.get('task_id')} start={item['start_time']} end={item['end_time']} in_window={in_window} gcal_conflict={gcal_conflict}")
+        if gcal_conflict:
             overflow_pushed.append({
                 "task_id": item.get("task_id", ""),
                 "task_name": item.get("task_name") or task_names.get(item.get("task_id", ""), item.get("task_id", "")),
-                "reason": "Proposed time falls outside available free windows (conflicts with existing calendar events or constraints)",
+                "reason": "Conflicts with an existing calendar event",
             })
+        else:
+            valid_scheduled.append(item)
     result["scheduled"] = valid_scheduled
     result["pushed"] = list(result.get("pushed", [])) + overflow_pushed
 

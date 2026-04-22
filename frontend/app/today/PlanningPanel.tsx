@@ -14,6 +14,7 @@ interface Message {
 interface PlanningPanelProps {
   token: string;
   contextNote?: string;
+  targetDate?: "today" | "tomorrow";
   onScheduleProposed: (schedule: ScheduledItem[]) => void;
   onConfirm: () => void;
   onClose: () => void;
@@ -29,6 +30,7 @@ const PROGRESS_STEPS = [
 export default function PlanningPanel({
   token,
   contextNote,
+  targetDate = "today",
   onScheduleProposed,
   onConfirm,
   onClose,
@@ -59,9 +61,8 @@ export default function PlanningPanel({
     if (hasFired.current) return;
     hasFired.current = true;
 
-    const userContent = contextNote
-      ? `Plan my day. Note: ${contextNote}`
-      : "Plan my day";
+    const base = targetDate === "tomorrow" ? "Plan my day for tomorrow" : "Plan my day";
+    const userContent = contextNote ? `${base}. Note: ${contextNote}` : base;
 
     const initialMessages: Message[] = [{ role: "user", content: userContent }];
     setMessages(initialMessages);
@@ -79,7 +80,11 @@ export default function PlanningPanel({
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ messages: wireMessages.length > 0 ? wireMessages : msgs.map((m) => ({ role: m.role, content: m.content })) }),
+          body: JSON.stringify({
+            messages: wireMessages.length > 0
+              ? [...wireMessages, { role: msgs[msgs.length - 1].role, content: msgs[msgs.length - 1].content }]
+              : msgs.map((m) => ({ role: m.role, content: m.content })),
+          }),
         }
       );
 
@@ -122,7 +127,11 @@ export default function PlanningPanel({
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ messages: confirmMessages.map((m) => ({ role: m.role, content: m.content })) }),
+          body: JSON.stringify({
+            messages: wireMessages.length > 0
+              ? [...wireMessages, { role: "user", content: "Looks good, please confirm the schedule." }]
+              : confirmMessages.map((m) => ({ role: m.role, content: m.content })),
+          }),
         }
       );
 
@@ -381,6 +390,7 @@ export default function PlanningPanel({
 // ── Shared shell style ───────────────────────────────────────────
 const panelShell: React.CSSProperties = {
   width: 340,
+  height: "100%",
   flexShrink: 0,
   background: "var(--surface)",
   borderLeft: "1px solid var(--border)",

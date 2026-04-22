@@ -58,6 +58,19 @@ def _build_prompt(
     )
     rules_text = "\n".join(f"- {r}" for r in rules_hard) if rules_hard else "None"
 
+    # Min gap between tasks
+    min_gap = config.get("scheduling", {}).get("min_gap_between_tasks_minutes", 10)
+
+    # Meal / daily blocks — already excluded from free windows; listed here so the LLM
+    # knows WHY those windows are missing and does not invent "break" tasks to fill them.
+    daily_blocks = config.get("daily_blocks", [])
+    if daily_blocks:
+        reserved_text = ", ".join(
+            f"{db['name']} {db['start']}–{db['end']}" for db in daily_blocks
+        )
+    else:
+        reserved_text = "Lunch 12:30–13:30, Dinner 19:00–20:00"
+
     note = f"Note: {context_note}" if context_note else ""
 
     timed_events = [e for e in (events or []) if not e.is_all_day]
@@ -75,9 +88,20 @@ def _build_prompt(
 TASKS (id name priority duration):
 {tasks_text}
 
-FREE WINDOWS (all times are LOCAL, UTC{tz_offset}): {windows_text}
+SUGGESTED WINDOWS (pre-computed guidance, LOCAL time, UTC{tz_offset}): {windows_text}
 {calendar_section}
-HARD RULES: {rules_text}
+SOFT BLOCKS (preferred reserved time — respect by default, but use your judgment if the user's context or task load warrants it):
+{reserved_text}
+
+HARD RULES (non-negotiable — never schedule over these):
+{rules_text}
+- Never schedule over a CALENDAR EVENT above.
+- Do NOT invent "break", "recovery", or filler tasks to represent gaps. Leave gaps as empty time.
+
+GUIDANCE (apply unless context overrides):
+- Prefer scheduling within the suggested windows.
+- Leave at least {min_gap} minutes between consecutive deep_work tasks.
+- If tasks don't fit within suggested windows, you may schedule outside them (including late-night hours) rather than push tasks — use judgment based on task priority and the user's note.
 
 Reply ONLY with JSON:
 {{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}

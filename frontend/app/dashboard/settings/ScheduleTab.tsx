@@ -73,6 +73,9 @@ function Field({
 export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
   const initSleep = (config.sleep ?? {}) as Record<string, unknown>;
   const initScheduling = (config.scheduling ?? {}) as Record<string, unknown>;
+  const initDailyBlocks = (config.daily_blocks as Array<Record<string, unknown>>) ?? [];
+  const lunchBlock  = initDailyBlocks.find(b => String(b.name).toLowerCase() === "lunch");
+  const dinnerBlock = initDailyBlocks.find(b => String(b.name).toLowerCase() === "dinner");
 
   const [sleep, setSleepField] = useState({
     default_wake_time:       (initSleep.default_wake_time as string)        ?? "09:00",
@@ -82,9 +85,19 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
   });
 
   const [scheduling, setSchedulingField] = useState({
-    min_gap_between_tasks_minutes: (initScheduling.min_gap_between_tasks_minutes as number) ?? 5,
+    min_gap_between_tasks_minutes: (initScheduling.min_gap_between_tasks_minutes as number) ?? 10,
     max_tasks_per_day:             (initScheduling.max_tasks_per_day as number)             ?? 10,
   });
+
+  const [meals, setMealsField] = useState({
+    lunch_start:  (lunchBlock?.start  as string) ?? "12:30",
+    lunch_end:    (lunchBlock?.end    as string) ?? "13:30",
+    dinner_start: (dinnerBlock?.start as string) ?? "19:00",
+    dinner_end:   (dinnerBlock?.end   as string) ?? "20:00",
+  });
+
+  const setMeal = (key: string, value: string) =>
+    setMealsField(prev => ({ ...prev, [key]: value }));
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -102,10 +115,18 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
     setSaved(false);
     try {
       const token = await getToken();
+      const otherBlocks = initDailyBlocks.filter(
+        b => !["lunch", "dinner"].includes(String(b.name).toLowerCase())
+      );
       const updated = {
         ...config,
         sleep: { ...((config.sleep as object) ?? {}), ...sleep },
         scheduling: { ...((config.scheduling as object) ?? {}), ...scheduling },
+        daily_blocks: [
+          ...otherBlocks,
+          { name: "Lunch",  start: meals.lunch_start,  end: meals.lunch_end,  days: "all", movable: false, buffer_before_minutes: 0, buffer_after_minutes: 0 },
+          { name: "Dinner", start: meals.dinner_start, end: meals.dinner_end, days: "all", movable: false, buffer_before_minutes: 0, buffer_after_minutes: 0 },
+        ],
       };
       await apiPost("/api/onboard/promote", { config: updated }, token);
       setSaved(true);
@@ -173,6 +194,22 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
             value={scheduling.max_tasks_per_day}
             onChange={(v) => setScheduling("max_tasks_per_day", parseInt(v, 10) || 1)}
           />
+        </div>
+      </div>
+
+      {/* Meals */}
+      <div style={{ marginBottom: 32 }}>
+        <p style={GROUP_LABEL}>Meals</p>
+        <p style={{ fontSize: 12, color: "var(--text-faint)", fontFamily: "var(--font-literata)", fontStyle: "italic", marginBottom: 20, lineHeight: 1.65 }}>
+          Papyrus keeps these free — no scheduling over lunch or dinner. Tell it once, never mention it again.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Lunch starts" type="time" value={meals.lunch_start}  onChange={v => setMeal("lunch_start",  v)} />
+          <Field label="Lunch ends"   type="time" value={meals.lunch_end}    onChange={v => setMeal("lunch_end",    v)} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label="Dinner starts" type="time" value={meals.dinner_start} onChange={v => setMeal("dinner_start", v)} />
+          <Field label="Dinner ends"   type="time" value={meals.dinner_end}   onChange={v => setMeal("dinner_end",   v)} />
         </div>
       </div>
 
