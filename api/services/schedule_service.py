@@ -109,6 +109,7 @@ Reply ONLY with JSON:
 - start_time/end_time: ISO 8601 with the SAME UTC offset (UTC{tz_offset}), e.g. {target_date}T09:00:00{tz_offset}
 - CRITICAL: The free window times are LOCAL (UTC{tz_offset}) — do NOT convert them to UTC. Use them exactly as shown.
 - Every task in exactly one list. Tasks that don't fit go in pushed.
+- NEVER shorten a task's total duration_minutes. If a task cannot fit its full duration in one contiguous slot, SPLIT it: schedule part 1 in the current window and part 2 in the next available window. Use the SAME task_id for both parts and append " (pt 1)" / " (pt 2)" to task_name. The sum of both parts' duration_minutes must equal the original task duration. Only push a task if there is genuinely no room for it at all today.
 - For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room.
 - category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous."""
 

@@ -113,6 +113,36 @@ LLM gets pre-computed free windows as guidance, not walls.
 
 ---
 
+## Deployment
+
+**Frontend:** Vercel (Next.js, GitHub-connected auto-deploy)
+**Backend:** Hetzner VPS (`5.78.200.61`), systemd + Caddy reverse proxy
+**Database:** Supabase Cloud (shared between dev and prod)
+
+### VPS Port Mapping
+
+| Project | Port | Caddy hostname |
+|---|---|---|
+| `papyrus-intelligence` | `8001` | `papyrus.5-78-200-61.nip.io` |
+| `reed-resume-engine` | `8000` | `5-78-200-61.nip.io` |
+
+Both projects share the same Hetzner VPS. Caddy routes by hostname. Each project
+has its own systemd unit, venv, and `.env` file.
+
+### Backend Env Vars (VPS)
+
+`SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `TODOIST_CLIENT_ID`, `TODOIST_CLIENT_SECRET`,
+`ANTHROPIC_API_KEY`, `FRONTEND_URL` (set to Vercel URL).
+
+### Frontend Env Vars (Vercel)
+
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+`NEXT_PUBLIC_POSTHOG_HOST`, `NEXT_PUBLIC_POSTHOG_KEY`,
+`NEXT_PUBLIC_API_URL` (set to `https://papyrus.5-78-200-61.nip.io`).
+
+---
+
 ## Session Protocol
 
 - Planning: use `superpowers:writing-plans`, track in `task_plan.md`

@@ -210,9 +210,9 @@ def test_schedule_day_passes_scheduled_tasks_as_keyword_arg():
     )
 
 
-def test_schedule_day_pushes_llm_times_outside_free_windows():
-    """LLM-proposed start/end times that fall outside computed free windows are
-    moved to pushed — prevents scheduling tasks on top of GCal events."""
+def test_schedule_day_allows_llm_times_outside_free_windows():
+    """LLM-proposed times outside free windows are allowed — windows are soft guidance.
+    Only real GCal event conflicts are hard-rejected."""
     from api.services.agent_tools import execute_schedule_day
     from src.models import FreeWindow
 
@@ -239,7 +239,7 @@ def test_schedule_day_pushes_llm_times_outside_free_windows():
         block_type="morning",
     )
 
-    # LLM proposes 14:00–15:00 — this slot is blocked by a GCal event (not in free windows)
+    # LLM proposes 14:00–15:00 — outside free windows but no GCal conflict
     llm_result = {
         "scheduled": [
             {
@@ -263,8 +263,73 @@ def test_schedule_day_pushes_llm_times_outside_free_windows():
         MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
         result = execute_schedule_day("", "2026-04-15", ctx)
 
-    assert len(result["scheduled"]) == 0, "Task outside free window must not appear in scheduled"
-    assert len(result["pushed"]) == 1, "Task outside free window must be moved to pushed"
+    assert len(result["scheduled"]) == 1, "Task outside free window but no GCal conflict should stay scheduled"
+    assert result["scheduled"][0]["task_id"] == "t1"
+
+
+def test_schedule_day_rejects_gcal_conflict():
+    """LLM-proposed times that overlap a real GCal event are moved to pushed."""
+    from api.services.agent_tools import execute_schedule_day
+    from src.models import CalendarEvent, FreeWindow
+
+    TZ = ZoneInfo("America/Vancouver")
+    ctx = {
+        "config": {
+            "user": {"timezone": "America/Vancouver"},
+            "calendar_ids": [],
+            "sleep": {},
+            "rules": {"hard": [], "soft": []},
+        },
+        "todoist_api_key": "tok",
+        "anthropic_api_key": "sk-ant",
+        "gcal_service": MagicMock(),
+        "user_id": "u1",
+        "supabase": MagicMock(),
+    }
+
+    free_window = FreeWindow(
+        start=datetime(2026, 4, 15, 10, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 11, 0, tzinfo=TZ),
+        duration_minutes=60,
+        block_type="morning",
+    )
+
+    # GCal event from 14:00–15:30
+    gcal_event = CalendarEvent(
+        id="ev1",
+        summary="Team standup",
+        start=datetime(2026, 4, 15, 14, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 15, 30, tzinfo=TZ),
+        is_all_day=False,
+        color_id=None,
+    )
+
+    # LLM proposes 14:30–15:30 — overlaps with the GCal event
+    llm_result = {
+        "scheduled": [
+            {
+                "task_id": "t1",
+                "task_name": "Task A",
+                "start_time": "2026-04-15T14:30:00-07:00",
+                "end_time": "2026-04-15T15:30:00-07:00",
+                "duration_minutes": 60,
+            }
+        ],
+        "pushed": [],
+        "reasoning_summary": "scheduled",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[gcal_event]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[free_window]), \
+         patch("api.services.agent_tools.schedule_day", return_value=llm_result), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        result = execute_schedule_day("", "2026-04-15", ctx)
+
+    assert len(result["scheduled"]) == 0, "Task conflicting with GCal event must not stay scheduled"
+    assert len(result["pushed"]) == 1, "Task conflicting with GCal event must be moved to pushed"
     assert result["pushed"][0]["task_id"] == "t1"
 
 
