@@ -3,6 +3,7 @@
 
 import { useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Check, ArrowRight, Circle } from "lucide-react";
 import { type ScheduledItem } from "./TodayPage";
 import TaskCard from "./TaskCard";
 
@@ -19,11 +20,24 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-// Height in px for a given duration. 72px/hour, same as calendar grid.
-const PX_PER_HOUR = 72;
-function blockHeight(minutes: number): number {
-  return Math.max(22, (minutes / 60) * PX_PER_HOUR);
+function fmtDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
+
+const STATE_ICON = {
+  done:     <Check size={14} strokeWidth={2.4} />,
+  tomorrow: <ArrowRight size={14} strokeWidth={2.4} />,
+  keep:     <Circle size={12} strokeWidth={2.4} />,
+} as const;
+
+const STATE_TOOLTIP: Record<TriageState, string> = {
+  done: "Already finished this",
+  tomorrow: "Move to tomorrow",
+  keep: "Keep for this afternoon",
+};
 
 export default function TaskTriageBlock({
   item,
@@ -31,17 +45,11 @@ export default function TaskTriageBlock({
   onStateChange,
   fromTodoist = false,
 }: TaskTriageBlockProps) {
-  const height = blockHeight(item.duration_minutes);
-  const showTimeLabel = height >= 36;
   const blockRef = useRef<HTMLDivElement>(null);
   const [cardOpen, setCardOpen] = useState(false);
 
-  function handleBlockClick() {
-    setCardOpen(true);
-  }
-
-  const blockOpacity = state === "done" ? 0.55 : state === "tomorrow" ? 0.25 : 1;
-  const blockX = state === "tomorrow" ? 10 : 0;
+  const blockOpacity = state === "done" ? 0.6 : state === "tomorrow" ? 0.35 : 1;
+  const blockX = state === "tomorrow" ? 8 : 0;
 
   return (
     <>
@@ -50,23 +58,23 @@ export default function TaskTriageBlock({
       role="button"
       aria-label={`View details for ${item.task_name}`}
       tabIndex={0}
-      onClick={handleBlockClick}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleBlockClick(); }}
+      onClick={() => setCardOpen(true)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCardOpen(true); }}
       animate={{ x: blockX, opacity: blockOpacity }}
       transition={{ type: "spring", stiffness: 120, damping: 18 }}
       style={{
         position: "relative",
-        height,
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        padding: "11px 12px",
+        minHeight: 60,
         background: "var(--accent-light)",
         border: "1px solid var(--accent-border)",
-        borderRadius: 6,
-        marginBottom: 4,
-        padding: "4px 8px",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
+        borderRadius: 8,
+        marginBottom: 8,
         cursor: "pointer",
+        overflow: "hidden",
       }}
     >
       {/* Green sweep overlay for "done" state */}
@@ -80,76 +88,69 @@ export default function TaskTriageBlock({
             style={{
               position: "absolute",
               inset: 0,
-              background: "rgba(34, 197, 94, 0.25)",
+              background: "rgba(34, 197, 94, 0.22)",
               transformOrigin: "left center",
-              borderRadius: 6,
+              borderRadius: 8,
               pointerEvents: "none",
             }}
           />
         )}
       </AnimatePresence>
 
-      {/* Task name */}
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          fontFamily: "var(--font-literata)",
-          color: "var(--text)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          textDecoration: state === "done" ? "line-through" : "none",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        {item.task_name}
-        {fromTodoist && state === "done" && (
-          <span style={{ color: "var(--text-faint)", fontSize: 10, marginLeft: 4 }}>
-            · from Todoist
-          </span>
-        )}
-      </span>
-
-      {/* Time label — hidden if block too short */}
-      {showTimeLabel && (
-        <span
+      {/* Left: task name + meta */}
+      <div style={{ flex: 1, minWidth: 0, position: "relative", zIndex: 1 }}>
+        <div
           style={{
-            fontSize: 10,
-            color: "var(--text-muted)",
+            fontSize: 13,
+            fontWeight: 500,
+            color: "var(--text)",
             fontFamily: "var(--font-literata)",
-            position: "relative",
-            zIndex: 1,
+            lineHeight: 1.35,
+            textDecoration: state === "done" ? "line-through" : "none",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            wordBreak: "break-word",
           }}
         >
-          {fmtTime(item.start_time)}
-        </span>
-      )}
+          {item.task_name}
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-literata)",
+            marginTop: 3,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <span>{fmtTime(item.start_time)}</span>
+          <span style={{ color: "var(--text-faint)" }}>·</span>
+          <span>{fmtDuration(item.duration_minutes)}</span>
+          {fromTodoist && state === "done" && (
+            <>
+              <span style={{ color: "var(--text-faint)" }}>·</span>
+              <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>from Todoist</span>
+            </>
+          )}
+        </div>
+      </div>
 
-      {/* State buttons */}
+      {/* Right: state buttons */}
       <div
         style={{
-          position: "absolute",
-          right: 4,
-          top: "50%",
-          transform: "translateY(-50%)",
           display: "flex",
-          gap: 2,
+          gap: 4,
+          flexShrink: 0,
+          position: "relative",
           zIndex: 2,
         }}
       >
         {(["done", "tomorrow", "keep"] as TriageState[]).map((s) => {
-          const labels: Record<TriageState, string> = {
-            done: "✓",
-            tomorrow: "→",
-            keep: "·",
-          };
-          const tooltips: Record<TriageState, string> = {
-            done: "Already finished this",
-            tomorrow: "Move to tomorrow",
-            keep: "Keep for this afternoon",
-          };
+          const selected = state === s;
           const ariaLabels: Record<TriageState, string> = {
             done: `Mark ${item.task_name} as done`,
             tomorrow: `Move ${item.task_name} to tomorrow`,
@@ -159,25 +160,24 @@ export default function TaskTriageBlock({
             <button
               key={s}
               onClick={(e) => { e.stopPropagation(); onStateChange(item.task_id, s); }}
-              title={tooltips[s]}
+              title={STATE_TOOLTIP[s]}
               aria-label={ariaLabels[s]}
-              aria-pressed={state === s}
+              aria-pressed={selected}
               style={{
-                width: 22,
-                height: 22,
-                borderRadius: 4,
-                border: state === s ? "1px solid var(--accent)" : "1px solid var(--border)",
-                background: state === s ? "var(--accent)" : "var(--surface)",
-                color: state === s ? "var(--surface)" : "var(--text-muted)",
-                fontSize: 11,
+                width: 34,
+                height: 30,
+                borderRadius: 6,
+                border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
+                background: selected ? "var(--accent)" : "var(--surface)",
+                color: selected ? "var(--surface)" : "var(--text-muted)",
                 cursor: "pointer",
-                fontFamily: "monospace",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                transition: "all 0.12s",
               }}
             >
-              {labels[s]}
+              {STATE_ICON[s]}
             </button>
           );
         })}

@@ -202,7 +202,7 @@ export default function ReplanModal({
           borderRadius: 16,
           padding: 28,
           width: "100%",
-          maxWidth: 520,
+          maxWidth: 580,
           maxHeight: "85vh",
           overflowY: "auto",
           outline: "none",
