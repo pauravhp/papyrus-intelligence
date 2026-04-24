@@ -156,9 +156,9 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
     e.preventDefault();
     if (!form.name.trim()) return;
     // Ensure min <= max
-    const corrected = {
+    const corrected: RhythmFormData = {
       ...form,
-      description: form.description.trim() || null as string | null,
+      description: form.description.trim(),
       session_min: Math.min(form.session_min, form.session_max),
       session_max: Math.max(form.session_min, form.session_max),
     };

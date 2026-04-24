@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { MessageSquare, CalendarDays, Activity, Settings2, Sun, Moon, LogOut, HelpCircle } from "lucide-react";
+import { CalendarDays, Activity, Settings2, Sun, Moon, LogOut, HelpCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
@@ -12,7 +12,6 @@ import { useTheme } from "@/components/ThemeProvider";
 
 const NAV_ITEMS = [
   { icon: CalendarDays,  label: "Today",    href: "/today"              },
-  { icon: MessageSquare, label: "Chat",     href: "/chat"               },
   { icon: Activity,      label: "Rhythms",  href: "/rhythms"            },
   { icon: Settings2,     label: "Settings", href: "/dashboard/settings" },
 ] as const;

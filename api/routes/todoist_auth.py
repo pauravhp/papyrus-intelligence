@@ -117,10 +117,11 @@ def todoist_oauth_callback(
         .maybe_single()
         .execute()
     )
-    redirect_after = (
-        (row.data or {}).get("oauth_redirect_after")
-        or f"{settings.FRONTEND_URL}/onboard"
-    )
+    stored_redirect = (row.data or {}).get("oauth_redirect_after")
+    if stored_redirect and stored_redirect.startswith("/"):
+        redirect_after = f"{settings.FRONTEND_URL}{stored_redirect}"
+    else:
+        redirect_after = stored_redirect or f"{settings.FRONTEND_URL}/onboard"
 
     # Exchange authorization code for access token
     resp = requests.post(

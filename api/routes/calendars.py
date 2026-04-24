@@ -3,6 +3,7 @@ GET  /api/calendars            — list user's GCal calendars with metadata
 """
 
 from fastapi import APIRouter, Depends, HTTPException
+from google.auth.exceptions import RefreshError
 
 from api.auth import get_current_user
 from api.config import settings
@@ -13,7 +14,7 @@ router = APIRouter(prefix="/api")
 
 
 def _get_gcal_service(user_id: str):
-    """Load GCal service for user. Raises 400 if not connected."""
+    """Load GCal service for user. Raises 400 if not connected or needs reconnect."""
     row = (
         supabase.from_("users")
         .select("google_credentials")
@@ -23,10 +24,19 @@ def _get_gcal_service(user_id: str):
     )
     gcal_creds = (row.data or {}).get("google_credentials")
     if not gcal_creds:
-        raise HTTPException(status_code=400, detail="Google Calendar not connected")
-    svc, refreshed = build_gcal_service_from_credentials(
-        gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
-    )
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "google_not_connected", "message": "Google Calendar not connected"},
+        )
+    try:
+        svc, refreshed = build_gcal_service_from_credentials(
+            gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+        )
+    except RefreshError:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "google_reconnect_required", "message": "Google refresh token revoked or expired"},
+        )
     if refreshed:
         supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
     return svc

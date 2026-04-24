@@ -160,7 +160,11 @@ def google_oauth_callback(
         return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?error=session_expired")
 
     code_verifier = (row.data or {}).get("oauth_code_verifier")
-    redirect_after = (row.data or {}).get("oauth_redirect_after") or f"{settings.FRONTEND_URL}/onboard"
+    stored_redirect = (row.data or {}).get("oauth_redirect_after")
+    if stored_redirect and stored_redirect.startswith("/"):
+        redirect_after = f"{settings.FRONTEND_URL}{stored_redirect}"
+    else:
+        redirect_after = stored_redirect or f"{settings.FRONTEND_URL}/onboard"
 
     flow = Flow.from_client_config(
         _client_config(),
