@@ -176,7 +176,7 @@ def compute_free_windows(
     buffer_mins: int = sleep.get("morning_buffer_minutes", 90)
     first_task_str = sleep.get("first_task_not_before", "10:30")
     no_tasks_after_str = sleep.get("no_tasks_after", "23:00")
-    weekend_days = {d.lower() for d in sleep.get("weekend_days", ["friday", "saturday", "sunday"])}
+    weekend_days = {d.lower() for d in sleep.get("weekend_days", ["saturday", "sunday"])}
     weekend_start_str = sleep.get("weekend_nothing_before", "13:00")
 
     wake_dt = _parse_time(wake_str, target_date, tz)

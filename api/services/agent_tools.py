@@ -15,6 +15,7 @@ TOOL_SCHEMAS is the list passed to Anthropic messages.create(tools=...).
 9 tools total — onboard_scan/apply/confirm handled by /api/onboard/* HTTP routes.
 """
 
+import json
 import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -28,6 +29,58 @@ from src.scheduler import compute_free_windows
 from api.services.rhythm_service import get_active_rhythms
 from src.models import TodoistTask as _TodoistTask
 from api.services.analytics import capture as _analytics_capture
+
+
+def _compute_rhythm_sessions_done_this_week(supabase, user_id: str, target_date: date) -> dict[str, int]:
+    """
+    Count confirmed rhythm sessions between ISO-week Monday and target_date (inclusive).
+    Returns {synthetic_task_id: count} e.g. {"proj_<uuid>": 2}.
+    """
+    # ISO week: Monday is day 0
+    week_start = target_date - timedelta(days=target_date.weekday())
+    try:
+        rows = (
+            supabase.from_("schedule_log")
+            .select("schedule_date, proposed_json, confirmed")
+            .eq("user_id", user_id)
+            .eq("confirmed", 1)
+            .gte("schedule_date", week_start.isoformat())
+            .lte("schedule_date", target_date.isoformat())
+            .execute()
+        ).data or []
+    except Exception as exc:
+        logger.warning("[rhythm_priority] schedule_log query failed: %s — defaulting to 0 done", exc)
+        return {}
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        try:
+            proposed = json.loads(row.get("proposed_json") or "{}")
+            for item in proposed.get("scheduled") or []:
+                tid = item.get("task_id", "")
+                if tid.startswith("proj_"):
+                    counts[tid] = counts.get(tid, 0) + 1
+        except Exception:
+            continue
+    return counts
+
+
+def _rhythm_priority(sessions_remaining: int, target_date: date) -> int:
+    """
+    Map weekly-completion urgency to a Todoist priority (1–4; higher = more urgent).
+    urgency = sessions_remaining / days_remaining_in_week (incl. target_date).
+      urgency >= 0.8 → 4 (P1)
+      0.4 <= urgency < 0.8 → 3 (P2)
+      urgency < 0.4 → 2 (P3)
+    """
+    # Days remaining in the ISO week including target_date itself (1–7).
+    days_remaining = 7 - target_date.weekday()
+    urgency = sessions_remaining / max(1, days_remaining)
+    if urgency >= 0.8:
+        return 4
+    if urgency >= 0.4:
+        return 3
+    return 2
 
 
 # ── Python implementations ─────────────────────────────────────────────────────
@@ -131,10 +184,22 @@ def execute_schedule_day(
     task_names: dict[str, str] = {t.id: t.content for t in all_tasks}
     # Only schedulable tasks (have a duration label) go to the LLM.
     tasks_raw = [t for t in all_tasks if t.duration_minutes is not None]
-    # Inject active rhythms as synthetic schedulable tasks (sorted by sort_order asc)
+    # Inject active rhythms as synthetic schedulable tasks (sorted by sort_order asc).
+    # Priority is derived from weekly completion pressure so 3x/week rhythms that
+    # haven't run yet by Thursday outrank P3 one-offs, while a daily rhythm with
+    # all sessions already done this week is skipped entirely.
     active_rhythms = get_active_rhythms(user_ctx["user_id"], user_ctx["supabase"])
+    sessions_done_by_rhythm = _compute_rhythm_sessions_done_this_week(
+        user_ctx["supabase"], user_ctx["user_id"], target_date
+    )
     synthetic_rhythms = []
     for rhythm in active_rhythms:
+        sessions_per_week = int(rhythm["sessions_per_week"])
+        sessions_done = sessions_done_by_rhythm.get(f"proj_{rhythm['id']}", 0)
+        sessions_remaining = max(0, sessions_per_week - sessions_done)
+        if sessions_remaining == 0:
+            # Quota hit — don't inject for this week.
+            continue
         synthetic = _TodoistTask(
             id=f"proj_{rhythm['id']}",
             content=(
@@ -143,7 +208,7 @@ def execute_schedule_day(
                 else rhythm["rhythm_name"]
             ),
             project_id="rhythm",
-            priority=0,
+            priority=_rhythm_priority(sessions_remaining, target_date),
             due_datetime=None,
             deadline=None,
             duration_minutes=int(rhythm["session_min_minutes"]),
@@ -151,7 +216,7 @@ def execute_schedule_day(
             is_inbox=False,
             is_rhythm=True,
             session_max_minutes=int(rhythm["session_max_minutes"]),
-            sessions_per_week=int(rhythm["sessions_per_week"]),
+            sessions_per_week=sessions_per_week,
         )
         task_names[f"proj_{rhythm['id']}"] = (
             f"{rhythm['rhythm_name']}: {rhythm['description']}"

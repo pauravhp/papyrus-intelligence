@@ -36,7 +36,7 @@ def _build_prompt(
         if t.is_rhythm and t.session_max_minutes:
             dur_str = f"{t.duration_minutes}-{t.session_max_minutes}min"
             cadence = f" [{t.sessions_per_week}x/week]" if t.sessions_per_week else ""
-            lines.append(f"{t.id} {t.content[:50]} {dur_str}{cadence}")
+            lines.append(f"{t.id} {t.content[:50]} p{t.priority} {dur_str}{cadence} [rhythm]")
         else:
             lines.append(
                 f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
@@ -110,7 +110,7 @@ Reply ONLY with JSON:
 - CRITICAL: The free window times are LOCAL (UTC{tz_offset}) — do NOT convert them to UTC. Use them exactly as shown.
 - Every task in exactly one list. Tasks that don't fit go in pushed.
 - NEVER shorten a task's total duration_minutes. If a task cannot fit its full duration in one contiguous slot, SPLIT it: schedule part 1 in the current window and part 2 in the next available window. Use the SAME task_id for both parts and append " (pt 1)" / " (pt 2)" to task_name. The sum of both parts' duration_minutes must equal the original task duration. Only push a task if there is genuinely no room for it at all today.
-- For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room.
+- For rhythm tasks (marked [rhythm]): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). Treat their priority (p2/p3/p4) exactly like a one-off task's priority — a p4 rhythm slots before p3 tasks, a p3 rhythm slots before p4 tasks, etc. Rhythm priority reflects how urgent the weekly cadence is given what's been done this week; respect it the same way you respect priorities on one-off tasks.
 - category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous."""
 
 

@@ -82,6 +82,8 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
     morning_buffer_minutes:  (initSleep.morning_buffer_minutes as number)   ?? 90,
     first_task_not_before:   (initSleep.first_task_not_before as string)    ?? "10:30",
     no_tasks_after:          (initSleep.no_tasks_after as string)           ?? "23:30",
+    weekend_days:            (initSleep.weekend_days as string[])           ?? ["saturday", "sunday"],
+    weekend_nothing_before:  (initSleep.weekend_nothing_before as string)   ?? "13:00",
   });
 
   const [scheduling, setSchedulingField] = useState({
@@ -103,8 +105,18 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const setSleep = (key: string, value: string | number) =>
+  const setSleep = (key: string, value: string | number | string[]) =>
     setSleepField((prev) => ({ ...prev, [key]: value }));
+
+  const toggleWeekendDay = (day: string) => {
+    setSleepField((prev) => {
+      const has = prev.weekend_days.includes(day);
+      const next = has
+        ? prev.weekend_days.filter((d) => d !== day)
+        : [...prev.weekend_days, day];
+      return { ...prev, weekend_days: next };
+    });
+  };
 
   const setScheduling = (key: string, value: number) =>
     setSchedulingField((prev) => ({ ...prev, [key]: value }));
@@ -174,6 +186,48 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
           type="time"
           value={sleep.no_tasks_after}
           onChange={(v) => setSleep("no_tasks_after", v)}
+          style={{ maxWidth: 160 }}
+        />
+      </div>
+
+      {/* Weekend */}
+      <div style={{ marginBottom: 32 }}>
+        <p style={GROUP_LABEL}>Weekend</p>
+        <p style={{ fontSize: 12, color: "var(--text-faint)", fontFamily: "var(--font-literata)", fontStyle: "italic", marginBottom: 16, lineHeight: 1.65 }}>
+          Pick the days you sleep in. Nothing is scheduled before the weekend start time on those days.
+        </p>
+        <label style={LABEL}>Weekend days</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+          {["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => {
+            const on = sleep.weekend_days.includes(day);
+            return (
+              <button
+                key={day}
+                type="button"
+                onClick={() => toggleWeekendDay(day)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                  background: on ? "var(--accent-tint)" : "transparent",
+                  color: on ? "var(--accent)" : "var(--text-muted)",
+                  fontSize: 12,
+                  fontFamily: "var(--font-literata)",
+                  cursor: "pointer",
+                  textTransform: "capitalize",
+                  transition: "all 0.12s",
+                }}
+              >
+                {day.slice(0, 3)}
+              </button>
+            );
+          })}
+        </div>
+        <Field
+          label="Weekend starts at"
+          type="time"
+          value={sleep.weekend_nothing_before}
+          onChange={(v) => setSleep("weekend_nothing_before", v)}
           style={{ maxWidth: 160 }}
         />
       </div>
