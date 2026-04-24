@@ -93,7 +93,7 @@ export default function CalendarSection({
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token ?? "";
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
     window.location.href = `${apiUrl}/auth/google?token=${token}&redirect_after=${encodeURIComponent("/dashboard/settings")}`;
   };
 

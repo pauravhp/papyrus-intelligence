@@ -21,7 +21,7 @@ export default function OnboardPage() {
   };
 
   const handleOnboardComplete = () => {
-    router.push("/dashboard");
+    router.push("/today");
   };
 
   if (step === "setup") {

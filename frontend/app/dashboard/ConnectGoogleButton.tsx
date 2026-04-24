@@ -2,7 +2,7 @@
 
 import { createClient } from "@/utils/supabase/client";
 
-const BACKEND_GOOGLE_AUTH = "http://localhost:8000/auth/google";
+const BACKEND_GOOGLE_AUTH = "http://localhost:8001/auth/google";
 
 export default function ConnectGoogleButton() {
   const supabase = createClient();

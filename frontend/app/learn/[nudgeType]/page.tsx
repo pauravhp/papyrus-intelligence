@@ -78,7 +78,7 @@ export default async function LearnPage({ params }: Props) {
       <article style={{ maxWidth: "58ch", width: "100%" }}>
 
         <Link
-          href="/dashboard"
+          href="/today"
           style={{
             fontSize: 12,
             color: "var(--text-faint)",
@@ -202,7 +202,7 @@ export default async function LearnPage({ params }: Props) {
         </section>
 
         <Link
-          href="/dashboard"
+          href="/today"
           style={{
             display: "inline-block",
             padding: "10px 22px",

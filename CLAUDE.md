@@ -119,12 +119,15 @@ LLM gets pre-computed free windows as guidance, not walls.
 **Backend:** Hetzner VPS (`5.78.200.61`), systemd + Caddy reverse proxy
 **Database:** Supabase Cloud (shared between dev and prod)
 
-### VPS Port Mapping
+### Port Mapping (canonical — dev Mac and VPS match)
 
-| Project | Port | Caddy hostname |
-|---|---|---|
-| `papyrus-intelligence` | `8001` | `papyrus.5-78-200-61.nip.io` |
-| `reed-resume-engine` | `8000` | `5-78-200-61.nip.io` |
+| Project                | Host port (dev Mac) | Host port (VPS) | Caddy hostname               |
+|------------------------|---------------------|-----------------|------------------------------|
+| `papyrus-intelligence` | `8001`              | `8001`          | `papyrus.5-78-200-61.nip.io` |
+| `reed-resume-engine`   | `8000`              | `8000`          | `5-78-200-61.nip.io`         |
+
+Papyrus backend runs on **8001** everywhere. Start locally with
+`uvicorn api.main:app --reload --port 8001`. Frontend stays on `3000`.
 
 Both projects share the same Hetzner VPS. Caddy routes by hostname. Each project
 has its own systemd unit, venv, and `.env` file.

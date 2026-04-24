@@ -97,7 +97,7 @@ function IntegrationRow({
 }
 
 export default function IntegrationsTab({ gcalConnected, todoistConnected, getToken }: IntegrationsTabProps) {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
   const handleReconnectGoogle = async () => {
     const token = await getToken();

@@ -39,14 +39,14 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) return;
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/auth/google?token=${token}`;
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"}/auth/google?token=${token}`;
   };
 
   const handleConnectTodoist = async () => {
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (!token) return;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
     window.location.href = `${apiUrl}/auth/todoist?token=${token}`;
   };
 

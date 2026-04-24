@@ -30,7 +30,7 @@ from api.db import supabase
 
 router = APIRouter()
 
-_REDIRECT_URI = "http://localhost:8000/auth/todoist/callback"
+_REDIRECT_URI = "http://localhost:8001/auth/todoist/callback"
 _STATE_MAX_AGE = 600  # 10 minutes
 
 

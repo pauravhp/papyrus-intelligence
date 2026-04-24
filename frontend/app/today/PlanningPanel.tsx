@@ -75,7 +75,7 @@ export default function PlanningPanel({
   async function callChat(msgs: Message[]) {
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/chat`,
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"}/api/chat`,
         {
           method: "POST",
           headers: {
@@ -125,7 +125,7 @@ export default function PlanningPanel({
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/chat`,
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"}/api/chat`,
         {
           method: "POST",
           headers: {

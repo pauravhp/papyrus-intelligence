@@ -21,7 +21,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isAuthenticated && pathname === "/login") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL("/today", request.url));
   }
 
   // Always return supabaseResponse so refreshed session cookies are forwarded.

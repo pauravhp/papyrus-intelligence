@@ -18,7 +18,7 @@ export default function NudgeNotFound() {
       <p style={{ fontSize: 14, color: "var(--text-muted)", fontStyle: "italic" }}>
         This nudge no longer exists.
       </p>
-      <Link href="/dashboard" style={{ fontSize: 13, color: "var(--accent)" }}>
+      <Link href="/today" style={{ fontSize: 13, color: "var(--accent)" }}>
         Back to today →
       </Link>
     </div>
