@@ -33,10 +33,33 @@ Before planning, say things like:
 - "skip anything physical, I'm under the weather"
 This changes which tasks get scheduled, when, and how tightly.
 
-Two planning moments:
-- Morning: type anything in chat to get a proposed day plan
-- Afternoon (after noon): use the Replan button in Today view to triage what happened
-  and get a revised afternoon schedule. One slip does not have to cascade into losing the whole day.
+Two planning moments — this is the heart of Papyrus:
+
+1. Morning · Plan
+   Type anything in chat ("plan my day", "low energy today"). Papyrus proposes a
+   time-blocked day. You confirm, it writes to Google Calendar.
+
+2. Afternoon · Replan
+   Things slip. That's Tuesday, not failure. After noon, a "Replan afternoon"
+   button appears on Today view. Open it and you'll see a triage modal listing
+   your remaining afternoon tasks. For each one, mark it Done (already finished),
+   Tomorrow (push out of today), or Keep (still want to do it). Add a short
+   context note if you want — "running behind, skip the gym" — and Papyrus
+   re-proposes a new afternoon from the current moment onwards. It keeps what
+   you kept, drops what you finished, pushes what you moved, and fills gaps
+   from your Todoist backlog. Confirm and it deletes the stale GCal events and
+   writes new ones. The morning's plan didn't fail — it got updated.
+
+   Replanning is not the same as regenerating the whole day. It's a recovery
+   move designed to feel calm, not guilty. The mental model: you don't restart
+   the day; you update the contract with the rest of it.
+
+Refining vs Replanning:
+- Refine (inline, any time after confirm) = small tweaks. "Move gym to 7am",
+  "drop the LinkedIn post". Requires a short instruction in the input field.
+- Replan afternoon (post-noon only) = mid-day reset with triage. Use this when
+  multiple things slipped or you need to re-sort the afternoon around what
+  actually happened.
 
 Ask me anything about setting up Todoist for Papyrus, writing better context notes,
 or understanding why Papyrus scheduled something a certain way.`

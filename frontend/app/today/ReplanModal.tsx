@@ -7,6 +7,8 @@ import { type ScheduledItem } from "./TodayPage";
 import TaskTriageBlock, { type TriageState } from "./TaskTriageBlock";
 import ProposedCalendar from "./ProposedCalendar";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+
 const MAX_WORDS = 40;
 function countWords(s: string): number {
   return s.trim() === "" ? 0 : s.trim().split(/\s+/).length;
@@ -54,7 +56,7 @@ export default function ReplanModal({
   useEffect(() => {
     async function preflight() {
       try {
-        const res = await fetch("/api/replan/preflight", {
+        const res = await fetch(`${API_BASE}/api/replan/preflight`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ task_ids: afternoonTasks.map((t) => t.task_id) }),
@@ -99,7 +101,7 @@ export default function ReplanModal({
     setPhase("loading");
     setError(null);
     try {
-      const res = await fetch("/api/replan", {
+      const res = await fetch(`${API_BASE}/api/replan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -125,7 +127,7 @@ export default function ReplanModal({
     setIsRefining(true);
     setPhase("loading");
     try {
-      const res = await fetch("/api/replan", {
+      const res = await fetch(`${API_BASE}/api/replan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -157,7 +159,7 @@ export default function ReplanModal({
         .filter(([, s]) => s === "tomorrow")
         .map(([id]) => id);
 
-      const res = await fetch("/api/replan/confirm", {
+      const res = await fetch(`${API_BASE}/api/replan/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ schedule: proposed, tomorrow_task_ids: tomorrowIds }),

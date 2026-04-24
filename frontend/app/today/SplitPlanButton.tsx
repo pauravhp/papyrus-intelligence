@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface SplitPlanButtonProps {
-  confirmed: boolean;   // true → label is "Adjust", false → "Plan today"
+  confirmed: boolean;   // true → label is "Refine", false → "Plan today"
   disabled?: boolean;
   onPlan: (contextNote?: string, target?: "today" | "tomorrow") => void;
 }
@@ -14,7 +14,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
   const [contextNote, setContextNote] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const label = confirmed ? "Adjust" : "Plan today";
+  const label = confirmed ? "Refine" : "Plan today";
 
   useEffect(() => {
     if (contextOpen) inputRef.current?.focus();
@@ -26,6 +26,12 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
 
   const handleMainClick = () => {
     if (disabled) return;
+    // Refine requires context. Pressing the main button reveals the input
+    // instead of firing a blind re-plan on the already-confirmed schedule.
+    if (confirmed) {
+      setContextOpen(true);
+      return;
+    }
     setContextOpen(false);
     setContextNote("");
     onPlan(undefined);
@@ -37,10 +43,12 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
   };
 
   const handleSubmitContext = () => {
-    const note = contextNote.trim() || undefined;
+    const note = contextNote.trim();
+    // Refine requires an actual instruction — no blind regenerate.
+    if (confirmed && !note) return;
     setContextOpen(false);
     setContextNote("");
-    onPlan(note, "today");
+    onPlan(note || undefined, "today");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -149,7 +157,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
                 value={contextNote}
                 onChange={(e) => setContextNote(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Tired today, travelling, light day…"
+                placeholder={confirmed ? "Move gym to 7am, drop the LinkedIn post…" : "Tired today, travelling, light day…"}
                 disabled={disabled}
                 style={{
                   flex: 1,
@@ -176,7 +184,7 @@ export default function SplitPlanButton({ confirmed, disabled, onPlan }: SplitPl
                   flexShrink: 0,
                 }}
               >
-                Plan →
+                {confirmed ? "Refine →" : "Plan →"}
               </button>
             </div>
           </motion.div>

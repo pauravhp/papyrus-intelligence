@@ -12,6 +12,8 @@ import ReviewButton from "./ReviewButton";
 import ReviewModal from "./ReviewModal";
 import SplitPlanButton from "./SplitPlanButton";
 import PlanningPanel from "./PlanningPanel";
+import ReplanButton from "./ReplanButton";
+import ReplanModal from "./ReplanModal";
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(
@@ -82,6 +84,7 @@ export default function TodayPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [replanOpen, setReplanOpen] = useState(false);
   const [showCalendarNudge, setShowCalendarNudge] = useState(false);
 
   const [planningOpen, setPlanningOpen] = useState(false);
@@ -157,6 +160,15 @@ export default function TodayPage() {
   // Single source of truth: confirmed_at on today's DayData
   const isConfirmed = !!data?.today?.confirmed_at;
 
+  // Replan is mid-day recovery: only available after noon and only when today is confirmed.
+  const nowDate = new Date();
+  const showReplan = isConfirmed && nowDate.getHours() >= 12;
+
+  // Afternoon tasks (for the Replan triage modal): today's scheduled items starting from now.
+  const afternoonTasks: ScheduledItem[] = (data?.today?.scheduled ?? []).filter((item) => {
+    return new Date(item.start_time) >= nowDate;
+  });
+
   const handlePlan = (contextNote?: string, target: "today" | "tomorrow" = "today") => {
     setPlanningContext(contextNote);
     setPlanningTarget(target);
@@ -212,6 +224,9 @@ export default function TodayPage() {
           <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
             {data?.review_available && (
               <ReviewButton onClick={() => setReviewOpen(true)} />
+            )}
+            {showReplan && (
+              <ReplanButton onClick={() => setReplanOpen(true)} />
             )}
             <SplitPlanButton
               confirmed={isConfirmed}
@@ -315,6 +330,20 @@ export default function TodayPage() {
           <ReviewModal
             token={token}
             onClose={() => setReviewOpen(false)}
+          />
+        )}
+
+        {/* Replan modal — mid-day afternoon recovery */}
+        {replanOpen && (
+          <ReplanModal
+            afternoonTasks={afternoonTasks}
+            token={token}
+            onClose={() => setReplanOpen(false)}
+            onConfirm={() => {
+              setReplanOpen(false);
+              setLoading(true);
+              load();
+            }}
           />
         )}
       </div>

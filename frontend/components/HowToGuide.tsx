@@ -100,7 +100,11 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
             you're feeling — it proposes a time-blocked day. You review, confirm, and it writes
             the plan to your calendar.
             <br /><br />
-            For it to plan well, your tasks need to speak its language. This guide covers exactly that.
+            And when things slip mid-day — because Tuesdays happen — you can <em>replan</em>
+            the afternoon in one calm gesture. Not a restart. An update.
+            <br /><br />
+            For it to plan (and replan) well, your tasks need to speak its language. This guide
+            covers exactly that.
             <p style={{ marginTop: 12 }}>
               On the{" "}
               <strong style={{ fontWeight: 600 }}>Rhythms</strong>{" "}
@@ -112,11 +116,63 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
         </div>
       );
 
-    // ── Step 1: Scheduling Labels ──
+    // ── Step 1: Copy Prompt (moved from Step 6 — quick-start shortcut) ──
     case 1:
       return (
         <div>
           <div style={EYEBROW}>Step 2 of {TOTAL_STEPS}</div>
+          <div style={HEADING}>Take Papyrus with you</div>
+          <div style={BODY}>
+            Paste this into any AI — Claude, ChatGPT, Gemini — to get personalised help setting
+            up your Todoist, writing better context notes, or understanding why something was
+            scheduled a certain way. Works for replans too: ask it how to phrase a context note
+            when your afternoon slips.
+            <br /><br />
+            <em style={{ color: "var(--text-faint)" }}>
+              This is a shortcut for people who learn by asking. The next five slides walk
+              through everything in detail — don't feel you have to copy the prompt to use Papyrus.
+            </em>
+          </div>
+          <div>
+            <button
+              onClick={onCopy}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                background: "var(--surface-raised)", border: "1px solid var(--border)",
+                borderRadius: 10, padding: "11px 14px", cursor: "pointer",
+                fontFamily: "var(--font-literata)", fontSize: 13, color: "var(--text-secondary)",
+                width: "100%", marginBottom: 10, textAlign: "left" as const,
+                transition: "background 0.15s",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                <rect x="5" y="1" width="10" height="12" rx="2" stroke="var(--border-strong)" strokeWidth="1.5" />
+                <rect x="1" y="4" width="10" height="12" rx="2" fill="var(--surface-raised)" stroke="var(--border-strong)" strokeWidth="1.5" />
+              </svg>
+              {copied ? "Copied ✓" : "Copy setup prompt"}
+            </button>
+            <div style={{
+              background: "var(--surface)", border: "1px solid var(--border)",
+              borderRadius: 8, padding: "10px 12px",
+              fontSize: 10, color: "var(--text-muted)", lineHeight: 1.6,
+              maxHeight: 100, overflow: "hidden", position: "relative" as const,
+              fontFamily: "var(--font-literata)",
+            }}>
+              {HOWTO_PROMPT.slice(0, 220)}…
+              <div style={{
+                position: "absolute", bottom: 0, left: 0, right: 0, height: 32,
+                background: "linear-gradient(transparent, var(--surface))",
+              }} />
+            </div>
+          </div>
+        </div>
+      );
+
+    // ── Step 2: Scheduling Labels ──
+    case 2:
+      return (
+        <div>
+          <div style={EYEBROW}>Step 3 of {TOTAL_STEPS}</div>
           <div style={HEADING}>Label tasks so Papyrus knows how to place them</div>
           <div style={BODY}>
             These labels tell Papyrus the cognitive weight and placement rules for each task —
@@ -142,11 +198,11 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
         </div>
       );
 
-    // ── Step 2: Priorities ──
-    case 2:
+    // ── Step 3: Priorities ──
+    case 3:
       return (
         <div>
-          <div style={EYEBROW}>Step 3 of {TOTAL_STEPS}</div>
+          <div style={EYEBROW}>Step 4 of {TOTAL_STEPS}</div>
           <div style={HEADING}>Priority tells Papyrus when to schedule it</div>
           <div style={BODY}>
             Set priority in Todoist to control urgency. Papyrus uses this to decide what makes
@@ -175,11 +231,11 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
         </div>
       );
 
-    // ── Step 3: Time Estimate Labels ──
-    case 3:
+    // ── Step 4: Time Estimate Labels ──
+    case 4:
       return (
         <div>
-          <div style={EYEBROW}>Step 4 of {TOTAL_STEPS}</div>
+          <div style={EYEBROW}>Step 5 of {TOTAL_STEPS}</div>
           <div style={HEADING}>Add a time label — or your task won't be scheduled</div>
           <div style={BODY}>
             Time estimates are Todoist labels, not text in the task name. If a task has no time
@@ -216,15 +272,18 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
         </div>
       );
 
-    // ── Step 4: Context Notes ──
-    case 4:
+    // ── Step 5: Context Notes ──
+    case 5:
       return (
         <div>
-          <div style={EYEBROW}>Step 5 of {TOTAL_STEPS}</div>
+          <div style={EYEBROW}>Step 6 of {TOTAL_STEPS}</div>
           <div style={HEADING}>Tell Papyrus how you're feeling before you plan</div>
           <div style={BODY}>
             Say anything in chat before asking to plan. Papyrus uses this to adjust which tasks
             get selected, how tightly they're packed, and which get pushed to tomorrow.
+            <br /><br />
+            The same kind of note works during a <em>replan</em> — "running behind, skip the gym",
+            "roommate's sick, light afternoon" — so the recovery still feels like yours.
           </div>
           <div style={CARD}>
             <div style={{
@@ -256,14 +315,17 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
         </div>
       );
 
-    // ── Step 5: Two Moments ──
-    case 5:
+    // ── Step 6: Two Moments ──
+    case 6:
       return (
         <div>
-          <div style={EYEBROW}>Step 6 of {TOTAL_STEPS}</div>
+          <div style={EYEBROW}>Step 7 of {TOTAL_STEPS}</div>
           <div style={HEADING}>Two moments, one coach</div>
           <div style={BODY}>
-            Things going off-plan isn't failure — it's just Tuesday. Papyrus is designed for both moments: building the day in the morning, and recovering gracefully in the afternoon.
+            Things going off-plan isn't failure — it's just Tuesday. Papyrus is designed for both
+            moments: building the day in the morning, and <em>replanning</em> calmly in the
+            afternoon. Not a restart. An update to the rest of your day, grounded in what actually
+            happened.
           </div>
           <div style={CARD}>
             <div style={{ display: "flex", gap: 10 }}>
@@ -289,54 +351,8 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
                     <div key={label} style={{ flex: 1, textAlign: "center" as const, padding: "3px 0", borderRadius: 5, fontSize: 9, border: "1px solid var(--border)", color: active ? "var(--accent)" : "var(--text-muted)", background: active ? "var(--accent-tint)" : "var(--surface)" }}>{label}</div>
                   ))}
                 </div>
-                <div style={{ fontSize: 10, color: "var(--text-faint)", lineHeight: 1.45 }}>Triage what happened, add context, get a revised afternoon plan. Stale GCal events are replaced.</div>
+                <div style={{ fontSize: 10, color: "var(--text-faint)", lineHeight: 1.45 }}>Triage what happened, tell Papyrus how you feel, get a calmer afternoon. The morning's plan doesn't fail — it gets updated.</div>
               </div>
-            </div>
-          </div>
-        </div>
-      );
-
-    // ── Step 6: Copy Prompt + Ready ──
-    case 6:
-      return (
-        <div>
-          <div style={EYEBROW}>Step 7 of {TOTAL_STEPS}</div>
-          <div style={HEADING}>Take Papyrus with you</div>
-          <div style={BODY}>
-            Paste this into any AI — Claude, ChatGPT, Gemini — to get personalised help setting
-            up your Todoist, writing better context notes, or understanding why something was
-            scheduled a certain way.
-          </div>
-          <div>
-            <button
-              onClick={onCopy}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                background: "var(--surface-raised)", border: "1px solid var(--border)",
-                borderRadius: 10, padding: "11px 14px", cursor: "pointer",
-                fontFamily: "var(--font-literata)", fontSize: 13, color: "var(--text-secondary)",
-                width: "100%", marginBottom: 10, textAlign: "left" as const,
-                transition: "background 0.15s",
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                <rect x="5" y="1" width="10" height="12" rx="2" stroke="var(--border-strong)" strokeWidth="1.5" />
-                <rect x="1" y="4" width="10" height="12" rx="2" fill="var(--surface-raised)" stroke="var(--border-strong)" strokeWidth="1.5" />
-              </svg>
-              {copied ? "Copied ✓" : "Copy setup prompt"}
-            </button>
-            <div style={{
-              background: "var(--surface)", border: "1px solid var(--border)",
-              borderRadius: 8, padding: "10px 12px",
-              fontSize: 10, color: "var(--text-muted)", lineHeight: 1.6,
-              maxHeight: 100, overflow: "hidden", position: "relative" as const,
-              fontFamily: "var(--font-literata)",
-            }}>
-              {HOWTO_PROMPT.slice(0, 220)}…
-              <div style={{
-                position: "absolute", bottom: 0, left: 0, right: 0, height: 32,
-                background: "linear-gradient(transparent, var(--surface))",
-              }} />
             </div>
           </div>
         </div>
