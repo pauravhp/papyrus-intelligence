@@ -218,8 +218,12 @@ def compute_free_windows(
     if start_override is not None:
         effective_start = start_override
 
-    # Supports "HH:MM next day" for windows that extend past midnight
+    # Supports "HH:MM next day" for windows that extend past midnight.
+    # Also auto-rolls to next day when the parsed cutoff falls before effective_start
+    # (e.g. user sets 01:00 via the Settings time picker to mean 1 AM tomorrow).
     day_end = _parse_time_extended(no_tasks_after_str, target_date, tz)
+    if day_end <= effective_start and "next day" not in no_tasks_after_str:
+        day_end = day_end + timedelta(days=1)
 
     if effective_start >= day_end:
         return []

@@ -20,6 +20,33 @@ from src.models import CalendarEvent, FreeWindow, TodoistTask
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 
+def _overflow_rule(config: dict) -> str:
+    """
+    Build the end-of-day overflow instruction.
+
+    If the user has explicitly set sleep.no_tasks_after in their config,
+    treat it as a hard cutoff and push overflow to another day. Otherwise
+    (default 23:00 is implicit), allow overflow into late-night hours
+    since the user hasn't signalled they want a firm boundary. Either
+    way, shorter overflows within non-end-of-day gaps (between events,
+    over soft meal blocks) remain at the LLM's discretion.
+    """
+    sleep = config.get("sleep") or {}
+    user_set_cutoff = "no_tasks_after" in sleep
+    if user_set_cutoff:
+        cutoff = sleep.get("no_tasks_after")
+        return (
+            f"The user has set a hard end-of-day cutoff at {cutoff}. Never schedule any task that starts or ends "
+            "past this time — the SUGGESTED WINDOWS already reflect it. If tasks don't fit today within that boundary, "
+            "push them to another day. You may still overflow slightly within the day (e.g. across a soft meal block, "
+            "or fitting a task right up against the cutoff) when priority warrants it."
+        )
+    return (
+        "If tasks don't fit within suggested windows, you may schedule outside them (including late-night hours) "
+        "rather than push tasks — use judgment based on task priority and the user's note."
+    )
+
+
 def _build_prompt(
     tasks: list[TodoistTask],
     free_windows: list[FreeWindow],
@@ -101,7 +128,7 @@ HARD RULES (non-negotiable — never schedule over these):
 GUIDANCE (apply unless context overrides):
 - Prefer scheduling within the suggested windows.
 - Leave at least {min_gap} minutes between consecutive deep_work tasks.
-- If tasks don't fit within suggested windows, you may schedule outside them (including late-night hours) rather than push tasks — use judgment based on task priority and the user's note.
+- {_overflow_rule(config)}
 
 Reply ONLY with JSON:
 {{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}

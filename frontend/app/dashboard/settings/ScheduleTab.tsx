@@ -81,7 +81,7 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
     default_wake_time:       (initSleep.default_wake_time as string)        ?? "09:00",
     morning_buffer_minutes:  (initSleep.morning_buffer_minutes as number)   ?? 90,
     first_task_not_before:   (initSleep.first_task_not_before as string)    ?? "10:30",
-    no_tasks_after:          (initSleep.no_tasks_after as string)           ?? "23:30",
+    no_tasks_after:          (initSleep.no_tasks_after as string)           ?? "23:00",
     weekend_days:            (initSleep.weekend_days as string[])           ?? ["saturday", "sunday"],
     weekend_nothing_before:  (initSleep.weekend_nothing_before as string)   ?? "13:00",
   });
@@ -188,6 +188,10 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
           onChange={(v) => setSleep("no_tasks_after", v)}
           style={{ maxWidth: 160 }}
         />
+        <p style={{ fontSize: 11, color: "var(--text-faint)", fontFamily: "var(--font-literata)", fontStyle: "italic", marginTop: -4, lineHeight: 1.55 }}>
+          Setting a time earlier than your wake time — like 01:00 — is read as the next morning.
+          Tasks that don't fit inside this window will be pushed to another day rather than scheduled past the cutoff.
+        </p>
       </div>
 
       {/* Weekend */}
