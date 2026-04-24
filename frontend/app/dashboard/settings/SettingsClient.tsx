@@ -11,11 +11,13 @@ import NudgesTab from "./NudgesTab";
 
 type Tab = "integrations" | "schedule" | "calendars" | "nudges";
 
+const COACHING_NUDGES_ENABLED = process.env.NEXT_PUBLIC_COACHING_NUDGES_ENABLED === "true";
+
 const TABS: { id: Tab; label: string }[] = [
   { id: "integrations", label: "Integrations" },
   { id: "schedule",     label: "Schedule"     },
   { id: "calendars",    label: "Calendars"    },
-  { id: "nudges",       label: "Nudges"       },
+  ...(COACHING_NUDGES_ENABLED ? [{ id: "nudges" as Tab, label: "Nudges" }] : []),
 ];
 
 interface SettingsData {
@@ -123,7 +125,7 @@ export default function SettingsClient() {
         {activeTab === "calendars" && (
           <CalendarsTab config={data.config} getToken={getToken} />
         )}
-        {activeTab === "nudges" && (
+        {activeTab === "nudges" && COACHING_NUDGES_ENABLED && (
           <NudgesTab config={data.config} getToken={getToken} />
         )}
       </div>

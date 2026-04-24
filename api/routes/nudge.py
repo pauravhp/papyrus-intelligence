@@ -7,10 +7,11 @@ Per-type dismiss:     omit instance_key (stored as '__type__' sentinel).
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from api.auth import get_current_user
+from api.config import settings
 from api.db import supabase
 
 router = APIRouter()
@@ -27,6 +28,9 @@ def dismiss_nudge(
     payload: DismissPayload,
     user: dict = Depends(get_current_user),
 ) -> dict:
+    if not settings.COACHING_NUDGES_ENABLED:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
     # Use sentinel for per-type dismissals to avoid NULL UNIQUE issues
     key = payload.instance_key if payload.instance_key is not None else "__type__"
 

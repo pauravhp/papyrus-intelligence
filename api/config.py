@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     POSTHOG_API_KEY: str = ""   # empty string disables PostHog in local dev without the key
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Feature flags — keep in sync with NEXT_PUBLIC_* counterparts on the frontend.
+    COACHING_NUDGES_ENABLED: bool = False
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

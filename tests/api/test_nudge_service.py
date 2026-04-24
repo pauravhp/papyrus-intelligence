@@ -43,8 +43,9 @@ def _make_signals(overrides=None):
         "stale_waiting_task_id": None,
         "stale_waiting_task_name": None,
         "stale_waiting_task_days": 0,
-        "tasks_without_deadline_count": 0,
-        "tasks_without_deadline_first_name": None,
+        "rhythms_without_end_date_count": 0,
+        "rhythms_without_end_date_first_name": None,
+        "rhythms_without_end_date_first_id": None,
         "backlog_growth_rate": 0.0,
         "backlog_delta": 0,
         "habit_skipped_rhythm_id": None,
@@ -110,7 +111,7 @@ def test_condition_not_met_over_scheduling():
 def test_condition_met_no_deadline():
     from api.services.nudge_service import _condition_met, NUDGE_CATALOG
     nudge = next(n for n in NUDGE_CATALOG if n["nudge_id"] == "no_deadline")
-    signals = _make_signals({"tasks_without_deadline_count": 2, "tasks_without_deadline_first_name": "Build feature X"})
+    signals = _make_signals({"rhythms_without_end_date_count": 2, "rhythms_without_end_date_first_name": "Daily writing"})
     assert _condition_met(nudge, signals) is True
 
 def test_condition_met_context_switching():

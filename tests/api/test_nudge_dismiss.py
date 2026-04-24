@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.auth import get_current_user
+from api.config import settings
 from api.main import app
 
 FAKE_USER = {"sub": "user-123"}
@@ -23,11 +24,16 @@ def override_auth():
     yield
     app.dependency_overrides.clear()
 
+@pytest.fixture
+def coaching_enabled(monkeypatch):
+    """Turn the feature flag on for tests that exercise the live endpoint."""
+    monkeypatch.setattr(settings, "COACHING_NUDGES_ENABLED", True)
+
 client = TestClient(app)
 
 
 @patch("api.routes.nudge.supabase")
-def test_dismiss_per_instance(mock_sb):
+def test_dismiss_per_instance(mock_sb, coaching_enabled):
     mock_sb.from_.return_value.upsert.return_value.execute.return_value = MagicMock()
 
     resp = client.post("/api/nudge/dismiss", json={
@@ -48,7 +54,7 @@ def test_dismiss_per_instance(mock_sb):
 
 
 @patch("api.routes.nudge.supabase")
-def test_dismiss_per_type_uses_sentinel(mock_sb):
+def test_dismiss_per_type_uses_sentinel(mock_sb, coaching_enabled):
     mock_sb.from_.return_value.upsert.return_value.execute.return_value = MagicMock()
 
     resp = client.post("/api/nudge/dismiss", json={
@@ -63,7 +69,7 @@ def test_dismiss_per_type_uses_sentinel(mock_sb):
 
 
 @patch("api.routes.nudge.supabase")
-def test_dismiss_idempotent(mock_sb):
+def test_dismiss_idempotent(mock_sb, coaching_enabled):
     """Double-dismiss same instance should not error."""
     mock_sb.from_.return_value.upsert.return_value.execute.return_value = MagicMock()
 
@@ -75,10 +81,16 @@ def test_dismiss_idempotent(mock_sb):
         assert resp.status_code == 200
 
 
-def test_dismiss_requires_auth():
+def test_dismiss_requires_auth(coaching_enabled):
     app.dependency_overrides.clear()
     try:
         resp = client.post("/api/nudge/dismiss", json={"nudge_type": "no_deadline"})
         assert resp.status_code in (401, 403, 422)
     finally:
         app.dependency_overrides[get_current_user] = lambda: FAKE_USER
+
+
+def test_dismiss_404_when_flag_disabled():
+    """With COACHING_NUDGES_ENABLED=False (default), the endpoint should 404."""
+    resp = client.post("/api/nudge/dismiss", json={"nudge_type": "no_deadline"})
+    assert resp.status_code == 404

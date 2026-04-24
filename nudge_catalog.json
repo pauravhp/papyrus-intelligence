@@ -26,17 +26,17 @@
     "priority": 2,
     "category": "warning",
     "trigger": {
-      "signal": "tasks_without_deadline_count",
+      "signal": "rhythms_without_end_date_count",
       "operator": ">=",
       "threshold": 1
     },
     "research": {
       "primary_citation": "Steel (2007) Temporal Motivation Theory meta-analysis (691 correlations) — temporal distance is the single strongest predictor of procrastination, stronger than task difficulty, self-regulation, or self-efficacy. Formula: Motivation = (Expectancy × Value) / (Impulsivity × Delay). No deadline means Delay → ∞, Motivation → 0.",
       "supporting_citation": "Even a self-imposed internal milestone activates the motivational math. The deadline does not need to be external or binding.",
-      "behavior_change": "Set any concrete milestone — even a personal one with no external accountability. The act of specifying a date changes the motivational arithmetic."
+      "behavior_change": "Set any concrete end date — even a personal one with no external accountability. The act of specifying a date changes the motivational arithmetic."
     },
-    "coach_message_template": "'{task_name}' doesn't have a deadline. Piers Steel's procrastination meta-analysis — the largest ever done — found deadline distance is the single strongest predictor of a task never getting done, more than difficulty or how busy you are. Even an internal milestone this week activates the motivational math.",
-    "action_label": "Set a deadline",
+    "coach_message_template": "'{rhythm_name}' is an open-ended rhythm with no end date. Piers Steel's procrastination meta-analysis — the largest ever done — found deadline distance is the single strongest predictor of a project never getting finished, more than difficulty or how busy you are. Even an internal milestone this quarter activates the motivational math.",
+    "action_label": "Set an end date",
     "learn_more_path": "/learn/no-deadline",
     "framing": "gain",
     "autonomy_support": true,

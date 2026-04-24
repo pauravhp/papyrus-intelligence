@@ -35,6 +35,11 @@ class NudgeCard(BaseModel):
 
 def get_eligible(user_ctx: dict, messages: list[dict]) -> NudgeCard | None:
     """Return the highest-priority eligible nudge, or None."""
+    # Feature flag: short-circuit before any I/O when coaching is disabled globally.
+    from api.config import settings
+    if not settings.COACHING_NUDGES_ENABLED:
+        return None
+
     # Guard: mid-conversation — zero I/O
     if len(messages) > 1:
         return None
@@ -155,7 +160,7 @@ def _instance_key_for(nudge: dict, signals: dict) -> str | None:
     if nudge_id == "repeated_deferral":
         return signals.get("most_pushed_task_id")
     if nudge_id == "no_deadline":
-        return signals.get("tasks_without_deadline_first_id")
+        return signals.get("rhythms_without_end_date_first_id")
     if nudge_id == "waiting_task_stale":
         return signals.get("stale_waiting_task_id")
     if nudge_id == "habit_skipped":
@@ -179,7 +184,7 @@ def _build_nudge_card(nudge: dict, signals: dict) -> NudgeCard:
         }
     elif nudge_id == "no_deadline":
         substitutions = {
-            "task_name": signals.get("tasks_without_deadline_first_name") or "this task",
+            "rhythm_name": signals.get("rhythms_without_end_date_first_name") or "this rhythm",
         }
     elif nudge_id == "over_scheduling":
         rate = signals.get("completion_rate_7d", 0.5)
@@ -380,17 +385,25 @@ def _compute_signals(user_ctx: dict) -> dict:
     signals["stale_waiting_task_name"] = stale_waiting["content"] if stale_waiting else None
     signals["stale_waiting_task_days"] = stale_days
 
-    # Tasks without deadline (priority >= p3 = Todoist priority >= 2, no due date)
-    no_deadline_tasks = [
-        t for t in tasks
-        if not t.get("due") and t.get("priority", 1) >= 2
-    ]
-    signals["tasks_without_deadline_count"] = len(no_deadline_tasks)
-    signals["tasks_without_deadline_first_name"] = (
-        no_deadline_tasks[0]["content"] if no_deadline_tasks else None
+    # Rhythms without end_date — open-ended commitments with no finish line
+    try:
+        rhythm_rows = (
+            _supabase.from_("rhythms")
+            .select("id, rhythm_name, end_date")
+            .eq("user_id", user_id)
+            .is_("end_date", "null")
+            .order("sort_order")
+            .execute()
+        ).data or []
+    except Exception:
+        rhythm_rows = []
+
+    signals["rhythms_without_end_date_count"] = len(rhythm_rows)
+    signals["rhythms_without_end_date_first_name"] = (
+        rhythm_rows[0]["rhythm_name"] if rhythm_rows else None
     )
-    signals["tasks_without_deadline_first_id"] = (
-        no_deadline_tasks[0]["id"] if no_deadline_tasks else None
+    signals["rhythms_without_end_date_first_id"] = (
+        rhythm_rows[0]["id"] if rhythm_rows else None
     )
 
     # habit_skipped — not yet implemented (no rhythm_completions tracking)
