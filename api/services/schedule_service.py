@@ -19,6 +19,53 @@ from src.models import CalendarEvent, FreeWindow, TodoistTask
 
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
+# Static system prompt — eligible for prompt caching since it never varies
+# per request. Anthropic caches the prefix up to the cache_control marker;
+# we mark this whole block ephemeral so subsequent calls within ~5 min
+# read it back at 10% of normal input cost. Keep this string stable —
+# any per-request data must live in the user message, never here.
+SYSTEM_PROMPT = """You schedule tasks for a user across their available time windows.
+
+Reply ONLY with JSON in this exact shape:
+{"scheduled":[{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}],"pushed":[{"task_id":"","reason":""}],"reasoning_summary":""}
+
+OUTPUT RULES
+- start_time/end_time: ISO 8601 with the user's UTC offset shown in the user message.
+- Free window times in the user message are LOCAL — use them exactly, do NOT convert to UTC.
+- Every task appears in exactly one list. Tasks that don't fit go in pushed.
+- NEVER shorten a task's duration_minutes. If a task can't fit one contiguous slot, SPLIT across the next available window: same task_id, append " (pt 1)" / " (pt 2)" to task_name, parts sum to the original duration.
+- Rhythm tasks (marked [rhythm]) accept any duration within the shown range. Treat their priority like one-off tasks.
+- category: "deep_work" (focused concentration — writing, coding, design, research, analysis) or "admin" (lightweight — email, reviews, calls, admin). null if genuinely ambiguous.
+
+REASONING_SUMMARY RULES
+- ONE or TWO short sentences in second person ("you"/"your"). Coach voice. Conversational.
+- FORBIDDEN in this field: task IDs, priority codes (p1/p2/p3/p4), category labels (deep_work/admin), arithmetic ("30m + 60m"), hour totals or duration totals of any kind, restating the current time, restating the cutoff, the words "the user", "hard rule", "soft block", "suggested window".
+- Refer to tasks by their human name (or omit the name).
+
+PUSHED.REASON RULES
+- Reference observable facts only: "didn't fit before your cutoff", "calendar conflict at 3pm", "you blocked this time", "no duration estimate set".
+- NEVER invent user intent. Phrases like "deprioritized per your guidance", "as you requested", "to align with your goals" are forbidden unless the user literally used those words in the context note.
+
+REFINEMENT RULES
+- When the context note describes an EDIT to an existing plan ("move X to 7am", "give Y more time", "drop Z"), make the smallest changes needed to satisfy that edit.
+- Do NOT move, split, drop, or rearrange tasks unrelated to the user's ask.
+- Treat the user's previous proposal as the baseline; refinement is a diff, not a fresh plan.
+
+USER-STATED CONSTRAINTS IN CONTEXT NOTE
+- If the context note contains a time block ("block 4pm-9pm", "I have an event 14:00-15:30", "no calls after 5pm", "free until noon"), treat it as a HARD RULE — equivalent to a calendar event. Never schedule over it.
+- These constraints persist within a refinement chain; do not relax them on later turns unless the user explicitly removes them.
+
+GOOD examples
+- reasoning_summary: "Stacked your focus blocks into the late-night window before your cutoff, with a 30-min buffer if you need it."
+- reasoning_summary: "Front-loaded the deep work this morning so admin tasks fall into the lower-energy afternoon."
+- pushed.reason: "didn't fit before your cutoff today"
+- pushed.reason: "you blocked 4pm-9pm"
+
+BAD examples (do NOT produce these)
+- reasoning_summary: "Current time is 03:23. The user wants larger blocks. Scheduled 6gJjJ7M3 (60m, p2, deep_work) totaling 5.5h." (forbidden: time, third-person, IDs, p-codes, categories, totals)
+- reasoning_summary: "I scheduled 4 tasks adding to 135m before your 02:30 cutoff." (forbidden: arithmetic, restated cutoff)
+- pushed.reason: "Deprioritized per your guidance" (forbidden: invented intent)"""
+
 
 def _overflow_rule(config: dict) -> str:
     """
@@ -110,39 +157,25 @@ def _build_prompt(
     else:
         calendar_section = ""
 
-    return f"""Schedule tasks for {target_date} tz={tz} (UTC{tz_offset}). {note}
+    return f"""Schedule tasks for {target_date} (timezone {tz}, UTC{tz_offset}).{(' ' + note) if note else ''}
 
 TASKS (id name priority duration):
 {tasks_text}
 
-SUGGESTED WINDOWS (pre-computed guidance, LOCAL time, UTC{tz_offset}): {windows_text}
+SUGGESTED WINDOWS (LOCAL, UTC{tz_offset}): {windows_text}
 {calendar_section}
-SOFT BLOCKS (preferred reserved time — respect by default, but use your judgment if the user's context or task load warrants it):
+SOFT BLOCKS (preferred reserved time — use judgment):
 {reserved_text}
 
-HARD RULES (non-negotiable — never schedule over these):
+HARD RULES (in addition to system rules):
 {rules_text}
 - Never schedule over a CALENDAR EVENT above.
-- Do NOT invent "break", "recovery", or filler tasks to represent gaps. Leave gaps as empty time.
+- Do NOT invent break/recovery/filler tasks for gaps. Leave gaps empty.
 
-GUIDANCE (apply unless context overrides):
+GUIDANCE
 - Prefer scheduling within the suggested windows.
 - Leave at least {min_gap} minutes between consecutive deep_work tasks.
-- {_overflow_rule(config)}
-
-Reply ONLY with JSON:
-{{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
-
-- start_time/end_time: ISO 8601 with the SAME UTC offset (UTC{tz_offset}), e.g. {target_date}T09:00:00{tz_offset}
-- CRITICAL: The free window times are LOCAL (UTC{tz_offset}) — do NOT convert them to UTC. Use them exactly as shown.
-- Every task in exactly one list. Tasks that don't fit go in pushed.
-- NEVER shorten a task's total duration_minutes. If a task cannot fit its full duration in one contiguous slot, SPLIT it: schedule part 1 in the current window and part 2 in the next available window. Use the SAME task_id for both parts and append " (pt 1)" / " (pt 2)" to task_name. The sum of both parts' duration_minutes must equal the original task duration. Only push a task if there is genuinely no room for it at all today.
-- For rhythm tasks (marked [rhythm]): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). Treat their priority (p2/p3/p4) exactly like a one-off task's priority — a p4 rhythm slots before p3 tasks, a p3 rhythm slots before p4 tasks, etc. Rhythm priority reflects how urgent the weekly cadence is given what's been done this week; respect it the same way you respect priorities on one-off tasks.
-- category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous.
-- reasoning_summary: ONE or TWO short sentences spoken directly to the user in second person ("you"/"your"). Like a thoughtful coach noting what you did. Forbidden in this field: task IDs, priority codes ("p1"/"p2"/"p3"/"p4"), category labels ("deep_work"/"admin"), arithmetic breakdowns ("30m + 60m = 90m"), restating the current time, restating the cutoff time, the words "the user", "hard rule", "soft block", "suggested window". Refer to tasks by their human name (or omit the name entirely). If everything fit, mention what kind of work was prioritized and any meaningful gap. If anything was pushed, name the human reason briefly.
-  Good example: "Stacked your focus blocks into the late-night window before your cutoff, with a 30-min buffer if you need it."
-  Good example: "Front-loaded the deep work this morning so admin tasks fall into the lower-energy afternoon."
-  Bad example: "Current time is 03:23. The user wants larger blocks. Scheduled 6gJjJ7M3 (60m, p2, deep_work) + 6gjjJZyZ (30m, p3, admin) = 90m before the 02:30 cutoff." (forbidden: time, IDs, p-codes, categories, arithmetic, third-person)"""
+- {_overflow_rule(config)}"""
 
 
 def _extract_json(text: str) -> str:
@@ -222,6 +255,13 @@ def schedule_day(
                 model=ANTHROPIC_MODEL,
                 max_tokens=4096,
                 temperature=0.2,
+                system=[
+                    {
+                        "type": "text",
+                        "text": SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=[{"role": "user", "content": prompt}],
             )
             return resp.content[0].text
