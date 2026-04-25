@@ -175,9 +175,11 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
                     content=item["task_name"],
                     priority=2,
                     duration_minutes=item["duration_minutes"],
+                    due_datetime=None,
                     deadline=None,
                     labels=[],
                     project_id=None,
+                    is_inbox=False,
                     is_rhythm=False,
                     session_max_minutes=None,
                     sessions_per_week=None,
@@ -205,23 +207,29 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
         or config.get("calendar_ids")
         or ["primary"]
     )
-    try:
-        events = get_events(date.today(), tz_str, calendar_ids=cal_ids)
-    except Exception:
-        events = []
+    events = []
+    if user_ctx["gcal_service"]:
+        try:
+            events = get_events(
+                date.today(), tz_str, calendar_ids=cal_ids,
+                service=user_ctx["gcal_service"],
+            )
+        except Exception as exc:
+            print(f"[replan] get_events failed: {exc}")
 
-    all_windows = compute_free_windows(events, config, date.today())
-    # Filter to windows that end after now
-    now_time = now_aware.time().replace(second=0, microsecond=0)
-    afternoon_windows = [w for w in all_windows if w.end > now_time]
+    all_windows = compute_free_windows(events, date.today(), config)
+    # Filter to windows that end after now (both tz-aware datetimes in user's local tz)
+    afternoon_windows = [w for w in all_windows if w.end > now_aware]
 
     # Inject mid-day hard rule so LLM knows current time
     config_with_time = dict(config)
     rules = dict(config_with_time.get("rules", {}))
     hard_rules = list(rules.get("hard", []))
-    hard_rules.insert(0, f"It is currently {now_aware.strftime('%H:%M')}. Schedule only from now onwards.")
+    current_time_rule = f"It is currently {now_aware.strftime('%H:%M')}. Schedule only from now onwards."
+    hard_rules.insert(0, current_time_rule)
     rules["hard"] = hard_rules
     config_with_time["rules"] = rules
+    print(f"[replan] now_aware={now_aware.isoformat()} | injected: {current_time_rule}")
 
     # Build context note: refinement is primary, original note is background
     context_note = _sanitize_note(body.context_note)
@@ -240,6 +248,7 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
         context_note=combined_note,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         target_date=today_str,
+        events=events,
     )
 
     return proposed

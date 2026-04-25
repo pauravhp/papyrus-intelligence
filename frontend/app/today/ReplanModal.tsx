@@ -29,6 +29,59 @@ interface ProposedResult {
   reasoning_summary: string;
 }
 
+function PushedSummary({ pushed }: { pushed: Array<{ task_id: string; reason: string }> }) {
+  if (pushed.length === 0) return null;
+
+  const buckets = { duration: 0, calendar: 0, other: 0 };
+  for (const p of pushed) {
+    if (/duration/i.test(p.reason)) buckets.duration++;
+    else if (/calendar/i.test(p.reason)) buckets.calendar++;
+    else buckets.other++;
+  }
+
+  const lines: string[] = [];
+  if (buckets.duration) lines.push(`${buckets.duration} need a duration estimate in Todoist`);
+  if (buckets.calendar) lines.push(`${buckets.calendar} already on your calendar`);
+  if (buckets.other) lines.push(`${buckets.other} didn't fit today`);
+
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        padding: "10px 12px",
+        borderTop: "1px solid var(--border)",
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--text-faint)",
+          marginBottom: 4,
+          fontFamily: "var(--font-literata)",
+        }}
+      >
+        Couldn&apos;t place ({pushed.length})
+      </p>
+      {lines.map((line) => (
+        <p
+          key={line}
+          style={{
+            fontSize: 12,
+            color: "var(--text-faint)",
+            fontFamily: "var(--font-literata)",
+            lineHeight: 1.5,
+            margin: 0,
+          }}
+        >
+          {line}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export default function ReplanModal({
   afternoonTasks,
   token,
@@ -361,6 +414,8 @@ export default function ReplanModal({
                 onRefinement={handleRefinement}
                 isRefining={isRefining}
               />
+
+              <PushedSummary pushed={proposed.pushed} />
 
               <button
                 onClick={handleConfirm}

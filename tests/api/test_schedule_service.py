@@ -183,3 +183,65 @@ def test_build_prompt_shows_session_range_for_budget_task():
     assert "90-180min" in prompt
     assert "[2x/week]" in prompt
     assert "proj_1" in prompt
+
+
+def test_schedule_day_filters_no_duration_and_surfaces_them_in_pushed():
+    """
+    Tasks with duration_minutes=None are kept out of the LLM prompt and
+    surfaced in the result's `pushed` list with an actionable reason.
+
+    Regression guard for 2026-04-24: previously these tasks rendered as
+    "Nonem" in the prompt and bloated the response with 20+ pushed entries,
+    causing JSON truncation at max_tokens.
+    """
+    from unittest.mock import patch, MagicMock
+    from src.models import TodoistTask, FreeWindow
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from api.services.schedule_service import schedule_day
+
+    tz = ZoneInfo("America/Vancouver")
+
+    def _t(tid, content, dur):
+        return TodoistTask(
+            id=tid, content=content, project_id="p", priority=3,
+            due_datetime=None, deadline=None, duration_minutes=dur,
+            labels=[], is_inbox=False, is_rhythm=False,
+        )
+
+    tasks = [_t("a", "Has duration", 60), _t("b", "No duration", None), _t("c", "Also none", None)]
+    window = FreeWindow(
+        start=datetime(2026, 4, 24, 14, 0, tzinfo=tz),
+        end=datetime(2026, 4, 24, 18, 0, tzinfo=tz),
+        duration_minutes=240,
+        block_type="afternoon",
+    )
+
+    captured_prompt = {}
+    fake_resp = MagicMock()
+    fake_resp.content = [MagicMock(text='{"scheduled":[{"task_id":"a","task_name":"Has duration","start_time":"2026-04-24T14:00:00-07:00","end_time":"2026-04-24T15:00:00-07:00","duration_minutes":60,"category":"deep_work"}],"pushed":[],"reasoning_summary":"ok"}')]
+
+    fake_messages = MagicMock()
+    fake_messages.create.return_value = fake_resp
+
+    with patch("api.services.schedule_service.anthropic.Anthropic") as MockClient:
+        MockClient.return_value.messages = fake_messages
+        result = schedule_day(
+            tasks=tasks, free_windows=[window], config={}, context_note="",
+            anthropic_api_key="sk-ant-test", target_date="2026-04-24",
+        )
+
+    # 1. The LLM only saw the schedulable task — "Nonem" never appears in prompt
+    sent_prompt = fake_messages.create.call_args.kwargs["messages"][0]["content"]
+    assert "Nonem" not in sent_prompt
+    assert "No duration" not in sent_prompt  # task content stripped from prompt
+    assert "Has duration" in sent_prompt
+
+    # 2. max_tokens >= 4096 so large responses don't truncate mid-string
+    assert fake_messages.create.call_args.kwargs["max_tokens"] >= 4096
+
+    # 3. No-duration tasks appear in pushed with an actionable reason
+    pushed_ids = {p["task_id"] for p in result["pushed"]}
+    assert pushed_ids == {"b", "c"}
+    for p in result["pushed"]:
+        assert "duration" in p["reason"].lower()

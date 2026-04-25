@@ -138,7 +138,11 @@ Reply ONLY with JSON:
 - Every task in exactly one list. Tasks that don't fit go in pushed.
 - NEVER shorten a task's total duration_minutes. If a task cannot fit its full duration in one contiguous slot, SPLIT it: schedule part 1 in the current window and part 2 in the next available window. Use the SAME task_id for both parts and append " (pt 1)" / " (pt 2)" to task_name. The sum of both parts' duration_minutes must equal the original task duration. Only push a task if there is genuinely no room for it at all today.
 - For rhythm tasks (marked [rhythm]): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). Treat their priority (p2/p3/p4) exactly like a one-off task's priority — a p4 rhythm slots before p3 tasks, a p3 rhythm slots before p4 tasks, etc. Rhythm priority reflects how urgent the weekly cadence is given what's been done this week; respect it the same way you respect priorities on one-off tasks.
-- category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous."""
+- category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous.
+- reasoning_summary: ONE or TWO short sentences spoken directly to the user in second person ("you"/"your"). Like a thoughtful coach noting what you did. Forbidden in this field: task IDs, priority codes ("p1"/"p2"/"p3"/"p4"), category labels ("deep_work"/"admin"), arithmetic breakdowns ("30m + 60m = 90m"), restating the current time, restating the cutoff time, the words "the user", "hard rule", "soft block", "suggested window". Refer to tasks by their human name (or omit the name entirely). If everything fit, mention what kind of work was prioritized and any meaningful gap. If anything was pushed, name the human reason briefly.
+  Good example: "Stacked your focus blocks into the late-night window before your cutoff, with a 30-min buffer if you need it."
+  Good example: "Front-loaded the deep work this morning so admin tasks fall into the lower-energy afternoon."
+  Bad example: "Current time is 03:23. The user wants larger blocks. Scheduled 6gJjJ7M3 (60m, p2, deep_work) + 6gjjJZyZ (30m, p3, admin) = 90m before the 02:30 cutoff." (forbidden: time, IDs, p-codes, categories, arithmetic, third-person)"""
 
 
 def _extract_json(text: str) -> str:
@@ -197,7 +201,18 @@ def schedule_day(
     if not target_date:
         target_date = date.today().isoformat()
 
-    prompt = _build_prompt(tasks, free_windows, config, context_note, target_date, events=events)
+    # Pre-filter tasks without a duration estimate. The LLM cannot place them
+    # and previously rendered them as "Nonem" in the prompt, then bloated the
+    # response by listing each in `pushed`. Surface them with an actionable
+    # reason and keep them out of the LLM input entirely.
+    schedulable_tasks = [t for t in tasks if t.duration_minutes is not None]
+    no_duration_pushed = [
+        {"task_id": t.id, "reason": "No duration estimate set in Todoist — add one to schedule it."}
+        for t in tasks
+        if t.duration_minutes is None
+    ]
+
+    prompt = _build_prompt(schedulable_tasks, free_windows, config, context_note, target_date, events=events)
 
     if anthropic_api_key:
         client = anthropic.Anthropic(api_key=anthropic_api_key)
@@ -205,7 +220,7 @@ def schedule_day(
         def _call():
             resp = client.messages.create(
                 model=ANTHROPIC_MODEL,
-                max_tokens=2048,
+                max_tokens=4096,
                 temperature=0.2,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -215,9 +230,14 @@ def schedule_day(
     else:
         import warnings
         warnings.warn("[schedule_day] No API key provided — returning empty schedule", stacklevel=2)
-        return {"scheduled": [], "pushed": [], "reasoning_summary": "No LLM key available."}
+        return {
+            "scheduled": [],
+            "pushed": no_duration_pushed,
+            "reasoning_summary": "No LLM key available.",
+        }
 
     result.setdefault("scheduled", [])
     result.setdefault("pushed", [])
     result.setdefault("reasoning_summary", "")
+    result["pushed"].extend(no_duration_pushed)
     return result

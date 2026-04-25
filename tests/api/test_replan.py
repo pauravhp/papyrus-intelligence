@@ -126,6 +126,99 @@ def test_replan_returns_proposed_schedule(client, monkeypatch):
     assert "reasoning_summary" in data
 
 
+def test_replan_wiring_contracts(client, monkeypatch):
+    """
+    Integration-style guard against the three replan-route wiring bugs found
+    on 2026-04-24:
+      - compute_free_windows arg order (events, target_date, config)
+      - get_events MUST receive service=<user's gcal_service> (else falls back
+        to disk token.json — wrong user)
+      - schedule_day MUST receive events=<events> (else LLM is blind to GCal)
+      - the post-compute window filter must accept a real FreeWindow.end
+        (a tz-aware datetime) — not a `time` mismatch
+    """
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from src.models import FreeWindow
+
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
+    row, _ = _mock_schedule_log_today(mock_sb)
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    tz = ZoneInfo("America/Vancouver")
+    today = date.today()
+    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
+
+    real_window = FreeWindow(
+        start=datetime(today.year, today.month, today.day, 13, 0, tzinfo=tz),
+        end=datetime(today.year, today.month, today.day, 18, 0, tzinfo=tz),
+        duration_minutes=300,
+        block_type="afternoon",
+    )
+
+    fake_event = MagicMock()
+    mock_gcal = MagicMock()
+
+    captured = {}
+    def fake_get_events(target_date, tz_str, calendar_ids=None, service=None):
+        captured["get_events_service"] = service
+        captured["get_events_calendar_ids"] = calendar_ids
+        return [fake_event]
+
+    def fake_schedule_day(**kwargs):
+        captured["schedule_day_kwargs"] = kwargs
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    def fake_compute_free_windows(events, target_date, config, **kwargs):
+        captured["cfw_args"] = (type(events), type(target_date), type(config))
+        return [real_window]
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.get_events", side_effect=fake_get_events), \
+         patch("api.routes.replan.compute_free_windows", side_effect=fake_compute_free_windows), \
+         patch("api.routes.replan.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.routes.replan._get_now", return_value=mock_now):
+
+        MockTodoist.return_value.is_task_completed.return_value = False
+        MockTodoist.return_value.get_tasks.return_value = []
+
+        resp = client.post(
+            "/api/replan",
+            json={"task_states": {"t1": "keep"}, "context_note": "", "refinement_message": None},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+
+    # 1. get_events received the user's gcal service (not None → not fallback)
+    assert captured["get_events_service"] is mock_gcal
+
+    # 2. compute_free_windows got (list, date, dict) in that order
+    cfw_events_t, cfw_date_t, cfw_config_t = captured["cfw_args"]
+    assert cfw_events_t is list
+    assert cfw_date_t is date
+    assert cfw_config_t is dict
+
+    # 3. schedule_day received events kwarg (LLM sees calendar) and the post-now
+    #    free_windows survived the filter (real FreeWindow.end vs tz-aware now)
+    sd_kwargs = captured["schedule_day_kwargs"]
+    assert "events" in sd_kwargs and sd_kwargs["events"] == [fake_event]
+    assert sd_kwargs["free_windows"] == [real_window]
+
+
 def test_replan_disabled_before_noon(client, monkeypatch):
     """POST /api/replan returns 400 if called before noon."""
     mock_sb = MagicMock()

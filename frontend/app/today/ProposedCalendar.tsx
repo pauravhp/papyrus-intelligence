@@ -54,8 +54,7 @@ export default function ProposedCalendar({
           </p>
         ) : (
           scheduled.map((item) => {
-            const height = blockHeight(item.duration_minutes);
-            const showTime = height >= 36;
+            const minHeight = Math.max(44, blockHeight(item.duration_minutes));
             return (
               <div
                 key={item.task_id}
@@ -74,35 +73,41 @@ export default function ProposedCalendar({
                   }
                 }}
                 style={{
-                  height,
+                  minHeight,
                   background: "rgba(34, 197, 94, 0.12)",
                   border: "1px solid rgba(34, 197, 94, 0.4)",
                   borderRadius: 6,
                   marginBottom: 4,
-                  padding: "4px 8px",
+                  padding: "6px 8px",
                   display: "flex",
                   flexDirection: "column",
                   justifyContent: "center",
-                  overflow: "hidden",
                   cursor: "pointer",
+                  minWidth: 0,
                 }}
               >
                 <span style={{
                   fontSize: 11,
                   fontWeight: 500,
                   color: "var(--text)",
-                  whiteSpace: "nowrap",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
                   overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  wordBreak: "break-word",
+                  lineHeight: 1.35,
                   fontFamily: "var(--font-literata)",
                 }}>
                   {item.task_name}
                 </span>
-                {showTime && (
-                  <span style={{ fontSize: 10, color: "var(--text-muted)", fontFamily: "var(--font-literata)" }}>
-                    {fmtTime(item.start_time)} · {item.duration_minutes}m
-                  </span>
-                )}
+                <span style={{
+                  fontSize: 10,
+                  color: "var(--text-muted)",
+                  fontFamily: "var(--font-literata)",
+                  marginTop: 2,
+                }}>
+                  {fmtTime(item.start_time)} · {item.duration_minutes}m
+                </span>
               </div>
             );
           })
