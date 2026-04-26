@@ -58,6 +58,19 @@ def _build_prompt(
     )
     rules_text = "\n".join(f"- {r}" for r in rules_hard) if rules_hard else "None"
 
+    # Min gap between tasks
+    min_gap = config.get("scheduling", {}).get("min_gap_between_tasks_minutes", 10)
+
+    # Meal / daily blocks — already excluded from free windows; listed here so the LLM
+    # knows WHY those windows are missing and does not invent "break" tasks to fill them.
+    daily_blocks = config.get("daily_blocks", [])
+    if daily_blocks:
+        reserved_text = ", ".join(
+            f"{db['name']} {db['start']}–{db['end']}" for db in daily_blocks
+        )
+    else:
+        reserved_text = "Lunch 12:30–13:30, Dinner 19:00–20:00"
+
     note = f"Note: {context_note}" if context_note else ""
 
     timed_events = [e for e in (events or []) if not e.is_all_day]
@@ -75,17 +88,30 @@ def _build_prompt(
 TASKS (id name priority duration):
 {tasks_text}
 
-FREE WINDOWS (all times are LOCAL, UTC{tz_offset}): {windows_text}
+SUGGESTED WINDOWS (pre-computed guidance, LOCAL time, UTC{tz_offset}): {windows_text}
 {calendar_section}
-HARD RULES: {rules_text}
+SOFT BLOCKS (preferred reserved time — respect by default, but use your judgment if the user's context or task load warrants it):
+{reserved_text}
+
+HARD RULES (non-negotiable — never schedule over these):
+{rules_text}
+- Never schedule over a CALENDAR EVENT above.
+- Do NOT invent "break", "recovery", or filler tasks to represent gaps. Leave gaps as empty time.
+
+GUIDANCE (apply unless context overrides):
+- Prefer scheduling within the suggested windows.
+- Leave at least {min_gap} minutes between consecutive deep_work tasks.
+- If tasks don't fit within suggested windows, you may schedule outside them (including late-night hours) rather than push tasks — use judgment based on task priority and the user's note.
 
 Reply ONLY with JSON:
-{{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
+{{"scheduled":[{{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}}],"pushed":[{{"task_id":"","reason":""}}],"reasoning_summary":""}}
 
 - start_time/end_time: ISO 8601 with the SAME UTC offset (UTC{tz_offset}), e.g. {target_date}T09:00:00{tz_offset}
 - CRITICAL: The free window times are LOCAL (UTC{tz_offset}) — do NOT convert them to UTC. Use them exactly as shown.
 - Every task in exactly one list. Tasks that don't fit go in pushed.
-- For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room."""
+- NEVER shorten a task's total duration_minutes. If a task cannot fit its full duration in one contiguous slot, SPLIT it: schedule part 1 in the current window and part 2 in the next available window. Use the SAME task_id for both parts and append " (pt 1)" / " (pt 2)" to task_name. The sum of both parts' duration_minutes must equal the original task duration. Only push a task if there is genuinely no room for it at all today.
+- For rhythm tasks (id starts with proj_): pick any duration within the shown range (e.g. 120-180min means schedule between 120 and 180 minutes). The cadence [Nx/week] is informational — aim to include a rhythm session if there's room.
+- category: classify each scheduled task as "deep_work" (requires focused concentration — writing, coding, designing, research, analysis) or "admin" (lightweight coordination — email, reviews, calls, planning, admin tasks). Use null if genuinely ambiguous."""
 
 
 def _extract_json(text: str) -> str:

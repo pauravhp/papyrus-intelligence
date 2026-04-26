@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     TODOIST_CLIENT_SECRET: str    # new — required
     ANTHROPIC_API_KEY: str        # now required (was Optional)
     POSTHOG_API_KEY: str = ""   # empty string disables PostHog in local dev without the key
+    FRONTEND_URL: str = "http://localhost:3000"
 
     model_config = SettingsConfigDict(
         env_file=".env",

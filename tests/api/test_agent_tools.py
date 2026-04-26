@@ -213,9 +213,9 @@ def test_schedule_day_passes_scheduled_tasks_as_keyword_arg():
     )
 
 
-def test_schedule_day_pushes_llm_times_outside_free_windows():
-    """LLM-proposed start/end times that fall outside computed free windows are
-    moved to pushed — prevents scheduling tasks on top of GCal events."""
+def test_schedule_day_allows_llm_times_outside_free_windows():
+    """LLM-proposed times outside free windows are allowed — windows are soft guidance.
+    Only real GCal event conflicts are hard-rejected."""
     from api.services.agent_tools import execute_schedule_day
     from src.models import FreeWindow
 
@@ -242,7 +242,7 @@ def test_schedule_day_pushes_llm_times_outside_free_windows():
         block_type="morning",
     )
 
-    # LLM proposes 14:00–15:00 — this slot is blocked by a GCal event (not in free windows)
+    # LLM proposes 14:00–15:00 — outside free windows but no GCal conflict
     llm_result = {
         "scheduled": [
             {
@@ -266,8 +266,73 @@ def test_schedule_day_pushes_llm_times_outside_free_windows():
         MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
         result = execute_schedule_day("", "2026-04-15", ctx)
 
-    assert len(result["scheduled"]) == 0, "Task outside free window must not appear in scheduled"
-    assert len(result["pushed"]) == 1, "Task outside free window must be moved to pushed"
+    assert len(result["scheduled"]) == 1, "Task outside free window but no GCal conflict should stay scheduled"
+    assert result["scheduled"][0]["task_id"] == "t1"
+
+
+def test_schedule_day_rejects_gcal_conflict():
+    """LLM-proposed times that overlap a real GCal event are moved to pushed."""
+    from api.services.agent_tools import execute_schedule_day
+    from src.models import CalendarEvent, FreeWindow
+
+    TZ = ZoneInfo("America/Vancouver")
+    ctx = {
+        "config": {
+            "user": {"timezone": "America/Vancouver"},
+            "calendar_ids": [],
+            "sleep": {},
+            "rules": {"hard": [], "soft": []},
+        },
+        "todoist_api_key": "tok",
+        "anthropic_api_key": "sk-ant",
+        "gcal_service": MagicMock(),
+        "user_id": "u1",
+        "supabase": MagicMock(),
+    }
+
+    free_window = FreeWindow(
+        start=datetime(2026, 4, 15, 10, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 11, 0, tzinfo=TZ),
+        duration_minutes=60,
+        block_type="morning",
+    )
+
+    # GCal event from 14:00–15:30
+    gcal_event = CalendarEvent(
+        id="ev1",
+        summary="Team standup",
+        start=datetime(2026, 4, 15, 14, 0, tzinfo=TZ),
+        end=datetime(2026, 4, 15, 15, 30, tzinfo=TZ),
+        is_all_day=False,
+        color_id=None,
+    )
+
+    # LLM proposes 14:30–15:30 — overlaps with the GCal event
+    llm_result = {
+        "scheduled": [
+            {
+                "task_id": "t1",
+                "task_name": "Task A",
+                "start_time": "2026-04-15T14:30:00-07:00",
+                "end_time": "2026-04-15T15:30:00-07:00",
+                "duration_minutes": 60,
+            }
+        ],
+        "pushed": [],
+        "reasoning_summary": "scheduled",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[gcal_event]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[free_window]), \
+         patch("api.services.agent_tools.schedule_day", return_value=llm_result), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        result = execute_schedule_day("", "2026-04-15", ctx)
+
+    assert len(result["scheduled"]) == 0, "Task conflicting with GCal event must not stay scheduled"
+    assert len(result["pushed"]) == 1, "Task conflicting with GCal event must be moved to pushed"
     assert result["pushed"][0]["task_id"] == "t1"
 
 
@@ -392,3 +457,94 @@ def test_confirm_schedule_fires_analytics(user_ctx):
     assert args[2]["task_count"] == 2
     assert args[2]["total_duration_minutes"] == 120
     assert "schedule_date" in args[2]
+
+
+
+def test_manage_rhythm_schema_has_description_property():
+    from api.services.agent_tools import TOOL_SCHEMAS
+    schema = next(s for s in TOOL_SCHEMAS if s["name"] == "manage_rhythm")
+    assert "description" in schema["input_schema"]["properties"]
+    desc_prop = schema["input_schema"]["properties"]["description"]
+    assert desc_prop["type"] == "string"
+
+
+def test_schedule_day_injects_rhythm_with_description_in_content():
+    """When a rhythm has a description, content = 'name: description'."""
+    from api.services.agent_tools import execute_schedule_day
+    from unittest.mock import MagicMock, patch
+
+    captured_tasks = []
+
+    def fake_schedule_day(**kwargs):
+        captured_tasks.extend(kwargs["tasks"])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    ctx = {
+        "user_id": "user-123",
+        "todoist_api_key": "tok",
+        "gcal_service": MagicMock(),
+        "config": {"timezone": "UTC", "calendar_ids": [], "work_start": "09:00", "work_end": "17:00", "sleep_end": "07:00", "sleep_start": "23:00", "buffer_minutes": 15},
+        "supabase": MagicMock(),
+    }
+
+    rhythm_row = {
+        "id": 8, "rhythm_name": "Morning run",
+        "sessions_per_week": 4, "session_min_minutes": 30, "session_max_minutes": 45,
+        "end_date": None, "sort_order": 0,
+        "description": "Best before deep work",
+        "created_at": "x", "updated_at": "x",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
+         patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[rhythm_row]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        execute_schedule_day("", "2026-04-18", ctx)
+
+    proj_tasks = [t for t in captured_tasks if t.id == "proj_8"]
+    assert len(proj_tasks) == 1
+    assert proj_tasks[0].content == "Morning run: Best before deep work"
+
+
+def test_schedule_day_injects_rhythm_without_description_uses_name_only():
+    """When a rhythm has no description, content = rhythm_name (unchanged behaviour)."""
+    from api.services.agent_tools import execute_schedule_day
+    from unittest.mock import MagicMock, patch
+
+    captured_tasks = []
+
+    def fake_schedule_day(**kwargs):
+        captured_tasks.extend(kwargs["tasks"])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    ctx = {
+        "user_id": "user-123",
+        "todoist_api_key": "tok",
+        "gcal_service": MagicMock(),
+        "config": {"timezone": "UTC", "calendar_ids": [], "work_start": "09:00", "work_end": "17:00", "sleep_end": "07:00", "sleep_start": "23:00", "buffer_minutes": 15},
+        "supabase": MagicMock(),
+    }
+
+    rhythm_row = {
+        "id": 9, "rhythm_name": "Evening reading",
+        "sessions_per_week": 3, "session_min_minutes": 20, "session_max_minutes": 30,
+        "end_date": None, "sort_order": 1,
+        "description": None,
+        "created_at": "x", "updated_at": "x",
+    }
+
+    with patch("api.services.agent_tools.TodoistClient") as MockTodoist, \
+         patch("api.services.agent_tools.get_events", return_value=[]), \
+         patch("api.services.agent_tools.compute_free_windows", return_value=[]), \
+         patch("api.services.agent_tools.schedule_day", side_effect=fake_schedule_day), \
+         patch("api.services.agent_tools.get_active_rhythms", return_value=[rhythm_row]):
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+        execute_schedule_day("", "2026-04-18", ctx)
+
+    proj_tasks = [t for t in captured_tasks if t.id == "proj_9"]
+    assert len(proj_tasks) == 1
+    assert proj_tasks[0].content == "Evening reading"

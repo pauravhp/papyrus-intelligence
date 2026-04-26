@@ -7,6 +7,10 @@ not a finite pool of hours. All functions take (user_id, supabase_client, ...).
 
 from datetime import date, datetime
 
+# Sentinel: distinguishes "description not supplied to update_rhythm" from
+# "description explicitly set to None (clear to NULL)".
+_DESCRIPTION_UNSET = object()
+
 
 def get_active_rhythms(user_id: str, supabase) -> list[dict]:
     """Return rhythms where end_date IS NULL or end_date >= today, sorted by sort_order."""
@@ -31,6 +35,7 @@ def create_rhythm(
     session_max: int = 120,
     end_date: str | None = None,
     sort_order: int = 0,
+    description: str | None = None,
 ) -> dict:
     """Insert a new rhythm. Returns the created row."""
     now = datetime.now().isoformat()
@@ -42,6 +47,7 @@ def create_rhythm(
         "session_max_minutes": session_max,
         "end_date": end_date,
         "sort_order": sort_order,
+        "description": description,
         "created_at": now,
         "updated_at": now,
     }
@@ -58,6 +64,7 @@ def update_rhythm(
     session_max: int | None = None,
     end_date: str | None = None,
     sort_order: int | None = None,
+    description=_DESCRIPTION_UNSET,  # str | None | _DESCRIPTION_UNSET
 ) -> dict:
     """Patch individual fields. Returns the updated row."""
     updates: dict = {"updated_at": datetime.now().isoformat()}
@@ -71,6 +78,9 @@ def update_rhythm(
         updates["end_date"] = end_date
     if sort_order is not None:
         updates["sort_order"] = sort_order
+    if description is not _DESCRIPTION_UNSET:
+        # None → stored as NULL (clear); non-empty str → stored as-is
+        updates["description"] = description
 
     result = (
         supabase.from_("rhythms")

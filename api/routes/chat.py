@@ -31,6 +31,8 @@ from api.auth import get_current_user
 from api.db import supabase
 from api.config import settings
 from api.services.agent_tools import TOOL_SCHEMAS, TOOL_DISPATCH
+from api.services import nudge_service
+from api.services.nudge_service import NudgeCard
 from src.calendar_client import build_gcal_service_from_credentials
 
 router = APIRouter()
@@ -54,6 +56,7 @@ Available tools:
 Rules:
 - Never ask the user for a date. Call get_date first.
 - To plan a day: call get_date → schedule_day. schedule_day already fetches tasks and injects active rhythms.
+- When the user asks to modify, refine, move, or adjust any part of the schedule (e.g. "move X to 7am", "drop Y", "add a break"), you MUST call schedule_day again with an updated context_note reflecting the requested change. Do NOT manually rearrange times in text — always re-run scheduling.
 - Never call confirm_schedule unless the user explicitly approves.
 - Present schedules concisely: task name, time, duration.
 - One coaching nudge max per conversation.
@@ -63,7 +66,7 @@ Rules:
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str | list  # list when replaying tool-use/tool-result blocks
 
 
 class ChatRequest(BaseModel):
@@ -74,6 +77,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     message: str
     schedule_card: dict | None = None
+    nudge: NudgeCard | None = None
     messages: list[dict]
 
 
@@ -126,9 +130,25 @@ def chat(
     user_id: str = user["sub"]
     user_ctx = _load_user_context(user_id)
 
+    # Evaluate nudge before the agent loop (first message only; mid-conversation guard inside)
+    messages_raw = [{"role": m.role, "content": m.content} for m in body.messages]
+    nudge_card = nudge_service.get_eligible(user_ctx, messages_raw)
+
     ant_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    # Build system prompt — inject nudge if eligible
+    system = SYSTEM_PROMPT
+    if nudge_card:
+        system += f"\n\nELIGIBLE_NUDGE: {nudge_card.model_dump_json()}"
+        system += (
+            "\n\nIf schedule_day was called in this response, include the nudge as a "
+            "coaching observation AFTER your scheduling reasoning — before the user "
+            "decides to confirm. Keep it to 2–3 sentences: the observation, one "
+            "sentence of science, and the offer. Gain-framed only. "
+            "Do not raise it again if the user dismisses or ignores it."
+        )
+
+    messages = messages_raw
     schedule_card: dict | None = None
 
     # Anthropic ReAct loop
@@ -136,7 +156,7 @@ def chat(
         response = ant_client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            system=system,
             tools=TOOL_SCHEMAS,
             messages=messages,
         )
@@ -163,6 +183,7 @@ def chat(
             return ChatResponse(
                 message=final_text,
                 schedule_card=schedule_card,
+                nudge=nudge_card,
                 messages=messages,
             )
 
@@ -200,5 +221,6 @@ def chat(
     return ChatResponse(
         message="I ran into an issue completing your request. Please try again.",
         schedule_card=schedule_card,
+        nudge=nudge_card,
         messages=messages,
     )

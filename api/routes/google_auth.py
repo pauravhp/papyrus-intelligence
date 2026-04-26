@@ -37,7 +37,6 @@ _SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
-_FRONTEND_ONBOARD = "http://localhost:3000/onboard"
 _STATE_MAX_AGE = 600  # seconds — consent screen should complete in <10 min
 
 
@@ -94,6 +93,7 @@ def _verify_state(state: str) -> str:
 @router.get("/auth/google")
 def google_oauth_start(
     token: str = Query(..., description="Supabase access token from the frontend session"),
+    redirect_after: str = Query(default=None, description="Frontend URL to redirect to after OAuth completes"),
 ) -> RedirectResponse:
     """
     Browser-initiated OAuth entry point.
@@ -117,9 +117,10 @@ def google_oauth_start(
         state=_sign_state(user_id),
     )
 
-    # Persist code_verifier so the callback can complete the PKCE exchange.
+    # Persist code_verifier and optional redirect_after so the callback can
+    # complete the PKCE exchange and redirect to the right frontend page.
     supabase.from_("users").update(
-        {"oauth_code_verifier": flow.code_verifier}
+        {"oauth_code_verifier": flow.code_verifier, "oauth_redirect_after": redirect_after}
     ).eq("id", user_id).execute()
 
     return RedirectResponse(url=auth_url, status_code=302)
@@ -146,10 +147,10 @@ def google_oauth_callback(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    # Retrieve the PKCE code_verifier stored during google_oauth_start.
+    # Retrieve the PKCE code_verifier and redirect_after stored during google_oauth_start.
     row = (
         supabase.from_("users")
-        .select("oauth_code_verifier")
+        .select("oauth_code_verifier, oauth_redirect_after")
         .eq("id", user_id)
         .maybe_single()
         .execute()
@@ -157,7 +158,13 @@ def google_oauth_callback(
     if row is None or row.data is None:
         # User row doesn't exist — stale session; redirect to login
         return RedirectResponse(url=f"{settings.FRONTEND_URL}/login?error=session_expired")
+
     code_verifier = (row.data or {}).get("oauth_code_verifier")
+    stored_redirect = (row.data or {}).get("oauth_redirect_after")
+    if stored_redirect and stored_redirect.startswith("/"):
+        redirect_after = f"{settings.FRONTEND_URL}{stored_redirect}"
+    else:
+        redirect_after = stored_redirect or f"{settings.FRONTEND_URL}/onboard"
 
     flow = Flow.from_client_config(
         _client_config(),
@@ -173,9 +180,9 @@ def google_oauth_callback(
             detail=f"Token exchange failed: {exc}",
         ) from exc
 
-    # Clear the one-time verifier now that the exchange is complete.
+    # Clear the one-time verifier and redirect_after now that the exchange is complete.
     supabase.from_("users").update(
-        {"oauth_code_verifier": None}
+        {"oauth_code_verifier": None, "oauth_redirect_after": None}
     ).eq("id", user_id).execute()
 
     creds_dict = json.loads(flow.credentials.to_json())
@@ -192,4 +199,4 @@ def google_oauth_callback(
             detail=f"Supabase write failed: {result.error}",
         )
 
-    return RedirectResponse(url=_FRONTEND_ONBOARD, status_code=302)
+    return RedirectResponse(url=redirect_after, status_code=302)

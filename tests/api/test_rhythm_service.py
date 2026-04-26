@@ -21,6 +21,7 @@ _ROW = {
     "session_max_minutes": 180,
     "end_date": None,
     "sort_order": 0,
+    "description": None,
     "created_at": "2026-04-13T00:00:00+00:00",
     "updated_at": "2026-04-13T00:00:00+00:00",
 }
@@ -104,3 +105,49 @@ def test_delete_rhythm_calls_delete():
     delete_rhythm("user-123", sb, rhythm_id=1)
     sb.from_.assert_called_with("rhythms")
     sb.from_.return_value.delete.assert_called_once()
+
+
+def test_create_rhythm_with_description():
+    row = {**_ROW, "description": "Best in the morning, before deep work"}
+    sb = _sb_insert(row)
+    result = create_rhythm(
+        "user-123", sb,
+        name="Morning run",
+        sessions_per_week=4,
+        description="Best in the morning, before deep work",
+    )
+    assert result["description"] == "Best in the morning, before deep work"
+
+
+def test_create_rhythm_without_description_defaults_null():
+    sb = _sb_insert(_ROW)
+    # _ROW has description: None
+    result = create_rhythm("user-123", sb, name="Zotero Reading", sessions_per_week=2)
+    insert_call_args = sb.from_.return_value.insert.call_args[0][0]
+    assert insert_call_args["description"] is None
+
+
+def test_update_rhythm_sets_description():
+    from api.services.rhythm_service import _DESCRIPTION_UNSET
+    updated = {**_ROW, "description": "After lunch works well"}
+    sb = _sb_update(updated)
+    result = update_rhythm("user-123", sb, rhythm_id=1, description="After lunch works well")
+    assert result["description"] == "After lunch works well"
+
+
+def test_update_rhythm_clears_description_when_none():
+    from api.services.rhythm_service import _DESCRIPTION_UNSET
+    updated = {**_ROW, "description": None}
+    sb = _sb_update(updated)
+    update_rhythm("user-123", sb, rhythm_id=1, description=None)
+    update_call_args = sb.from_.return_value.update.call_args[0][0]
+    assert "description" in update_call_args
+    assert update_call_args["description"] is None
+
+
+def test_update_rhythm_omitting_description_leaves_it_unchanged():
+    from api.services.rhythm_service import _DESCRIPTION_UNSET
+    sb = _sb_update(_ROW)
+    update_rhythm("user-123", sb, rhythm_id=1, sort_order=5)
+    update_call_args = sb.from_.return_value.update.call_args[0][0]
+    assert "description" not in update_call_args

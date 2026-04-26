@@ -5,9 +5,11 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import type { Rhythm } from "./RhythmCard";
+import FieldTooltip from "@/components/FieldTooltip";
 
 export interface RhythmFormData {
   name: string;
+  description: string;
   sessions_per_week: number;
   session_min: number;
   session_max: number;
@@ -120,6 +122,7 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
 
   const defaultForm = (): RhythmFormData => ({
     name: rhythm?.rhythm_name ?? "",
+    description: rhythm?.description ?? "",
     sessions_per_week: rhythm?.sessions_per_week ?? 3,
     session_min: rhythm?.session_min_minutes ?? 30,
     session_max: rhythm?.session_max_minutes ?? 60,
@@ -153,8 +156,9 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
     e.preventDefault();
     if (!form.name.trim()) return;
     // Ensure min <= max
-    const corrected = {
+    const corrected: RhythmFormData = {
       ...form,
+      description: form.description.trim(),
       session_min: Math.min(form.session_min, form.session_max),
       session_max: Math.max(form.session_min, form.session_max),
     };
@@ -266,6 +270,41 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
                   required
                   autoFocus
                 />
+              </div>
+
+              {/* Scheduling hint */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
+                  <label style={{ ...LABEL, marginBottom: 0 }}>
+                    Scheduling hint{" "}
+                    <span style={{ color: "var(--text-faint)", textTransform: "none" as const, letterSpacing: 0 }}>
+                      (optional)
+                    </span>
+                  </label>
+                  <FieldTooltip content="Helps the app pick the right slot. Most useful: when it fits best ('mornings only') and what it leads into ('before deep work')." />
+                </div>
+                <textarea
+                  style={{
+                    ...INPUT,
+                    resize: "none" as const,
+                    minHeight: 62,
+                    lineHeight: 1.5,
+                  }}
+                  value={form.description}
+                  onChange={(e) => set("description", e.target.value)}
+                  placeholder="e.g. Best in the morning, before deep work"
+                  maxLength={80}
+                />
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "var(--text-faint)",
+                    textAlign: "right" as const,
+                    marginTop: 3,
+                  }}
+                >
+                  {form.description.length} / 80
+                </div>
               </div>
 
               {/* Sessions per week */}

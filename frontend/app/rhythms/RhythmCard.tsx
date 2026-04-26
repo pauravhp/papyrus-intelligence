@@ -10,6 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 export interface Rhythm {
   id: number;
   rhythm_name: string;
+  description: string | null;
   sessions_per_week: number;
   session_min_minutes: number;
   session_max_minutes: number;
@@ -177,7 +178,7 @@ export default function RhythmCard({ rhythm, onEdit, onDelete }: Props) {
           display: "flex",
           alignItems: "baseline",
           gap: 12,
-          marginBottom: 14,
+          marginBottom: rhythm.description ? 4 : 14,
         }}
       >
         <span
@@ -199,6 +200,21 @@ export default function RhythmCard({ rhythm, onEdit, onDelete }: Props) {
           {rhythm.session_min_minutes}–{rhythm.session_max_minutes} min
         </span>
       </div>
+
+      {/* Scheduling hint — only rendered when set */}
+      {rhythm.description && (
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            fontStyle: "italic",
+            lineHeight: 1.45,
+            marginBottom: 14,
+          }}
+        >
+          {rhythm.description}
+        </p>
+      )}
 
       {/* Body: cadence number + week grid */}
       <div style={{ display: "flex", alignItems: "center", gap: 28 }}>

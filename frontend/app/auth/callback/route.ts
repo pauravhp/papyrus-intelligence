@@ -4,12 +4,12 @@ import { createClient } from "@/utils/supabase/server";
 
 /**
  * Handles the auth callback after email confirmation or OAuth redirect.
- * Exchanges the ?code= param for a session, then redirects to /dashboard.
+ * Exchanges the ?code= param for a session, then redirects to /today (or custom next param).
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = searchParams.get("next") ?? "/today";
 
   if (code) {
     const cookieStore = await cookies();

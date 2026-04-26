@@ -11,6 +11,7 @@ from api.auth import get_current_user
 from api.db import supabase
 from api.services.analytics import capture
 from api.services.rhythm_service import (
+    _DESCRIPTION_UNSET,
     create_rhythm,
     delete_rhythm,
     get_active_rhythms,
@@ -27,6 +28,7 @@ class CreateRhythmRequest(BaseModel):
     session_max: int = 120
     end_date: str | None = None
     sort_order: int = 0
+    description: str | None = None
 
 
 class UpdateRhythmRequest(BaseModel):
@@ -35,6 +37,7 @@ class UpdateRhythmRequest(BaseModel):
     session_max: int | None = None
     end_date: str | None = None
     sort_order: int | None = None
+    description: str | None = None
 
 
 @router.get("")
@@ -43,7 +46,12 @@ def list_rhythms(user: dict = Depends(get_current_user)):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_rhythm_route(body: CreateRhythmRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+def create_rhythm_route(
+    body: CreateRhythmRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+):
+    desc = body.description.strip() if body.description else None
     result = create_rhythm(
         user["sub"], supabase,
         name=body.name,
@@ -52,6 +60,7 @@ def create_rhythm_route(body: CreateRhythmRequest, background_tasks: BackgroundT
         session_max=body.session_max,
         end_date=body.end_date,
         sort_order=body.sort_order,
+        description=desc,
     )
     background_tasks.add_task(
         capture,
@@ -71,6 +80,13 @@ def update_rhythm_route(
     body: UpdateRhythmRequest,
     user: dict = Depends(get_current_user),
 ):
+    # Use model_fields_set to detect whether description was present in the request
+    # body at all. If absent, pass the sentinel so the service leaves it unchanged.
+    if "description" in body.model_fields_set:
+        desc = body.description.strip() if body.description else None
+    else:
+        desc = _DESCRIPTION_UNSET
+
     return update_rhythm(
         user["sub"], supabase, rhythm_id=rhythm_id,
         sessions_per_week=body.sessions_per_week,
@@ -78,6 +94,7 @@ def update_rhythm_route(
         session_max=body.session_max,
         end_date=body.end_date,
         sort_order=body.sort_order,
+        description=desc,
     )
 
 

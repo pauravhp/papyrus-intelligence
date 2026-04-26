@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
-import { apiFetch, apiPatch } from "@/utils/api";
+import { apiFetch, apiPatch, ApiError } from "@/utils/api";
 
 interface CalendarItem {
   id: string;
@@ -49,6 +49,7 @@ export default function CalendarSection({
   const [calendars, setCalendars] = useState<CalendarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [sourceIds, setSourceIds] = useState<string[]>([]);
   const [writeId, setWriteId] = useState<string>("primary");
   const [saving, setSaving] = useState(false);
@@ -59,6 +60,7 @@ export default function CalendarSection({
     const load = async () => {
       setLoading(true);
       setError(null);
+      setNeedsReconnect(false);
       try {
         const supabase = createClient();
         const { data } = await supabase.auth.getSession();
@@ -73,7 +75,12 @@ export default function CalendarSection({
           setWriteId(cfgWrite);
         }
       } catch (e) {
-        if (!cancelled) setError("Couldn't load your calendars.");
+        if (cancelled) return;
+        if (e instanceof ApiError && e.code === "google_reconnect_required") {
+          setNeedsReconnect(true);
+        } else {
+          setError("Couldn't load your calendars.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -81,6 +88,14 @@ export default function CalendarSection({
     load();
     return () => { cancelled = true; };
   }, []);
+
+  const handleReconnect = async () => {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token ?? "";
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    window.location.href = `${apiUrl}/auth/google?token=${token}&redirect_after=${encodeURIComponent("/dashboard/settings")}`;
+  };
 
   const toggleSource = (id: string) => {
     setSourceIds((prev) =>
@@ -122,6 +137,35 @@ export default function CalendarSection({
             animation: "pulse 1.4s ease-in-out infinite",
           }} />
         ))}
+      </div>
+    );
+  }
+
+  if (needsReconnect) {
+    return (
+      <div>
+        <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 12 }}>
+          Your Google Calendar connection has expired.<br />
+          <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+            Reconnect to reload your calendars — your settings will stay intact.
+          </span>
+        </p>
+        <button
+          onClick={handleReconnect}
+          style={{
+            padding: "7px 14px",
+            background: "transparent",
+            color: "var(--accent)",
+            border: "1px solid var(--accent)",
+            borderRadius: 8,
+            fontFamily: "var(--font-literata)",
+            fontSize: 12,
+            cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+        >
+          Reconnect Google Calendar
+        </button>
       </div>
     );
   }

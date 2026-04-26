@@ -31,7 +31,6 @@ from api.db import supabase
 router = APIRouter()
 
 _REDIRECT_URI = "http://localhost:8000/auth/todoist/callback"
-_FRONTEND_ONBOARD = "http://localhost:3000/onboard"
 _STATE_MAX_AGE = 600  # 10 minutes
 
 
@@ -69,6 +68,7 @@ def _verify_state(state: str) -> str:
 @router.get("/auth/todoist")
 def todoist_oauth_start(
     token: str = Query(..., description="Supabase access token from the frontend session"),
+    redirect_after: str = Query(default=None, description="Frontend URL to redirect to after OAuth completes"),
 ) -> RedirectResponse:
     """
     Browser-initiated Todoist OAuth entry point.
@@ -78,6 +78,11 @@ def todoist_oauth_start(
     """
     user = verify_token(token)
     user_id: str = user["sub"]
+
+    # Store redirect_after so the callback can use it
+    supabase.from_("users").update(
+        {"oauth_redirect_after": redirect_after}
+    ).eq("id", user_id).execute()
 
     auth_url = (
         "https://api.todoist.com/oauth/authorize"
@@ -103,6 +108,20 @@ def todoist_oauth_callback(
         user_id = _verify_state(state)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    # Read stored redirect_after
+    row = (
+        supabase.from_("users")
+        .select("oauth_redirect_after")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    stored_redirect = (row.data or {}).get("oauth_redirect_after")
+    if stored_redirect and stored_redirect.startswith("/"):
+        redirect_after = f"{settings.FRONTEND_URL}{stored_redirect}"
+    else:
+        redirect_after = stored_redirect or f"{settings.FRONTEND_URL}/onboard"
 
     # Exchange authorization code for access token
     resp = requests.post(
@@ -133,7 +152,8 @@ def todoist_oauth_callback(
         "todoist_oauth_token": {
             "access_token": access_token,
             "granted_at": datetime.now(timezone.utc).isoformat(),
-        }
+        },
+        "oauth_redirect_after": None,
     }).eq("id", user_id).execute()
 
-    return RedirectResponse(url=_FRONTEND_ONBOARD, status_code=302)
+    return RedirectResponse(url=redirect_after, status_code=302)

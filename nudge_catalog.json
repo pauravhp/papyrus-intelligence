@@ -1,0 +1,247 @@
+[
+  {
+    "nudge_id": "repeated_deferral",
+    "priority": 1,
+    "category": "warning",
+    "trigger": {
+      "signal": "most_pushed_task_count",
+      "operator": ">=",
+      "threshold": 3
+    },
+    "research": {
+      "primary_citation": "Hershfield et al. (2011) — fMRI shows the brain represents your future self identically to how it represents a stranger. Delegating problems to 'tomorrow you' is neurologically equivalent to delegating to someone else.",
+      "supporting_citation": "Sirois & Pychyl (2016) — procrastination is an emotion regulation failure, not a time management failure. Tasks pushed 3-4× more often have aversive emotional valence: ambiguity, self-doubt, fear of failure.",
+      "behavior_change": "Name the specific obstacle (WOOP method, Oettingen 2014). The question 'what makes this uncomfortable?' is the intervention — not adding motivation."
+    },
+    "coach_message_template": "'{task_name}' has been pushed {push_count} times. Research from UCLA found your brain represents your future self the same way it represents a stranger — which is why handing problems to 'tomorrow you' feels so easy. What usually makes this task uncomfortable when it comes up?",
+    "action_label": "Set a deadline",
+    "learn_more_path": "/learn/repeated-deferral",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "no_deadline",
+    "priority": 2,
+    "category": "warning",
+    "trigger": {
+      "signal": "tasks_without_deadline_count",
+      "operator": ">=",
+      "threshold": 1
+    },
+    "research": {
+      "primary_citation": "Steel (2007) Temporal Motivation Theory meta-analysis (691 correlations) — temporal distance is the single strongest predictor of procrastination, stronger than task difficulty, self-regulation, or self-efficacy. Formula: Motivation = (Expectancy × Value) / (Impulsivity × Delay). No deadline means Delay → ∞, Motivation → 0.",
+      "supporting_citation": "Even a self-imposed internal milestone activates the motivational math. The deadline does not need to be external or binding.",
+      "behavior_change": "Set any concrete milestone — even a personal one with no external accountability. The act of specifying a date changes the motivational arithmetic."
+    },
+    "coach_message_template": "'{task_name}' doesn't have a deadline. Piers Steel's procrastination meta-analysis — the largest ever done — found deadline distance is the single strongest predictor of a task never getting done, more than difficulty or how busy you are. Even an internal milestone this week activates the motivational math.",
+    "action_label": "Set a deadline",
+    "learn_more_path": "/learn/no-deadline",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "over_scheduling",
+    "priority": 3,
+    "category": "warning",
+    "trigger": {
+      "signal": "completion_rate_7d",
+      "operator": "<",
+      "threshold": 0.6
+    },
+    "research": {
+      "primary_citation": "Kahneman & Tversky (1979, 1982) Planning Fallacy — people systematically underestimate task duration and ignore base rates. This bias does not improve with expertise, feedback, or effort. Domain experts show the same magnitude of error as novices.",
+      "supporting_citation": "Buehler, Griffin & Ross (1994) — the structural fix is reference class forecasting: use your own historical completion rate as the planning anchor, not an optimistic estimate for this particular week.",
+      "behavior_change": "Use your own past completion rate as the schedule anchor. If you've been completing 60% of what you plan, schedule 60% of what feels right."
+    },
+    "coach_message_template": "You've completed about {completion_pct}% of what you've scheduled this week. Nobel Prize research found this pattern is universal — even experts who know about the bias show it. The fix isn't willpower; it's using your own history as an anchor.",
+    "action_label": "Adjust today's plan",
+    "learn_more_path": "/learn/over-scheduling",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "habit_skipped",
+    "priority": 4,
+    "category": "warning",
+    "trigger": {
+      "signal": "habit_skipped_rhythm_id",
+      "operator": "!=",
+      "threshold": null
+    },
+    "research": {
+      "primary_citation": "Lally et al. (2010) UCL study (96 participants, 12 weeks) — average habit automaticity takes 66 days, not 21. Range: 18–254 days. First 30 days show the highest fragility — incomplete neural consolidation means the habit is still effortful and context-dependent.",
+      "supporting_citation": "Wood (2014) — fragility during formation correlates most strongly with context-cue consistency (same time, same place), not motivation or intention. Missing the cue does more damage than missing a day of motivation.",
+      "behavior_change": "A 5-minute version of the habit preserves the cue-routine neural link even when full execution is not possible. Minimum viable execution beats skipping entirely."
+    },
+    "coach_message_template": "'{habit_name}' has slipped below your target cadence for two weeks. UCL research found the first 30 days are the most fragile — not because of motivation, but because the neural circuit is still consolidating. Even a 5-minute version this week keeps the cue-routine link alive.",
+    "action_label": "Schedule a session now",
+    "learn_more_path": "/learn/habit-skipped",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "waiting_task_stale",
+    "priority": 5,
+    "category": "warning",
+    "trigger": {
+      "signal": "stale_waiting_task_days",
+      "operator": ">=",
+      "threshold": 7
+    },
+    "research": {
+      "primary_citation": "Masicampo & Baumeister (2011) Florida State — the Zeigarnik effect (open tasks occupy working memory) is relieved by making a plan, not by completing the task. A concrete next step closes the cognitive loop as effectively as completion.",
+      "supporting_citation": "Each unattended open loop consumes a continuous slice of working memory and executive function, degrading performance on unrelated tasks.",
+      "behavior_change": "Log a specific next step ('follow up Thursday at 3pm') — not a vague reminder. The specificity is what closes the cognitive loop."
+    },
+    "coach_message_template": "'{task_name}' has been waiting {days} days without a check-in. Florida State research found open-loop tasks quietly occupy working memory even when you're not looking at them — and the relief comes from making a plan, not completing the task. A logged next step is enough.",
+    "action_label": "Log a next step",
+    "learn_more_path": "/learn/waiting-task-stale",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "backlog_growing",
+    "priority": 6,
+    "category": "warning",
+    "trigger": {
+      "signal": "backlog_growth_rate",
+      "operator": ">",
+      "threshold": 0.2
+    },
+    "research": {
+      "primary_citation": "Baumeister (1998) ego depletion — micro-decisions about backlog items (should I do this? is this still relevant?) deplete executive function faster than actually doing the tasks.",
+      "supporting_citation": "Sweller (1988) cognitive load theory — a large visible backlog imposes constant cognitive tax even when not actively being processed. Once the pile feels unmanageable, avoidance becomes the dominant response, producing nonlinear growth.",
+      "behavior_change": "Three concrete decisions (delete, defer with date, or do this week) restore a sense of agency and interrupt the avoidance loop. Not clearing the backlog — just 3 decisions."
+    },
+    "coach_message_template": "Your overdue backlog has grown by {delta} tasks this week. Cognitive load research shows that once a pile feels unmanageable, avoidance becomes the dominant response — so backlogs accelerate, not shrink, on their own. You don't need to clear it; you need 3 decisions right now.",
+    "action_label": "Triage 3 items",
+    "learn_more_path": "/learn/backlog-growing",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "context_switching",
+    "priority": 7,
+    "category": "warning",
+    "trigger": {
+      "signal": "avg_block_duration_today_minutes",
+      "operator": "<",
+      "threshold": 25,
+      "secondary_signal": "task_count_today",
+      "secondary_operator": ">",
+      "secondary_threshold": 6
+    },
+    "research": {
+      "primary_citation": "Mark, Gonzalez & Harris (2005) UC Irvine — average re-engagement time after any context switch is 23 minutes 15 seconds. This applies to voluntary switches, not just interruptions.",
+      "supporting_citation": "Leroy (2009) attention residue theory — the key variable is not switch frequency but whether you finish before switching. Completing a task to a natural stopping point nearly eliminates attention residue. An unfinished task causes cognitive intrusion into the next task for 10–20 minutes.",
+      "behavior_change": "Consolidate short tasks into batches (admin hour, email block). The goal is not fewer switches — it's finishing each item before switching."
+    },
+    "coach_message_template": "Today looks fragmented — lots of short task windows. UC Irvine research found it takes over 23 minutes to fully re-engage after switching. Sophie Leroy's research adds a counterintuitive finding: the key isn't fewer switches, it's finishing before you switch — that's what eliminates the attention hangover that bleeds into the next task.",
+    "action_label": "Consolidate today's blocks",
+    "learn_more_path": "/learn/context-switching",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "deep_work_timing",
+    "priority": 8,
+    "category": "info",
+    "trigger": {
+      "signal": "deep_work_tasks_in_trough",
+      "operator": ">=",
+      "threshold": 2
+    },
+    "research": {
+      "primary_citation": "Wieth & Zacks (2011) — COUNTERINTUITIVE: insight and creative problems are solved better at non-peak alertness. The mechanism: inhibitory control that sharpens analytical focus simultaneously suppresses creative association. At low alertness, inhibition weakens and remote associations become accessible.",
+      "supporting_citation": "Oppezzo & Schwartz (2014) — walking increased divergent (creative) thinking output by 81% vs sitting. The key distinction: generative work (writing, ideation, planning) benefits from non-peak. Analytical/execution work (coding to spec, editing) benefits from peak.",
+      "behavior_change": "Classify deep work as generative (ideas, writing, design) or analytical (execution, debugging, review). Schedule generative at non-peak, analytical at peak."
+    },
+    "coach_message_template": "Some of your deep work is scheduled during your usual trough window. A counterintuitive 2011 finding: if this is generative work (writing, planning, ideation), your non-peak time might actually be better — the mental inhibition that sharpens analytical focus suppresses creative association. What kind of thinking does this task actually need?",
+    "action_label": "Move to a better window",
+    "learn_more_path": "/learn/deep-work-timing",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "no_breaks_scheduled",
+    "priority": 9,
+    "category": "warning",
+    "trigger": {
+      "signal": "hours_scheduled_today",
+      "operator": ">",
+      "threshold": 3.5
+    },
+    "research": {
+      "primary_citation": "Lavie (1986) ultradian rhythm research — biological 90-minute performance cycles. Each cycle ends with a low-alertness phase during which cortisol and adenosine accumulate. Ignoring this phase carries the physiological cost into the next cycle, compounding degradation.",
+      "supporting_citation": "Kaplan & Kaplan (1989) attention restoration theory — directed attention is only restored by genuine disengagement from goal-directed activity. Phone-based breaks use the same attentional system being rested; they do not restore capacity. Hunter & Wu (2016): morning breaks provide highest restorative value per minute.",
+      "behavior_change": "Schedule explicit recovery blocks (walk, eyes-closed rest, non-screen activity). Phone scrolling is not a break for the attentional system — it uses the same resource."
+    },
+    "coach_message_template": "You have {hours} hours of focus work scheduled without a break. Peretz Lavie's ultradian research found that recovery phases happen every ~90 minutes whether you plan them or not — ignoring them just carries the cost into the next cycle. Also worth knowing: phone-based breaks use the same attention system you're trying to rest.",
+    "action_label": "Add a recovery block",
+    "learn_more_path": "/learn/no-breaks-scheduled",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 3
+  },
+  {
+    "nudge_id": "good_estimation",
+    "priority": 10,
+    "category": "positive",
+    "trigger": {
+      "signal": "estimation_accuracy_7d",
+      "operator": ">=",
+      "threshold": 0.85
+    },
+    "research": {
+      "primary_citation": "Tetlock (2015) Superforecasting — good calibration is a learnable skill built from one behavior: systematically comparing predictions to outcomes and updating priors. It is not innate talent.",
+      "supporting_citation": "Good time estimation compounds: accurate estimators schedule more realistically, which increases completion rates, which improves estimation further. The feedback loop is self-reinforcing.",
+      "behavior_change": "Continue logging estimated vs actual duration after tasks. The tracking behavior is the mechanism — not a side effect."
+    },
+    "coach_message_template": "Your time estimates have been {accuracy_pct}% accurate this week. Research on superforecasters shows this is built from one behavior: comparing predictions to outcomes and letting that update your priors. This is a genuine, rare skill — and it compounds over time.",
+    "action_label": null,
+    "learn_more_path": "/learn/good-estimation",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 10
+  },
+  {
+    "nudge_id": "completion_streak",
+    "priority": 11,
+    "category": "positive",
+    "trigger": {
+      "signal": "daily_completion_streak",
+      "operator": ">=",
+      "threshold": 3
+    },
+    "research": {
+      "primary_citation": "Amabile & Kramer (2011) Progress Principle — analysis of 12,000 daily work diary entries from 238 professionals across 7 companies. Consistent progress on meaningful work was the single strongest predictor of intrinsic motivation, positive mood, and creative output — stronger than praise, recognition, clear goals, or autonomy.",
+      "supporting_citation": "Fishbach & Dhar (2005) — identity framing ('I'm someone who follows through') sustains behavior after streaks break. Debt framing ('I need to keep the streak alive') collapses sharply after a single miss. Coach messages should use identity framing.",
+      "behavior_change": "No action needed. The behavior sustaining this streak is already working."
+    },
+    "coach_message_template": "You've completed what you set out to do for {streak} days running. Harvard research analyzing 12,000 daily work diaries found consistent progress on meaningful work is the most powerful intrinsic motivator known — more than praise or clear goals. What you're building isn't a streak number; it's evidence about who you are.",
+    "action_label": null,
+    "learn_more_path": "/learn/completion-streak",
+    "framing": "gain",
+    "autonomy_support": true,
+    "min_recurrence_days": 7,
+    "max_shows_before_suppress": 10
+  }
+]

@@ -101,6 +101,7 @@ export default function RhythmsPage() {
             session_min: data.session_min,
             session_max: data.session_max,
             end_date: data.end_date || null,
+            description: data.description,
           },
           token
         );
@@ -117,6 +118,7 @@ export default function RhythmsPage() {
             session_max: data.session_max,
             end_date: data.end_date || null,
             sort_order: rhythms.length,
+            description: data.description,
           },
           token
         );

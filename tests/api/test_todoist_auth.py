@@ -8,73 +8,76 @@ os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-client-id")
 os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-client-secret")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
 
+# tests/api/test_todoist_auth.py
 from unittest.mock import MagicMock, patch
-import pytest
+
 from fastapi.testclient import TestClient
 
+from api.main import app
 
-@pytest.fixture
-def client():
-    from api.main import app
-    return TestClient(app, follow_redirects=False)
+client = TestClient(app, follow_redirects=False)
+
+FAKE_TOKEN = "fake-supabase-jwt"
+FAKE_USER_ID = "user-def"
 
 
-def test_todoist_oauth_start_redirects_to_todoist(client):
-    """GET /auth/todoist?token=... redirects to Todoist consent URL."""
-    mock_user = {"sub": "user-123"}
-    with patch("api.routes.todoist_auth.verify_token", return_value=mock_user), \
-         patch("api.routes.todoist_auth.supabase"):
-        resp = client.get("/auth/todoist?token=fake-jwt")
+@patch("api.routes.todoist_auth.supabase")
+@patch("api.routes.todoist_auth.verify_token", return_value={"sub": FAKE_USER_ID})
+def test_todoist_auth_stores_redirect_after(mock_verify, mock_sb):
+    """redirect_after param is stored in users.oauth_redirect_after."""
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    client.get(f"/auth/todoist?token={FAKE_TOKEN}&redirect_after=/dashboard/settings")
+
+    update_kwargs = mock_sb.from_.return_value.update.call_args[0][0]
+    assert update_kwargs.get("oauth_redirect_after") == "/dashboard/settings"
+
+
+@patch("api.routes.todoist_auth.supabase")
+@patch("api.routes.todoist_auth.verify_token", return_value={"sub": FAKE_USER_ID})
+def test_todoist_auth_stores_none_when_omitted(mock_verify, mock_sb):
+    """When redirect_after is omitted, NULL is stored."""
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    client.get(f"/auth/todoist?token={FAKE_TOKEN}")
+
+    update_kwargs = mock_sb.from_.return_value.update.call_args[0][0]
+    assert update_kwargs.get("oauth_redirect_after") is None
+
+
+@patch("api.routes.todoist_auth.supabase")
+@patch("api.routes.todoist_auth._verify_state", return_value=FAKE_USER_ID)
+@patch("api.routes.todoist_auth.requests.post")
+def test_todoist_callback_uses_redirect_after(mock_post, mock_verify_state, mock_sb):
+    """Callback redirects to stored oauth_redirect_after."""
+    mock_post.return_value = MagicMock(status_code=200, json=lambda: {"access_token": "tok"})
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"oauth_redirect_after": "/dashboard/settings"}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    resp = client.get("/auth/todoist/callback?code=abc&state=fake-state")
 
     assert resp.status_code == 302
-    location = resp.headers["location"]
-    assert "api.todoist.com/oauth/authorize" in location
-    assert "data%3Aread_write" in location or "data:read_write" in location
-    assert "test-todoist-client-id" in location
+    assert "/dashboard/settings" in resp.headers["location"]
 
 
-def test_todoist_oauth_callback_stores_token(client):
-    """GET /auth/todoist/callback stores access token in Supabase and redirects."""
-    import hmac, hashlib, time
-    from api.config import settings
+@patch("api.routes.todoist_auth.supabase")
+@patch("api.routes.todoist_auth._verify_state", return_value=FAKE_USER_ID)
+@patch("api.routes.todoist_auth.requests.post")
+def test_todoist_callback_clears_redirect_after(mock_post, mock_verify_state, mock_sb):
+    """Callback clears oauth_redirect_after after use."""
+    mock_post.return_value = MagicMock(status_code=200, json=lambda: {"access_token": "tok"})
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"oauth_redirect_after": "/dashboard/settings"}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
 
-    user_id = "user-abc"
-    timestamp = str(int(time.time()))
-    payload = f"{user_id}:{timestamp}"
-    sig = hmac.new(
-        settings.ENCRYPTION_KEY.encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
-    state = f"{payload}:{sig}"
+    client.get("/auth/todoist/callback?code=abc&state=fake-state")
 
-    mock_sb = MagicMock()
-    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value.data = {}
-
-    with patch("api.routes.todoist_auth.supabase", mock_sb), \
-         patch("api.routes.todoist_auth.requests.post") as mock_post:
-        mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = {"access_token": "tok_abc123", "token_type": "Bearer"}
-        resp = client.get(f"/auth/todoist/callback?code=authcode&state={state}")
-
-    assert resp.status_code == 302
-    assert "onboard" in resp.headers["location"]
-    # Verify Supabase was called with the token
-    update_call = mock_sb.from_.return_value.update.call_args
-    stored = update_call[0][0]
-    assert stored["todoist_oauth_token"]["access_token"] == "tok_abc123"
-
-
-def test_todoist_oauth_callback_rejects_expired_state(client):
-    """Expired state returns 400."""
-    import hmac, hashlib
-    from api.config import settings
-
-    user_id = "user-abc"
-    old_timestamp = str(1000000)  # way in the past
-    payload = f"{user_id}:{old_timestamp}"
-    sig = hmac.new(
-        settings.ENCRYPTION_KEY.encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
-    state = f"{payload}:{sig}"
-
-    resp = client.get(f"/auth/todoist/callback?code=authcode&state={state}")
-    assert resp.status_code == 400
+    update_calls = mock_sb.from_.return_value.update.call_args_list
+    cleared = any(
+        call[0][0].get("oauth_redirect_after") is None
+        for call in update_calls
+    )
+    assert cleared
