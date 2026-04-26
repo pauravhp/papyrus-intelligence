@@ -361,3 +361,139 @@ def test_onboard_promote_fires_analytics(client, monkeypatch):
     props = args[0][2]
     assert "timezone" in props
     assert "has_google_calendar" in props
+
+
+# ── timezone wiring (item #8) ─────────────────────────────────────────────────
+
+
+def test_scan_injects_request_timezone_into_proposed_config(client, monkeypatch):
+    """proposed_config.user.timezone must come back populated from request body
+    even when the LLM omits it. Without this, /promote saves a config with
+    user.timezone=None and the planner silently falls back to Vancouver."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+
+    # LLM response has NO user/timezone key — typical case
+    mock_llm = {
+        "proposed_config": {"sleep": {"default_wake_time": "07:00"}},
+        "detected_categories": [],
+        "questions_for_stage_2": [],
+    }
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._anthropic_json_call", return_value=mock_llm):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "America/New_York", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    proposed = resp.json()["proposed_config"]
+    assert proposed.get("user", {}).get("timezone") == "America/New_York"
+
+
+def test_scan_overrides_llm_timezone_with_request_timezone(client, monkeypatch):
+    """If the LLM hallucinates a different timezone, the browser-detected
+    request body timezone wins — it's the authoritative source."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+
+    mock_llm = {
+        "proposed_config": {
+            "user": {"timezone": "Europe/Berlin"},  # LLM-emitted, not trusted
+            "sleep": {},
+        },
+        "detected_categories": [],
+        "questions_for_stage_2": [],
+    }
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.get_events", return_value=[]), \
+         patch("api.routes.onboard.build_pattern_summary", return_value={}), \
+         patch("api.routes.onboard.build_onboard_prompt", return_value=[]), \
+         patch("api.routes.onboard._anthropic_json_call", return_value=mock_llm):
+        resp = client.post(
+            "/api/onboard/scan",
+            json={"timezone": "Asia/Tokyo", "calendar_ids": []},
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    proposed = resp.json()["proposed_config"]
+    assert proposed["user"]["timezone"] == "Asia/Tokyo"
+
+
+# ── /api/onboard/detect-todoist-sync (item #9) ────────────────────────────────
+
+
+def test_detect_todoist_sync_returns_positive(client, monkeypatch):
+    """GET /api/onboard/detect-todoist-sync returns the detector result."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.detect_todoist_gcal_sync", return_value={"detected": True, "calendar_id": "abc@cal.google.com"}):
+        resp = client.get(
+            "/api/onboard/detect-todoist-sync",
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detected"] is True
+    assert body["calendar_id"] == "abc@cal.google.com"
+
+
+def test_detect_todoist_sync_returns_negative(client, monkeypatch):
+    """When detector finds no match, route returns detected=False."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.detect_todoist_gcal_sync", return_value={"detected": False, "calendar_id": None}):
+        resp = client.get(
+            "/api/onboard/detect-todoist-sync",
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detected"] is False
+    assert body["calendar_id"] is None
+
+
+def test_detect_todoist_sync_400_when_no_gcal_creds(client, monkeypatch):
+    """Without Google credentials, the route returns 400."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": None}
+    )
+
+    with patch("api.routes.onboard.supabase", mock_sb):
+        resp = client.get(
+            "/api/onboard/detect-todoist-sync",
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 400

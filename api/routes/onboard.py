@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from api.auth import get_current_user, require_beta_access
 from api.services.analytics import capture
+from api.services.sync_detector import detect_todoist_gcal_sync
 from api.config import settings
 from api.db import supabase
 from src.calendar_client import WRITE_SCOPES, build_gcal_service_from_credentials, get_events
@@ -204,11 +205,67 @@ def onboard_scan(
     proposed = raw.get("proposed_config") or {}
     proposed["calendar_rules"] = calendar_rules
 
+    # Browser-detected timezone (body.timezone) is authoritative — the LLM is
+    # not asked for it and must not be trusted with it. Without this overwrite
+    # the saved config has user.timezone=None and the planner silently falls
+    # back to America/Vancouver for everyone.
+    user_block = proposed.get("user") or {}
+    user_block["timezone"] = body.timezone
+    proposed["user"] = user_block
+
     return ScanResponse(
         proposed_config=proposed,
         questions=raw.get("questions_for_stage_2") or [],
         detected_categories=detected,
     )
+
+
+# ── detect-todoist-sync ───────────────────────────────────────────────────────
+
+
+class DetectTodoistSyncResponse(BaseModel):
+    detected: bool
+    calendar_id: str | None
+
+
+@router.get("/detect-todoist-sync", response_model=DetectTodoistSyncResponse)
+def detect_todoist_sync(user: dict = Depends(get_current_user)) -> DetectTodoistSyncResponse:
+    """Check whether Todoist's GCal integration is enabled. See PRE-RELEASE.md #9.
+
+    Called by SetupStage after Todoist connects, and by Settings on page load.
+    The user has to flip the toggle in Todoist's web UI themselves —
+    Todoist doesn't expose an API to do it.
+    """
+    user_id: str = user["sub"]
+
+    row_result = (
+        supabase.from_("users")
+        .select("google_credentials")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    if not row_result.data:
+        raise HTTPException(status_code=400, detail="User not found.")
+
+    creds_data = row_result.data.get("google_credentials")
+    if not creds_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Calendar not connected.",
+        )
+
+    try:
+        gcal_service, refreshed = build_gcal_service_from_credentials(
+            creds_data, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+        )
+        if refreshed:
+            supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=f"GCal token invalid: {exc}")
+
+    result = detect_todoist_gcal_sync(gcal_service)
+    return DetectTodoistSyncResponse(**result)
 
 
 # ── promote ───────────────────────────────────────────────────────────────────

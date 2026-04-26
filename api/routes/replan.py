@@ -16,6 +16,7 @@ from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
+from api.services.planner import _is_within_idempotency_window
 from src.calendar_client import build_gcal_service_from_credentials, create_event, delete_event, get_events
 from src.todoist_client import TodoistClient
 
@@ -81,7 +82,7 @@ def _load_today_schedule(user_id: str) -> dict | None:
     """Load most recent confirmed schedule_log row for today."""
     result = (
         supabase.from_("schedule_log")
-        .select("id, proposed_json, gcal_event_ids, gcal_write_calendar_id, schedule_date, confirmed_at")
+        .select("id, proposed_json, gcal_event_ids, gcal_write_calendar_id, schedule_date, confirmed_at, replan_trigger")
         .eq("user_id", user_id)
         .eq("confirmed", 1)
         .order("id", desc=True)
@@ -177,7 +178,7 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
                     due_datetime=None,
                     deadline=None,
                     labels=[],
-                    project_id=None,
+                    project_id="",
                     is_inbox=False,
                     is_rhythm=False,
                     session_max_minutes=None,
@@ -236,6 +237,26 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
     tz_str = config.get("user", {}).get("timezone", "UTC")
     write_cal_id = config.get("write_calendar_id", "primary")
     tz = ZoneInfo(tz_str)
+
+    # Idempotency guard: if today's most-recent confirmed row is itself a
+    # replan-confirm within the window, this is a UI double-click — no-op
+    # and replay the previous result. A non-replan recent row (i.e. a fresh
+    # plan-confirm) is allowed to flow through, since the user might
+    # legitimately replan immediately after confirming.
+    today_row = _load_today_schedule(user_id)
+    if today_row and today_row.get("replan_trigger") == "mid_day_replan" \
+            and _is_within_idempotency_window(today_row.get("confirmed_at")):
+        try:
+            existing_ids = json.loads(today_row.get("gcal_event_ids") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            existing_ids = []
+        return {
+            "confirmed": True,
+            "gcal_events_created": len(existing_ids),
+            "todoist_updated": 0,
+            "schedule_log_id": today_row.get("id"),
+        }
+
     todoist_client = TodoistClient(user_ctx["todoist_api_key"])
 
     # Push "tomorrow" tasks
@@ -246,8 +267,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
         except Exception as exc:
             print(f"[replan/confirm] push_task failed for {tid}: {exc}")
 
-    # Load today's schedule_log to get stored gcal_event_ids
-    today_row = _load_today_schedule(user_id)
+    # today_row already loaded above for the idempotency guard — reuse it
     gcal_event_ids: list[str] = []
     write_cal_from_log = "primary"
     if today_row:
@@ -308,7 +328,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
                 print(f"[replan/confirm] Todoist update failed for {item.get('task_id')}: {exc}")
 
     # Insert new confirmed schedule_log row
-    supabase.from_("schedule_log").insert({
+    insert_result = supabase.from_("schedule_log").insert({
         "user_id": user_id,
         "run_at": _dt.now().isoformat(),
         "schedule_date": date.today().isoformat(),
@@ -319,6 +339,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
         "gcal_write_calendar_id": write_cal_id,
         "replan_trigger": "mid_day_replan",
     }).execute()
+    new_log_id = (insert_result.data or [{}])[0].get("id")
 
     tasks_kept = len(body.schedule.get("scheduled", []))
     tasks_pushed = len(body.tomorrow_task_ids)
@@ -336,6 +357,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
         "confirmed": True,
         "gcal_events_created": len(new_gcal_ids),
         "todoist_updated": todoist_count,
+        "schedule_log_id": new_log_id,
     }
 
 

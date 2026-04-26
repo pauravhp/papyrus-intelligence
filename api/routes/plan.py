@@ -6,9 +6,7 @@ Three routes, no agent loop:
   POST /api/refine       — refine an existing proposal
   POST /api/plan/confirm — write the proposed schedule to GCal + Todoist
 
-Each route is one LLM call (or zero, for confirm). Replaces the older
-ReAct-via-/api/chat path that incurred 3-5 LLM calls per interaction
-just to route intent the UI already declared.
+Each route is one LLM call (or zero, for confirm).
 """
 
 from __future__ import annotations
@@ -168,5 +166,8 @@ def confirm(body: ConfirmRequest, user: dict = Depends(require_beta_access)) -> 
     """Write the proposed schedule to GCal + Todoist + schedule_log."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
-    result = planner.confirm(user_ctx, body.schedule, target_date)
+    try:
+        result = planner.confirm(user_ctx, body.schedule, target_date)
+    except planner.AlreadyConfirmedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return ConfirmResponse(**result)
