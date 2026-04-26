@@ -56,13 +56,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL(next, request.url));
   }
 
-  // Rejected → auto-add to Resend (best-effort, ignore failure) + signOut + redirect
+  // Rejected → auto-add to Resend (best-effort, ignore failure) + signOut + redirect.
+  // Pull first name from Google OAuth metadata since the user never saw a form.
   if (email) {
+    const meta = sessionData.user?.user_metadata as
+      | { given_name?: string; full_name?: string; name?: string }
+      | undefined;
+    const firstName =
+      meta?.given_name ??
+      meta?.full_name?.trim().split(/\s+/)[0] ??
+      meta?.name?.trim().split(/\s+/)[0];
+
     try {
       await fetch(new URL("/api/waitlist", request.url), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, source: "rejected-oauth" }),
+        body: JSON.stringify({ email, firstName }),
       });
     } catch {
       // ignore — waitlist add is best-effort

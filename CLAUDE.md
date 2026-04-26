@@ -148,8 +148,7 @@ has its own systemd unit, venv, and `.env` file.
 `NEXT_PUBLIC_API_URL` (set to `https://papyrus.5-78-200-61.nip.io`).
 
 **Server-only (no NEXT_PUBLIC_ prefix):**
-`RESEND_API_KEY`, `RESEND_AUDIENCE_ID_WAITLIST`, `RESEND_AUDIENCE_ID_REJECTED`,
-`ADMIN_USER_ID` (your Supabase user UUID, for /admin gating),
+`RESEND_API_KEY`, `ADMIN_USER_ID` (your Supabase user UUID, for /admin gating),
 `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID`.
 
 ---
