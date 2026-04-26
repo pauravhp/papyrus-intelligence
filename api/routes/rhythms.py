@@ -7,7 +7,7 @@ All routes require Bearer JWT. user_id comes from the verified token.
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.db import supabase
 from api.services.analytics import capture
 from api.services.rhythm_service import (
@@ -41,7 +41,7 @@ class UpdateRhythmRequest(BaseModel):
 
 
 @router.get("")
-def list_rhythms(user: dict = Depends(get_current_user)):
+def list_rhythms(user: dict = Depends(require_beta_access)):
     return get_active_rhythms(user["sub"], supabase)
 
 
@@ -49,7 +49,7 @@ def list_rhythms(user: dict = Depends(get_current_user)):
 def create_rhythm_route(
     body: CreateRhythmRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ):
     desc = body.description.strip() if body.description else None
     result = create_rhythm(
@@ -78,7 +78,7 @@ def create_rhythm_route(
 def update_rhythm_route(
     rhythm_id: int,
     body: UpdateRhythmRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ):
     # Use model_fields_set to detect whether description was present in the request
     # body at all. If absent, pass the sentinel so the service leaves it unchanged.
@@ -99,5 +99,5 @@ def update_rhythm_route(
 
 
 @router.delete("/{rhythm_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_rhythm_route(rhythm_id: int, user: dict = Depends(get_current_user)):
+def delete_rhythm_route(rhythm_id: int, user: dict = Depends(require_beta_access)):
     delete_rhythm(user["sub"], supabase, rhythm_id)

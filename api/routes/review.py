@@ -8,7 +8,7 @@ import anthropic
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
@@ -58,7 +58,7 @@ class ReviewSubmitRequest(BaseModel):
 
 
 @router.get("/review/preflight")
-def review_preflight(user: dict = Depends(get_current_user)) -> dict:
+def review_preflight(user: dict = Depends(require_beta_access)) -> dict:
     user_id = user["sub"]
     today = date.today().isoformat()
 
@@ -163,7 +163,7 @@ def _generate_summary_line(tasks: list[ReviewSubmitTask], rhythms: list[ReviewSu
 
 
 @router.post("/review/submit")
-def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)) -> dict:
+def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_beta_access)) -> dict:
     user_id = user["sub"]
     today = date.today().isoformat()
 

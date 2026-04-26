@@ -24,7 +24,7 @@ The JWT is expected in the Authorization header as:
 import time
 
 import requests
-from fastapi import Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
@@ -86,3 +86,41 @@ def get_current_user(
     Thin wrapper around verify_token for use as a FastAPI Depends.
     """
     return verify_token(credentials.credentials)
+
+
+def require_beta_access(user: dict = Depends(get_current_user)) -> dict:
+    """
+    Verify the JWT AND check the user's email against BETA_ALLOWLIST.
+    If BETA_ALLOWLIST is empty, this is a no-op (open access — for dev/test).
+    """
+    raw = settings.BETA_ALLOWLIST
+    if not raw.strip():
+        return user
+    allowed = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    email = (user.get("email") or "").lower()
+    if email not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not in beta allowlist",
+        )
+    return user
+
+
+access_router = APIRouter(prefix="/api/me")
+
+
+@access_router.get("/access")
+def me_access(user: dict = Depends(get_current_user)) -> dict:
+    """
+    Returns {"allowed": true} or {"allowed": false, "email": "..."}.
+    NOTE: uses raw get_current_user (not require_beta_access) — otherwise rejected
+    users could not be told they are rejected.
+    """
+    raw = settings.BETA_ALLOWLIST
+    if not raw.strip():
+        return {"allowed": True}
+    allowed = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    email = (user.get("email") or "").lower()
+    if email in allowed:
+        return {"allowed": True}
+    return {"allowed": False, "email": user.get("email", "")}

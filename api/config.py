@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str        # now required (was Optional)
     POSTHOG_API_KEY: str = ""   # empty string disables PostHog in local dev without the key
     FRONTEND_URL: str = "http://localhost:3000"
+    BETA_ALLOWLIST: str = ""    # comma-separated emails; empty = open access (dev/test)
+    BACKEND_CORS_ORIGINS: str = "http://localhost:3000"  # comma-separated
 
     # Feature flags — keep in sync with NEXT_PUBLIC_* counterparts on the frontend.
     COACHING_NUDGES_ENABLED: bool = False

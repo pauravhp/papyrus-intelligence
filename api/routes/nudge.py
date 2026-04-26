@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 
@@ -26,7 +26,7 @@ class DismissPayload(BaseModel):
 @router.post("/api/nudge/dismiss")
 def dismiss_nudge(
     payload: DismissPayload,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ) -> dict:
     if not settings.COACHING_NUDGES_ENABLED:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)

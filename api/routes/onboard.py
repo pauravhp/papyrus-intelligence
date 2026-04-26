@@ -14,7 +14,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.services.analytics import capture
 from api.services.sync_detector import detect_todoist_gcal_sync
 from api.config import settings
@@ -114,7 +114,7 @@ def _default_calendar_rules() -> dict:
 @router.post("/scan", response_model=ScanResponse)
 def onboard_scan(
     body: ScanRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ) -> ScanResponse:
     """
     Scan the last 14 days of Google Calendar to propose a schedule config.
@@ -283,7 +283,7 @@ class PromoteResponse(BaseModel):
 def onboard_promote(
     body: PromoteRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ) -> PromoteResponse:
     """
     Save the confirmed config to users.config.
