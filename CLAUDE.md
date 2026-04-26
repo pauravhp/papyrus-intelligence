@@ -136,13 +136,21 @@ has its own systemd unit, venv, and `.env` file.
 
 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `TODOIST_CLIENT_ID`, `TODOIST_CLIENT_SECRET`,
-`ANTHROPIC_API_KEY`, `FRONTEND_URL` (set to Vercel URL).
+`ANTHROPIC_API_KEY`, `FRONTEND_URL` (set to Vercel URL),
+`POSTHOG_API_KEY`, `BETA_ALLOWLIST` (comma-separated emails),
+`BACKEND_CORS_ORIGINS` (comma-separated origins).
 
 ### Frontend Env Vars (Vercel)
 
+**Public (NEXT_PUBLIC_, baked into bundle):**
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
 `NEXT_PUBLIC_POSTHOG_HOST`, `NEXT_PUBLIC_POSTHOG_KEY`,
 `NEXT_PUBLIC_API_URL` (set to `https://papyrus.5-78-200-61.nip.io`).
+
+**Server-only (no NEXT_PUBLIC_ prefix):**
+`RESEND_API_KEY`, `RESEND_AUDIENCE_ID_WAITLIST`, `RESEND_AUDIENCE_ID_REJECTED`,
+`ADMIN_USER_ID` (your Supabase user UUID, for /admin gating),
+`POSTHOG_PERSONAL_API_KEY`, `POSTHOG_PROJECT_ID`.
 
 ---
 
