@@ -17,8 +17,6 @@ from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
 from src.calendar_client import build_gcal_service_from_credentials, create_event, delete_event, get_events
-from src.scheduler import compute_free_windows
-from api.services.schedule_service import schedule_day
 from src.todoist_client import TodoistClient
 
 router = APIRouter(prefix="/api")
@@ -105,6 +103,7 @@ class ReplanRequest(BaseModel):
     task_states: dict[str, str]        # task_id -> "done" | "tomorrow" | "keep"
     context_note: str | None = None
     refinement_message: str | None = None
+    previous_proposal: dict | None = None  # carries blocks + cutoff_override across in-modal refinements
 
 
 class ReplanConfirmRequest(BaseModel):
@@ -186,8 +185,8 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
                 )
             )
 
-    # Also fetch backlog Todoist tasks (not already in today's schedule) as additional candidates.
-    # This allows replanning even when all today's tasks are marked done/tomorrow.
+    # Also fetch backlog Todoist tasks (not already in today's schedule) so the
+    # user can still replan when all of today's afternoon tasks are done/pushed.
     backlog_tasks: list[TodoistTask] = []
     if user_ctx["todoist_api_key"]:
         try:
@@ -200,55 +199,28 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
 
     candidate_tasks = keep_tasks + backlog_tasks
 
-    # Compute free windows from now → end of day
-    today_str = date.today().isoformat()
-    cal_ids = (
-        config.get("source_calendar_ids")
-        or config.get("calendar_ids")
-        or ["primary"]
-    )
-    events = []
-    if user_ctx["gcal_service"]:
-        try:
-            events = get_events(
-                date.today(), tz_str, calendar_ids=cal_ids,
-                service=user_ctx["gcal_service"],
-            )
-        except Exception as exc:
-            print(f"[replan] get_events failed: {exc}")
-
-    all_windows = compute_free_windows(events, date.today(), config)
-    # Filter to windows that end after now (both tz-aware datetimes in user's local tz)
-    afternoon_windows = [w for w in all_windows if w.end > now_aware]
-
-    # Inject mid-day hard rule so LLM knows current time
-    config_with_time = dict(config)
-    rules = dict(config_with_time.get("rules", {}))
-    hard_rules = list(rules.get("hard", []))
-    current_time_rule = f"It is currently {now_aware.strftime('%H:%M')}. Schedule only from now onwards."
-    hard_rules.insert(0, current_time_rule)
-    rules["hard"] = hard_rules
-    config_with_time["rules"] = rules
-    print(f"[replan] now_aware={now_aware.isoformat()} | injected: {current_time_rule}")
-
-    # Build context note: refinement is primary, original note is background
-    context_note = _sanitize_note(body.context_note)
+    # Build prose for the extractor + scheduler. Mid-day note ("It is currently
+    # HH:MM") is included so the scheduler LLM can reason about late-night
+    # cutoffs. compute_free_windows already auto-detects mid-day and trims
+    # the windows to start from now, so we don't need a hard-rule injection
+    # like the legacy code did.
+    note = _sanitize_note(body.context_note)
     refinement = _sanitize_note(body.refinement_message)
-    if refinement and context_note:
-        combined_note = f"{refinement}\n\n[Background context: {context_note}]"
-    elif refinement:
-        combined_note = refinement
-    else:
-        combined_note = context_note
+    parts = [f"It is currently {now_aware.strftime('%H:%M')} — schedule only from now."]
+    if refinement:
+        parts.append(f"Refinement: {refinement}")
+    if note:
+        parts.append(f"Context: {note}")
+    prose = "\n\n".join(parts)
 
-    proposed = schedule_day(
-        tasks=candidate_tasks,
-        free_windows=afternoon_windows,
-        config=config_with_time,
-        context_note=combined_note,
-        anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        target_date=today_str,
-        events=events,
+    from api.services import planner
+
+    proposed = planner.replan(
+        user_ctx=user_ctx,
+        target_date=date.today(),
+        candidate_tasks=candidate_tasks,
+        prose=prose,
+        previous_proposal=body.previous_proposal,
     )
 
     return proposed

@@ -93,23 +93,26 @@ export default function TaskCard({ item, anchorRect, onClose }: TaskCardProps) {
       <p style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "var(--font-literata)", marginBottom: 14 }}>
         {fmtDuration(item.duration_minutes)}
       </p>
-      <a
-        href={`https://app.todoist.com/app/task/${item.task_id}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label={`Open ${item.task_name} in Todoist`}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 4,
-          fontSize: 12,
-          color: "var(--accent)",
-          fontFamily: "var(--font-literata)",
-          textDecoration: "none",
-        }}
-      >
-        Open in Todoist ↗
-      </a>
+      {/* Rhythm tasks are synthetic (proj_<rhythm_id>) — no Todoist task to link to. */}
+      {!item.task_id.startsWith("proj_") && (
+        <a
+          href={`https://app.todoist.com/app/task/${item.task_id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${item.task_name} in Todoist`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            fontSize: 12,
+            color: "var(--accent)",
+            fontFamily: "var(--font-literata)",
+            textDecoration: "none",
+          }}
+        >
+          Open in Todoist ↗
+        </a>
+      )}
     </div>
   );
 }

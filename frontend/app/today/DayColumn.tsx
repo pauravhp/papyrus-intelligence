@@ -33,11 +33,14 @@ function formatHour(h: number): string {
   return `${actual - 12} pm`;
 }
 
-function hasCrossMidnightTask(scheduled: ScheduledItem[]): boolean {
-  return scheduled.some(
-    (item) =>
-      new Date(item.end_time).getDate() !== new Date(item.start_time).getDate()
-  );
+/**
+ * Hours past the column's local midnight. A task starting/ending on the next
+ * day returns a value > 24 (e.g. 02:30 next day → 26.5).
+ */
+function hoursPastColumnMidnight(iso: string, columnDateIso: string): number {
+  const t = new Date(iso);
+  const colMid = new Date(columnDateIso + "T00:00:00");
+  return (t.getTime() - colMid.getTime()) / 3_600_000;
 }
 
 export default function DayColumn({ label, dayData, isToday, planningStatus }: DayColumnProps) {
@@ -49,11 +52,23 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
     (dayData?.gcal_events?.length ?? 0) > 0 ||
     (dayData?.all_day_events?.length ?? 0) > 0;
 
-  const crossMidnight = hasCrossMidnightTask(scheduled);
-  // When it's today, extend the grid to include the current hour so the now indicator is always visible
+  // columnDate must be YYYY-MM-DD (LOCAL date). Use today's local date as fallback
+  // — toISOString() returns UTC date which can be off-by-one in evening hours.
+  const columnDate = dayData?.schedule_date ?? (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+
+  // Extend the grid to cover whatever task ends latest, including post-midnight
+  // tasks. Old code capped at hour 25 even when a task ran to 02:30 next day.
+  // Defensive: drop NaN values that would otherwise propagate into gridHeight.
+  const taskEndHours = scheduled
+    .map((item) => hoursPastColumnMidnight(item.end_time, columnDate))
+    .filter((h) => Number.isFinite(h));
+  const latestTaskEndHour = taskEndHours.length > 0 ? Math.max(...taskEndHours) : 0;
   const nowHour = isToday ? new Date().getHours() : 0;
-  const dynamicEnd = isToday ? Math.max(GRID_DEFAULT_END, nowHour + 1) : GRID_DEFAULT_END;
-  const gridEnd = crossMidnight ? 25 : dynamicEnd;
+  const baseEnd = isToday ? Math.max(GRID_DEFAULT_END, nowHour + 1) : GRID_DEFAULT_END;
+  const gridEnd = Math.max(baseEnd, Math.ceil(latestTaskEndHour));
   const gridHeight = (gridEnd - GRID_START) * PX_PER_HOUR;
 
   // Hour markers: one line + label per hour from GRID_START to gridEnd (inclusive start, exclusive end)
@@ -229,8 +244,8 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
               />
             ))}
 
-            {/* Midnight divider (cross-midnight tasks only) */}
-            {crossMidnight && (
+            {/* Midnight divider (only when grid extends past midnight) */}
+            {gridEnd > 24 && (
               <div
                 style={{
                   position: "absolute",
@@ -284,8 +299,9 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
             ) : (
               scheduled.map((item) => (
                 <TaskBlock
-                  key={item.task_id}
+                  key={`${item.task_id}__${item.start_time}`}
                   item={item}
+                  columnDate={columnDate}
                   isProposed={planningStatus === "proposal"}
                 />
               ))

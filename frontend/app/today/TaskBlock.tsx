@@ -9,9 +9,17 @@ const GRID_START_HOUR = 8;
 const PX_PER_HOUR = 72;
 const MIN_HEIGHT = 22;
 
-function blockTop(startIso: string): number {
-  const d = new Date(startIso);
-  return (d.getHours() + d.getMinutes() / 60 - GRID_START_HOUR) * PX_PER_HOUR;
+/**
+ * Position relative to the column's local midnight (not the task's local
+ * hour-of-day). A task at "2026-04-26T00:30:00-07:00" in a column for
+ * 2026-04-25 sits 24.5 hours past column midnight — the old `getHours()`
+ * approach returned 0 here and pushed the block off-screen above the grid.
+ */
+function blockTop(startIso: string, columnDateIso: string): number {
+  const start = new Date(startIso);
+  const colMidnight = new Date(columnDateIso + "T00:00:00");
+  const hoursFromColMidnight = (start.getTime() - colMidnight.getTime()) / 3_600_000;
+  return (hoursFromColMidnight - GRID_START_HOUR) * PX_PER_HOUR;
 }
 
 const BLOCK_GAP = 2; // visual breathing room between adjacent blocks
@@ -56,15 +64,16 @@ const CATEGORY_STYLES: Record<
 
 interface TaskBlockProps {
   item: ScheduledItem;
+  columnDate: string;  // YYYY-MM-DD; the date this column represents
   isProposed?: boolean;
 }
 
-export default function TaskBlock({ item, isProposed = false }: TaskBlockProps) {
+export default function TaskBlock({ item, columnDate, isProposed = false }: TaskBlockProps) {
   const blockRef = useRef<HTMLDivElement>(null);
   const [cardOpen, setCardOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  const top = blockTop(item.start_time);
+  const top = blockTop(item.start_time, columnDate);
   const height = blockHeight(item.duration_minutes);
   const showTimeLabel = height >= 36;
 

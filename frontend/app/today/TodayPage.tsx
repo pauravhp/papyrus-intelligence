@@ -129,11 +129,20 @@ export default function TodayPage() {
   // - while working: show skeleton (handled inside DayColumn via planningStatus prop)
   // - while proposal: show proposed blocks
   // - confirmed/idle: show actual data from API
+  // LOCAL date as YYYY-MM-DD. toISOString() returns UTC which is off-by-one
+  // for users in negative offsets after the local evening — that mismatch was
+  // pushing every proposed task block 24h off-screen.
+  const localDateIso = (offsetDays: number = 0): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
   const todayColumnData: DayData | null =
     planningStatus === "proposal" && proposedSchedule && planningTarget === "today"
       ? {
           ...(data?.today ?? {
-            schedule_date: new Date().toISOString().split("T")[0],
+            schedule_date: localDateIso(0),
             pushed: [],
             confirmed_at: null,
             gcal_events: data?.today?.gcal_events ?? [],
@@ -147,7 +156,7 @@ export default function TodayPage() {
     planningStatus === "proposal" && proposedSchedule && planningTarget === "tomorrow"
       ? {
           ...(data?.tomorrow ?? {
-            schedule_date: (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().split("T")[0]; })(),
+            schedule_date: localDateIso(1),
             pushed: [],
             confirmed_at: null,
             gcal_events: data?.tomorrow?.gcal_events ?? [],

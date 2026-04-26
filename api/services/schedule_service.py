@@ -24,45 +24,46 @@ ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 # we mark this whole block ephemeral so subsequent calls within ~5 min
 # read it back at 10% of normal input cost. Keep this string stable —
 # any per-request data must live in the user message, never here.
-SYSTEM_PROMPT = """You schedule tasks for a user across their available time windows.
+SYSTEM_PROMPT = """You place tasks into the user's available time windows. Your only job is placement — constraints have already been applied to the windows by an earlier step, so anything outside the SUGGESTED WINDOWS is unavailable.
 
 Reply ONLY with JSON in this exact shape:
 {"scheduled":[{"task_id":"","task_name":"","start_time":"","end_time":"","duration_minutes":0,"category":""}],"pushed":[{"task_id":"","reason":""}],"reasoning_summary":""}
 
 OUTPUT RULES
-- start_time/end_time: ISO 8601 with the user's UTC offset shown in the user message.
+- start_time/end_time MUST be FULL ISO 8601 datetimes including DATE and UTC OFFSET — never time-only.
+  CORRECT:   "2026-04-25T15:40:00-07:00"
+  WRONG:     "15:40"     (no date, no offset)
+  Take the date from the user message header and the UTC offset shown alongside the windows.
 - Free window times in the user message are LOCAL — use them exactly, do NOT convert to UTC.
+- For tasks that cross midnight (22:30 today → 02:30 tomorrow), end_time uses the NEXT day's date: "2026-04-26T02:30:00-07:00".
 - Every task appears in exactly one list. Tasks that don't fit go in pushed.
-- NEVER shorten a task's duration_minutes. If a task can't fit one contiguous slot, SPLIT across the next available window: same task_id, append " (pt 1)" / " (pt 2)" to task_name, parts sum to the original duration.
+- NEVER shorten a task's duration_minutes. If a task can't fit one contiguous slot, SPLIT across the next available window: same task_id, append " (pt 1)" / " (pt 2)" to task_name, parts sum to the original duration. If even split won't work, push the whole task — do not place a partial.
 - Rhythm tasks (marked [rhythm]) accept any duration within the shown range. Treat their priority like one-off tasks.
-- category: "deep_work" (focused concentration — writing, coding, design, research, analysis) or "admin" (lightweight — email, reviews, calls, admin). null if genuinely ambiguous.
+- category: "deep_work" (focused concentration — writing, coding, design, research, analysis) or "admin" (lightweight — email, reviews, calls, admin). null if genuinely ambiguous. On a refinement, do not change a task's category from the previous proposal unless that task itself was replaced.
 
 REASONING_SUMMARY RULES
 - ONE or TWO short sentences in second person ("you"/"your"). Coach voice. Conversational.
-- FORBIDDEN in this field: task IDs, priority codes (p1/p2/p3/p4), category labels (deep_work/admin), arithmetic ("30m + 60m"), hour totals or duration totals of any kind, restating the current time, restating the cutoff, the words "the user", "hard rule", "soft block", "suggested window".
+- FORBIDDEN in this field: task IDs, priority codes (p1/p2/p3/p4), category labels (deep_work/admin), arithmetic ("30m + 60m"), hour totals or duration totals of any kind (no phrases like "the 220-minute window", "the 90-min block", "your 3 hours of focus work" — never name a duration), restating the current time, restating the cutoff, the words "the user", "hard rule", "soft block", "suggested window".
 - Refer to tasks by their human name (or omit the name).
 
 PUSHED.REASON RULES
-- Reference observable facts only: "didn't fit before your cutoff", "calendar conflict at 3pm", "you blocked this time", "no duration estimate set".
-- NEVER invent user intent. Phrases like "deprioritized per your guidance", "as you requested", "to align with your goals" are forbidden unless the user literally used those words in the context note.
+- Reference observable facts only: "didn't fit before your cutoff", "calendar conflict at 3pm", "no duration estimate set", "no contiguous slot available".
+- NEVER invent user intent. Phrases like "deprioritized per your guidance", "as you requested", "to align with your goals" are forbidden unless the user literally used those words.
 
 REFINEMENT RULES
-- When the context note describes an EDIT to an existing plan ("move X to 7am", "give Y more time", "drop Z"), make the smallest changes needed to satisfy that edit.
-- Do NOT move, split, drop, or rearrange tasks unrelated to the user's ask.
-- Treat the user's previous proposal as the baseline; refinement is a diff, not a fresh plan.
-
-USER-STATED CONSTRAINTS IN CONTEXT NOTE
-- If the context note contains a time block ("block 4pm-9pm", "I have an event 14:00-15:30", "no calls after 5pm", "free until noon"), treat it as a HARD RULE — equivalent to a calendar event. Never schedule over it.
-- These constraints persist within a refinement chain; do not relax them on later turns unless the user explicitly removes them.
+- When the user note describes a TARGETED edit ("move X to 7am", "drop Y"), make the smallest changes needed and don't move/rearrange unrelated tasks.
+- Treat the previous proposal in the user message as the baseline; small refinement is a diff.
+- EXCEPTION — PRIORITY SHIFT: if the user explicitly elevates a task's priority or scope ("X for the entirety of today", "make X my main focus", "most of the day on X", "I really need to get X done", "X is the priority"), DISPLACE other tasks to make room for X. The previous proposal is no longer the baseline — treat the request as a new top priority for the day. Push the displaced tasks with reason "displaced by the priority you set this turn".
+- Do NOT change a task's category from the previous proposal unless the task itself was replaced. The previous baseline shows each task's category; preserve it.
 
 GOOD examples
-- reasoning_summary: "Stacked your focus blocks into the late-night window before your cutoff, with a 30-min buffer if you need it."
+- reasoning_summary: "Stacked your focus blocks into the late-night window before your cutoff, with a buffer if you need it."
 - reasoning_summary: "Front-loaded the deep work this morning so admin tasks fall into the lower-energy afternoon."
 - pushed.reason: "didn't fit before your cutoff today"
-- pushed.reason: "you blocked 4pm-9pm"
+- pushed.reason: "no contiguous slot available"
 
 BAD examples (do NOT produce these)
-- reasoning_summary: "Current time is 03:23. The user wants larger blocks. Scheduled 6gJjJ7M3 (60m, p2, deep_work) totaling 5.5h." (forbidden: time, third-person, IDs, p-codes, categories, totals)
+- reasoning_summary: "Scheduled 6gJjJ7M3 (60m, p2, deep_work) totaling 5.5h." (forbidden: IDs, p-codes, categories, totals)
 - reasoning_summary: "I scheduled 4 tasks adding to 135m before your 02:30 cutoff." (forbidden: arithmetic, restated cutoff)
 - pushed.reason: "Deprioritized per your guidance" (forbidden: invented intent)"""
 
@@ -126,10 +127,28 @@ def _build_prompt(
     else:
         tz_offset = "+00:00"
 
-    windows_text = " | ".join(
-        f"{w.start.strftime('%H:%M')}–{w.end.strftime('%H:%M')} (UTC{tz_offset}, {w.duration_minutes}m)"
-        for w in free_windows
-    )
+    # Free windows must include date hints when they spill onto the next day —
+    # otherwise the LLM defaults to target_date and emits 00:30 of the WRONG day.
+    # Caught on 2026-04-25: cutoff_override extended to 03:30 next day, windows
+    # showed "00:30–03:30" with no date qualifier, scheduler placed task at
+    # 2026-04-25T00:30 (yesterday morning) instead of 2026-04-26T00:30.
+    from datetime import date as _date, timedelta as _timedelta
+    target_date_obj = _date.fromisoformat(target_date) if isinstance(target_date, str) else target_date
+    next_day = (target_date_obj + _timedelta(days=1)).isoformat()
+
+    def _format_window(w):
+        s_next = w.start.date() > target_date_obj
+        e_next = w.end.date() > target_date_obj
+        s, e = w.start.strftime('%H:%M'), w.end.strftime('%H:%M')
+        if s_next and e_next:
+            label = f"{s}–{e} (entire window on NEXT DAY)"
+        elif e_next:
+            label = f"{s}–{e} (crosses midnight; end is NEXT DAY)"
+        else:
+            label = f"{s}–{e}"
+        return f"{label} (UTC{tz_offset}, {w.duration_minutes}m)"
+
+    windows_text = " | ".join(_format_window(w) for w in free_windows)
     rules_text = "\n".join(f"- {r}" for r in rules_hard) if rules_hard else "None"
 
     # Min gap between tasks
@@ -171,6 +190,18 @@ HARD RULES (in addition to system rules):
 {rules_text}
 - Never schedule over a CALENDAR EVENT above.
 - Do NOT invent break/recovery/filler tasks for gaps. Leave gaps empty.
+
+DATETIME FORMAT FOR YOUR OUTPUT (do not deviate):
+- Today's date is {target_date}. UTC offset is {tz_offset}. The NEXT DAY's date is {next_day}.
+- For windows shown WITHOUT a "NEXT DAY" marker, use {target_date} as the date:
+    A 15:40 placement → "{target_date}T15:40:00{tz_offset}"
+- For windows marked "(crosses midnight; end is NEXT DAY)", times before midnight use {target_date}, times after midnight use {next_day}:
+    A placement starting 22:30 today and ending 02:30 next day →
+      start_time="{target_date}T22:30:00{tz_offset}", end_time="{next_day}T02:30:00{tz_offset}"
+- For windows marked "(entire window on NEXT DAY)", BOTH start and end use {next_day}:
+    A placement at 00:30–02:30 in such a window →
+      start_time="{next_day}T00:30:00{tz_offset}", end_time="{next_day}T02:30:00{tz_offset}"
+- This is the most common error mode: do NOT use {target_date} for a placement when the window says NEXT DAY. Use {next_day}.
 
 GUIDANCE
 - Prefer scheduling within the suggested windows.

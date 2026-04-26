@@ -23,10 +23,18 @@ interface ReplanModalProps {
 
 type Phase = "triage" | "loading" | "proposed";
 
+interface ProposedBlock {
+  start_iso: string;
+  end_iso: string;
+  source?: string;
+}
+
 interface ProposedResult {
   scheduled: ScheduledItem[];
   pushed: Array<{ task_id: string; reason: string }>;
   reasoning_summary: string;
+  blocks?: ProposedBlock[];
+  cutoff_override?: string | null;
 }
 
 function PushedSummary({ pushed }: { pushed: Array<{ task_id: string; reason: string }> }) {
@@ -187,6 +195,14 @@ export default function ReplanModal({
           task_states: triageStates,
           context_note: contextNote,
           refinement_message: message,
+          previous_proposal: proposed
+            ? {
+                scheduled: proposed.scheduled,
+                pushed: proposed.pushed,
+                blocks: proposed.blocks ?? [],
+                cutoff_override: proposed.cutoff_override ?? null,
+              }
+            : null,
         }),
       });
       if (!res.ok) {

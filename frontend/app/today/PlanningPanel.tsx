@@ -7,11 +7,6 @@ import { type ScheduledItem } from "./TodayPage";
 
 export type PanelStatus = "working" | "proposal" | "confirmed";
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface PlanningPanelProps {
   token: string;
   contextNote?: string;
@@ -21,12 +16,29 @@ interface PlanningPanelProps {
   onClose: () => void;
 }
 
+interface Block {
+  start_iso: string;
+  end_iso: string;
+  source?: string;
+}
+
+interface Proposal {
+  scheduled: ScheduledItem[];
+  pushed: Array<{ task_id: string; task_name?: string; reason: string }>;
+  reasoning_summary: string;
+  free_windows_used: Array<{ start: string; end: string; duration_minutes: number }>;
+  blocks?: Block[];
+  cutoff_override?: string | null;
+}
+
 const PROGRESS_STEPS = [
   "Reading your calendar",
   "Fetching tasks from Todoist",
   "Building your schedule",
   "Drafting reasoning",
 ];
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
 export default function PlanningPanel({
   token,
@@ -38,11 +50,10 @@ export default function PlanningPanel({
 }: PlanningPanelProps) {
   const [status, setStatus] = useState<PanelStatus>("working");
   const [progressStep, setProgressStep] = useState(0);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [reasoning, setReasoning] = useState<string>("");
   const [refinementInput, setRefinementInput] = useState("");
   const [refineLoading, setRefineLoading] = useState(false);
-  const [wireMessages, setWireMessages] = useState<Array<{ role: string; content: unknown }>>([]);
+  const [proposal, setProposal] = useState<Proposal | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const streamRef = useRef<HTMLDivElement>(null);
   const refinementRef = useRef<HTMLTextAreaElement>(null);
@@ -62,51 +73,26 @@ export default function PlanningPanel({
   useEffect(() => {
     if (hasFired.current) return;
     hasFired.current = true;
-
-    const base = targetDate === "tomorrow" ? "Plan my day for tomorrow" : "Plan my day";
-    const userContent = contextNote ? `${base}. Note: ${contextNote}` : base;
-
-    const initialMessages: Message[] = [{ role: "user", content: userContent }];
-    setMessages(initialMessages);
-    callChat(initialMessages);
+    runPlan();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function callChat(msgs: Message[]) {
+  async function runPlan() {
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"}/api/chat`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            messages: wireMessages.length > 0
-              ? [...wireMessages, { role: msgs[msgs.length - 1].role, content: msgs[msgs.length - 1].content }]
-              : msgs.map((m) => ({ role: m.role, content: m.content })),
-          }),
-        }
-      );
-
+      const res = await fetch(`${API_BASE}/api/plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ target_date: targetDate, context_note: contextNote ?? null }),
+      });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
-
-      const data = await res.json();
-      if (data.messages) setWireMessages(data.messages);
-      const assistantMsg: Message = { role: "assistant", content: data.message };
-      const nextMessages = [...msgs, assistantMsg];
-      setMessages(nextMessages);
-      setReasoning(data.message);
+      const data: Proposal = await res.json();
+      setProposal(data);
+      setReasoning(data.reasoning_summary);
       setProgressStep(PROGRESS_STEPS.length - 1);
-
-      if (data.schedule_card) {
-        onScheduleProposed(data.schedule_card.scheduled ?? []);
-        posthog?.capture("schedule_proposed", {
-          task_count: (data.schedule_card.scheduled ?? []).length,
-        });
-      }
-
+      onScheduleProposed(data.scheduled ?? []);
+      posthog?.capture("schedule_proposed", {
+        task_count: (data.scheduled ?? []).length,
+      });
       setStatus("proposal");
     } catch (err) {
       setPlanError(`Planning failed: ${(err as Error).message}`);
@@ -114,34 +100,49 @@ export default function PlanningPanel({
     }
   }
 
-  async function handleConfirm() {
-    if (isConfirmingRef.current) return;
-    isConfirmingRef.current = true;
-    const confirmMessages: Message[] = [
-      ...messages,
-      { role: "user", content: "Looks good, please confirm the schedule." },
-    ];
-    setMessages(confirmMessages);
-
+  async function runRefine(message: string) {
+    if (!proposal) return;
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"}/api/chat`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+      const res = await fetch(`${API_BASE}/api/refine`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          target_date: targetDate,
+          previous_proposal: {
+            scheduled: proposal.scheduled,
+            pushed: proposal.pushed,
+            blocks: proposal.blocks ?? [],
+            cutoff_override: proposal.cutoff_override ?? null,
           },
-          body: JSON.stringify({
-            messages: wireMessages.length > 0
-              ? [...wireMessages, { role: "user", content: "Looks good, please confirm the schedule." }]
-              : confirmMessages.map((m) => ({ role: m.role, content: m.content })),
-          }),
-        }
-      );
-
+          refinement_message: message,
+          original_context_note: contextNote ?? null,
+        }),
+      });
       if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const data: Proposal = await res.json();
+      setProposal(data);
+      setReasoning(data.reasoning_summary);
+      onScheduleProposed(data.scheduled ?? []);
+      setStatus("proposal");
+    } catch (err) {
+      setPlanError(`Refine failed: ${(err as Error).message}`);
+      setStatus("proposal");
+    }
+  }
 
+  async function handleConfirm() {
+    if (isConfirmingRef.current || !proposal) return;
+    isConfirmingRef.current = true;
+    try {
+      const res = await fetch(`${API_BASE}/api/plan/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          target_date: targetDate,
+          schedule: { scheduled: proposal.scheduled, pushed: proposal.pushed },
+        }),
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
       setStatus("confirmed");
       setTimeout(() => onConfirm(), 1200);
     } catch (err) {
@@ -152,17 +153,18 @@ export default function PlanningPanel({
   }
 
   async function handleRefinement() {
-    if (!refinementInput.trim() || refineLoading) return;
-    const userMsg: Message = { role: "user", content: refinementInput.trim() };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
+    const message = refinementInput.trim();
+    if (!message || refineLoading) return;
     setRefinementInput("");
     setRefineLoading(true);
     setStatus("working");
     setProgressStep(2); // Jump to "Building your schedule"
+    // Event name retained as "chat_message_sent" for continuity with existing
+    // PostHog dashboards — semantically this captures "user submitted a
+    // refinement," which is the only message-sending surface that exists
+    // post-chat-agent removal.
     posthog?.capture("chat_message_sent");
-
-    await callChat(nextMessages);
+    await runRefine(message);
     setRefineLoading(false);
   }
 

@@ -13,6 +13,12 @@ import pytest
 from fastapi.testclient import TestClient
 from datetime import date, datetime, time
 
+from api.services.extractor import ExtractionResult
+
+
+def _empty_extraction():
+    return ExtractionResult(blocks=[], cutoff_override_iso=None)
+
 
 @pytest.fixture
 def client():
@@ -102,12 +108,18 @@ def test_replan_returns_proposed_schedule(client, monkeypatch):
 
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan.TodoistClient") as MockTodoist, \
-         patch("api.routes.replan.schedule_day", return_value=mock_schedule_result), \
-         patch("api.routes.replan.compute_free_windows", return_value=[]), \
          patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
-         patch("api.routes.replan._get_now", return_value=mock_now):
+         patch("api.routes.replan._get_now", return_value=mock_now), \
+         patch("api.services.planner.TodoistClient") as MockPlannerTodoist, \
+         patch("api.services.planner.get_events", return_value=[]), \
+         patch("api.services.planner.compute_free_windows", return_value=[]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints", return_value=_empty_extraction()), \
+         patch("api.services.planner.schedule_day", return_value=mock_schedule_result):
 
         MockTodoist.return_value.is_task_completed.return_value = False
+        MockPlannerTodoist.return_value.get_tasks.return_value = []
+        MockPlannerTodoist.return_value.get_todays_scheduled_tasks.return_value = []
 
         resp = client.post(
             "/api/replan",
@@ -126,21 +138,8 @@ def test_replan_returns_proposed_schedule(client, monkeypatch):
     assert "reasoning_summary" in data
 
 
-def test_replan_wiring_contracts(client, monkeypatch):
-    """
-    Integration-style guard against the three replan-route wiring bugs found
-    on 2026-04-24:
-      - compute_free_windows arg order (events, target_date, config)
-      - get_events MUST receive service=<user's gcal_service> (else falls back
-        to disk token.json — wrong user)
-      - schedule_day MUST receive events=<events> (else LLM is blind to GCal)
-      - the post-compute window filter must accept a real FreeWindow.end
-        (a tz-aware datetime) — not a `time` mismatch
-    """
-    from datetime import timedelta
-    from zoneinfo import ZoneInfo
-    from src.models import FreeWindow
-
+def test_replan_delegates_to_planner_pipeline(client, monkeypatch):
+    """/api/replan delegates to planner.replan(), which runs the unified pipeline."""
     mock_sb = MagicMock()
     _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
     row, _ = _mock_schedule_log_today(mock_sb)
@@ -156,67 +155,38 @@ def test_replan_wiring_contracts(client, monkeypatch):
 
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    tz = ZoneInfo("America/Vancouver")
     today = date.today()
     mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
 
-    real_window = FreeWindow(
-        start=datetime(today.year, today.month, today.day, 13, 0, tzinfo=tz),
-        end=datetime(today.year, today.month, today.day, 18, 0, tzinfo=tz),
-        duration_minutes=300,
-        block_type="afternoon",
-    )
-
-    fake_event = MagicMock()
-    mock_gcal = MagicMock()
-
     captured = {}
-    def fake_get_events(target_date, tz_str, calendar_ids=None, service=None):
-        captured["get_events_service"] = service
-        captured["get_events_calendar_ids"] = calendar_ids
-        return [fake_event]
-
-    def fake_schedule_day(**kwargs):
-        captured["schedule_day_kwargs"] = kwargs
-        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
-
-    def fake_compute_free_windows(events, target_date, config, **kwargs):
-        captured["cfw_args"] = (type(events), type(target_date), type(config))
-        return [real_window]
+    def fake_replan(**kwargs):
+        captured["kwargs"] = kwargs
+        return {"scheduled": [], "pushed": [], "reasoning_summary": "ok",
+                "blocks": [], "cutoff_override": None, "free_windows_used": []}
 
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan.TodoistClient") as MockTodoist, \
-         patch("api.routes.replan.get_events", side_effect=fake_get_events), \
-         patch("api.routes.replan.compute_free_windows", side_effect=fake_compute_free_windows), \
-         patch("api.routes.replan.schedule_day", side_effect=fake_schedule_day), \
-         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
-         patch("api.routes.replan._get_now", return_value=mock_now):
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.routes.replan._get_now", return_value=mock_now), \
+         patch("api.services.planner.replan", side_effect=fake_replan):
 
         MockTodoist.return_value.is_task_completed.return_value = False
         MockTodoist.return_value.get_tasks.return_value = []
 
         resp = client.post(
             "/api/replan",
-            json={"task_states": {"t1": "keep"}, "context_note": "", "refinement_message": None},
+            json={"task_states": {"t1": "keep"}, "context_note": "context", "refinement_message": "refine me"},
             headers={"Authorization": "Bearer fake-jwt"},
         )
 
     assert resp.status_code == 200, resp.text
-
-    # 1. get_events received the user's gcal service (not None → not fallback)
-    assert captured["get_events_service"] is mock_gcal
-
-    # 2. compute_free_windows got (list, date, dict) in that order
-    cfw_events_t, cfw_date_t, cfw_config_t = captured["cfw_args"]
-    assert cfw_events_t is list
-    assert cfw_date_t is date
-    assert cfw_config_t is dict
-
-    # 3. schedule_day received events kwarg (LLM sees calendar) and the post-now
-    #    free_windows survived the filter (real FreeWindow.end vs tz-aware now)
-    sd_kwargs = captured["schedule_day_kwargs"]
-    assert "events" in sd_kwargs and sd_kwargs["events"] == [fake_event]
-    assert sd_kwargs["free_windows"] == [real_window]
+    kw = captured["kwargs"]
+    assert kw["target_date"] == today
+    assert kw["candidate_tasks"] is not None  # route built keep + backlog
+    # Mid-day current-time note + refinement + context all show up in prose
+    assert "It is currently" in kw["prose"]
+    assert "refine me" in kw["prose"]
+    assert "context" in kw["prose"]
 
 
 def test_replan_disabled_before_noon(client, monkeypatch):
@@ -262,15 +232,21 @@ def test_replan_completed_tasks_auto_promoted(client, monkeypatch):
     mock_schedule_result = {"scheduled": [], "pushed": [], "reasoning_summary": "Nothing to schedule."}
     mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
 
+    captured_planner = {}
+    def fake_replan(**kwargs):
+        captured_planner["candidate_tasks"] = kwargs.get("candidate_tasks") or []
+        return {"scheduled": [], "pushed": [], "reasoning_summary": "ok",
+                "blocks": [], "cutoff_override": None, "free_windows_used": []}
+
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan.TodoistClient") as MockTodoist, \
-         patch("api.routes.replan.schedule_day", return_value=mock_schedule_result), \
-         patch("api.routes.replan.compute_free_windows", return_value=[]), \
          patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
-         patch("api.routes.replan._get_now", return_value=mock_now):
+         patch("api.routes.replan._get_now", return_value=mock_now), \
+         patch("api.services.planner.replan", side_effect=fake_replan):
 
-        # Task is already completed in Todoist
+        # Task is already completed in Todoist; route auto-promotes "keep" → "done"
         MockTodoist.return_value.is_task_completed.return_value = True
+        MockTodoist.return_value.get_tasks.return_value = []  # no backlog
 
         resp = client.post(
             "/api/replan",
@@ -283,10 +259,9 @@ def test_replan_completed_tasks_auto_promoted(client, monkeypatch):
         )
 
     assert resp.status_code == 200
-    # schedule_day should have been called with empty tasks list (t1 auto-promoted to done)
-    from api.routes.replan import schedule_day as sd
-    # We verify by checking the mock was called — the tasks arg should be empty
-    # (validated in step 3 integration; unit confirms no error raised)
+    # The auto-promoted task should NOT be in the candidate_tasks passed to planner.
+    candidate_ids = {t.id for t in captured_planner["candidate_tasks"]}
+    assert "t1" not in candidate_ids
 
 
 def _today_dt():

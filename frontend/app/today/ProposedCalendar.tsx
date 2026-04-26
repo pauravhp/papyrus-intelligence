@@ -57,7 +57,7 @@ export default function ProposedCalendar({
             const minHeight = Math.max(44, blockHeight(item.duration_minutes));
             return (
               <div
-                key={item.task_id}
+                key={`${item.task_id}__${item.start_time}`}
                 ref={(el) => { if (el) blockRefs.current.set(item.task_id, el); }}
                 role="button"
                 tabIndex={0}
