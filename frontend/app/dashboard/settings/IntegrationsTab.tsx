@@ -1,7 +1,9 @@
 // frontend/app/dashboard/settings/IntegrationsTab.tsx
 "use client";
 
-import { CalendarDays, CheckSquare } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { AlertTriangle, CalendarDays, CheckSquare } from "lucide-react";
+import { apiFetch } from "@/utils/api";
 
 interface IntegrationsTabProps {
   gcalConnected: boolean;
@@ -99,6 +101,37 @@ function IntegrationRow({
 export default function IntegrationsTab({ gcalConnected, todoistConnected, getToken }: IntegrationsTabProps) {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
+  const [syncDetected, setSyncDetected] = useState<boolean | null>(null);
+  const [syncCheckLoading, setSyncCheckLoading] = useState(false);
+  const [syncRecheckedAtLeastOnce, setSyncRecheckedAtLeastOnce] = useState(false);
+
+  const runSyncDetection = useCallback(async () => {
+    setSyncCheckLoading(true);
+    try {
+      const token = await getToken();
+      const result = await apiFetch<{ detected: boolean; calendar_id: string | null }>(
+        "/api/onboard/detect-todoist-sync",
+        token,
+      );
+      setSyncDetected(result.detected);
+    } catch {
+      setSyncDetected(false);
+    } finally {
+      setSyncCheckLoading(false);
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    if (gcalConnected && todoistConnected && syncDetected === null && !syncCheckLoading) {
+      void runSyncDetection();
+    }
+  }, [gcalConnected, todoistConnected, syncDetected, syncCheckLoading, runSyncDetection]);
+
+  const handleRecheck = useCallback(async () => {
+    setSyncRecheckedAtLeastOnce(true);
+    await runSyncDetection();
+  }, [runSyncDetection]);
+
   const handleReconnectGoogle = async () => {
     const token = await getToken();
     window.location.href = `${apiUrl}/auth/google?token=${token}&redirect_after=${encodeURIComponent(REDIRECT_AFTER)}`;
@@ -114,6 +147,74 @@ export default function IntegrationsTab({ gcalConnected, todoistConnected, getTo
       <p style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 20, maxWidth: "52ch", lineHeight: 1.55 }}>
         Reconnect a service if something stops working. Your data and settings stay intact.
       </p>
+
+      {syncDetected === true && (
+        <div
+          style={{
+            background: "var(--surface-raised)",
+            border: "1px solid #d4a55a",
+            borderRadius: 10,
+            padding: 14,
+            marginBottom: 20,
+            display: "flex",
+            gap: 12,
+            alignItems: "flex-start",
+          }}
+        >
+          <div style={{ background: "rgba(212, 165, 90, 0.15)", padding: 8, borderRadius: 8, flexShrink: 0 }}>
+            <AlertTriangle size={16} color="#d4a55a" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 13, color: "var(--text)", fontWeight: 500 }}>
+              Todoist is mirroring tasks to your Calendar
+            </p>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.55, maxWidth: "52ch" }}>
+              Papyrus writes events directly. Leaving Todoist's Google Calendar
+              integration on duplicates every scheduled task on your calendar.
+              Turn it off in Todoist's settings.
+            </p>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <a
+                href="https://app.todoist.com/app/settings/integrations/calendar"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  background: "var(--accent)",
+                  color: "var(--bg)",
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                  display: "inline-block",
+                }}
+              >
+                Open Todoist settings
+              </a>
+              <button
+                onClick={handleRecheck}
+                disabled={syncCheckLoading}
+                style={{
+                  background: "transparent",
+                  color: "var(--text-secondary)",
+                  border: "1px solid var(--border-strong)",
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  cursor: syncCheckLoading ? "wait" : "pointer",
+                }}
+              >
+                {syncCheckLoading ? "Re-checking…" : "Re-check"}
+              </button>
+            </div>
+            {syncRecheckedAtLeastOnce && !syncCheckLoading && (
+              <p style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)", lineHeight: 1.4 }}>
+                Google Calendar can take ~60 seconds to reflect the change after you toggle the integration off in Todoist.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ borderTop: "1px solid var(--border)" }}>
         <IntegrationRow

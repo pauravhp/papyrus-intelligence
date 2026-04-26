@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, CalendarDays, CheckSquare } from "lucide-react";
+import { CheckCircle2, CalendarDays, CheckSquare, AlertTriangle } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
+import { apiFetch } from "@/utils/api";
 
 const CARD: React.CSSProperties = {
   background: "var(--surface)",
@@ -22,6 +23,12 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
   const [gcalConnected, setGcalConnected] = useState(false);
   const [todoistConnected, setTodoistConnected] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [syncDetected, setSyncDetected] = useState<boolean | null>(null);
+  const [syncCheckLoading, setSyncCheckLoading] = useState(false);
+  // True after the user clicks Re-check and detection still came back positive,
+  // OR after they clicked Re-check at least once. Used to surface the "Google
+  // takes ~60s to update" hint only when it's actionable.
+  const [syncRecheckedAtLeastOnce, setSyncRecheckedAtLeastOnce] = useState(false);
 
   useEffect(() => {
     supabase
@@ -34,6 +41,38 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
         setChecking(false);
       });
   }, []);
+
+  const runSyncDetection = useCallback(async () => {
+    setSyncCheckLoading(true);
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token ?? "";
+      const result = await apiFetch<{ detected: boolean; calendar_id: string | null }>(
+        "/api/onboard/detect-todoist-sync",
+        token,
+      );
+      setSyncDetected(result.detected);
+    } catch {
+      // Detection is best-effort — silent failure is fine. Worst case we
+      // don't surface the warning; HowToGuide still tells users to check.
+      setSyncDetected(false);
+    } finally {
+      setSyncCheckLoading(false);
+    }
+  }, [supabase]);
+
+  // Run detection once we know the user is connected to both Google and Todoist.
+  // Todoist sync is irrelevant until both are present.
+  useEffect(() => {
+    if (gcalConnected && todoistConnected && syncDetected === null && !syncCheckLoading) {
+      void runSyncDetection();
+    }
+  }, [gcalConnected, todoistConnected, syncDetected, syncCheckLoading, runSyncDetection]);
+
+  const handleRecheck = useCallback(async () => {
+    setSyncRecheckedAtLeastOnce(true);
+    await runSyncDetection();
+  }, [runSyncDetection]);
 
   const handleConnectGoogle = async () => {
     const { data } = await supabase.auth.getSession();
@@ -199,6 +238,76 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
             </div>
           </div>
         </motion.div>
+
+        {/* Todoist→GCal sync warning (non-blocking). See PRE-RELEASE.md #9. */}
+        {syncDetected === true && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+            style={{
+              ...CARD,
+              background: "var(--surface-raised)",
+              borderColor: "#d4a55a",
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div style={{ background: "rgba(212, 165, 90, 0.15)", padding: 8, borderRadius: 8 }}>
+                <AlertTriangle size={18} color="#d4a55a" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ color: "var(--text)", fontSize: 13, fontWeight: 500 }}>
+                  Todoist is mirroring tasks to your Calendar
+                </p>
+                <p style={{ color: "var(--text-muted)", fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                  Papyrus writes events to your calendar directly. Leaving Todoist's
+                  Google Calendar integration on would duplicate every scheduled task.
+                  Turn it off in Todoist before continuing.
+                </p>
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <a
+                    href="https://app.todoist.com/app/settings/integrations/calendar"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      background: "var(--accent)",
+                      color: "var(--bg)",
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 500,
+                      textDecoration: "none",
+                      display: "inline-block",
+                    }}
+                  >
+                    Open Todoist settings
+                  </a>
+                  <button
+                    onClick={handleRecheck}
+                    disabled={syncCheckLoading}
+                    style={{
+                      background: "transparent",
+                      color: "var(--text-secondary)",
+                      border: "1px solid var(--border-strong)",
+                      padding: "6px 12px",
+                      borderRadius: 6,
+                      fontSize: 12,
+                      cursor: syncCheckLoading ? "wait" : "pointer",
+                    }}
+                  >
+                    {syncCheckLoading ? "Re-checking…" : "Re-check"}
+                  </button>
+                </div>
+                {syncRecheckedAtLeastOnce && !syncCheckLoading && (
+                  <p style={{ marginTop: 8, fontSize: 11, color: "var(--text-faint)", lineHeight: 1.4 }}>
+                    Google Calendar can take ~60 seconds to reflect the change after
+                    you toggle the integration off in Todoist.
+                  </p>
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         <motion.div custom={3} variants={FADE}>
           <motion.button

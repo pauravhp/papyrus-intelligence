@@ -433,3 +433,67 @@ def test_scan_overrides_llm_timezone_with_request_timezone(client, monkeypatch):
     assert resp.status_code == 200
     proposed = resp.json()["proposed_config"]
     assert proposed["user"]["timezone"] == "Asia/Tokyo"
+
+
+# ── /api/onboard/detect-todoist-sync (item #9) ────────────────────────────────
+
+
+def test_detect_todoist_sync_returns_positive(client, monkeypatch):
+    """GET /api/onboard/detect-todoist-sync returns the detector result."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.detect_todoist_gcal_sync", return_value={"detected": True, "calendar_id": "abc@cal.google.com"}):
+        resp = client.get(
+            "/api/onboard/detect-todoist-sync",
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detected"] is True
+    assert body["calendar_id"] == "abc@cal.google.com"
+
+
+def test_detect_todoist_sync_returns_negative(client, monkeypatch):
+    """When detector finds no match, route returns detected=False."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": {"token": "tok"}}
+    )
+
+    with patch("api.routes.onboard.supabase", mock_sb), \
+         patch("api.routes.onboard.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.onboard.detect_todoist_gcal_sync", return_value={"detected": False, "calendar_id": None}):
+        resp = client.get(
+            "/api/onboard/detect-todoist-sync",
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["detected"] is False
+    assert body["calendar_id"] is None
+
+
+def test_detect_todoist_sync_400_when_no_gcal_creds(client, monkeypatch):
+    """Without Google credentials, the route returns 400."""
+    _mock_verify(monkeypatch)
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+        data={"google_credentials": None}
+    )
+
+    with patch("api.routes.onboard.supabase", mock_sb):
+        resp = client.get(
+            "/api/onboard/detect-todoist-sync",
+            headers=_auth_header(),
+        )
+
+    assert resp.status_code == 400
