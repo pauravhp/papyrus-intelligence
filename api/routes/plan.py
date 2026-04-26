@@ -6,9 +6,7 @@ Three routes, no agent loop:
   POST /api/refine       — refine an existing proposal
   POST /api/plan/confirm — write the proposed schedule to GCal + Todoist
 
-Each route is one LLM call (or zero, for confirm). Replaces the older
-ReAct-via-/api/chat path that incurred 3-5 LLM calls per interaction
-just to route intent the UI already declared.
+Each route is one LLM call (or zero, for confirm).
 """
 
 from __future__ import annotations
