@@ -9,12 +9,13 @@ import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.auth import get_current_user
 from api.config import settings
 from api.db import supabase
+from api.services.analytics import capture
 from src.calendar_client import build_gcal_service_from_credentials, create_event, delete_event, get_events
 from src.scheduler import compute_free_windows
 from api.services.schedule_service import schedule_day
@@ -245,7 +246,7 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
 
 
 @router.post("/replan/confirm")
-def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_user)) -> dict:
+def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)) -> dict:
     """Commit the proposed afternoon schedule to GCal + Todoist."""
     user_id: str = user["sub"]
 
@@ -337,6 +338,18 @@ def replan_confirm(body: ReplanConfirmRequest, user: dict = Depends(get_current_
         "gcal_write_calendar_id": write_cal_id,
         "replan_trigger": "mid_day_replan",
     }).execute()
+
+    tasks_kept = len(body.schedule.get("scheduled", []))
+    tasks_pushed = len(body.tomorrow_task_ids)
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "replan_confirmed",
+        {
+            "tasks_kept": tasks_kept,
+            "tasks_pushed": tasks_pushed,
+        },
+    )
 
     return {
         "confirmed": True,

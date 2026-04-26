@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { usePostHog } from "posthog-js/react";
 import { type ScheduledItem } from "./TodayPage";
 
 export type PanelStatus = "working" | "proposal" | "confirmed";
@@ -47,6 +48,7 @@ export default function PlanningPanel({
   const refinementRef = useRef<HTMLTextAreaElement>(null);
   const hasFired = useRef(false);
   const isConfirmingRef = useRef(false);
+  const posthog = usePostHog();
 
   // Advance progress steps on a timer while working
   useEffect(() => {
@@ -100,6 +102,9 @@ export default function PlanningPanel({
 
       if (data.schedule_card) {
         onScheduleProposed(data.schedule_card.scheduled ?? []);
+        posthog?.capture("schedule_proposed", {
+          task_count: (data.schedule_card.scheduled ?? []).length,
+        });
       }
 
       setStatus("proposal");
@@ -155,6 +160,7 @@ export default function PlanningPanel({
     setRefineLoading(true);
     setStatus("working");
     setProgressStep(2); // Jump to "Building your schedule"
+    posthog?.capture("chat_message_sent");
 
     await callChat(nextMessages);
     setRefineLoading(false);

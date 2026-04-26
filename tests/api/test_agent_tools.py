@@ -4,6 +4,9 @@ os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id")
 os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-client-id")
+os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-client-secret")
+os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
 
 from unittest.mock import MagicMock, patch
 from datetime import date, datetime
@@ -430,6 +433,31 @@ def test_execute_confirm_schedule_uses_write_calendar_id(user_ctx):
     insert_call = sb.from_.return_value.insert.call_args
     inserted_data = insert_call.args[0]
     assert inserted_data["gcal_write_calendar_id"] == "work@co.com"
+
+
+def test_confirm_schedule_fires_analytics(user_ctx):
+    """execute_confirm_schedule must fire schedule_confirmed after writing to Supabase."""
+    from unittest.mock import patch
+    schedule = {
+        "scheduled": [
+            {"task_id": "t1", "task_name": "Write tests", "start_time": "2026-04-17T09:00:00",
+             "end_time": "2026-04-17T10:00:00", "duration_minutes": 60},
+            {"task_id": "t2", "task_name": "Code review", "start_time": "2026-04-17T10:30:00",
+             "end_time": "2026-04-17T11:30:00", "duration_minutes": 60},
+        ],
+        "pushed": [],
+    }
+    with patch("api.services.agent_tools._analytics_capture") as mock_capture:
+        with patch("api.services.agent_tools.create_event", return_value="gcal-id"):
+            from api.services.agent_tools import execute_confirm_schedule
+            execute_confirm_schedule(schedule, user_ctx)
+    mock_capture.assert_called_once()
+    args = mock_capture.call_args[0]
+    assert args[1] == "schedule_confirmed"
+    assert args[2]["task_count"] == 2
+    assert args[2]["total_duration_minutes"] == 120
+    assert "schedule_date" in args[2]
+
 
 
 def test_manage_rhythm_schema_has_description_property():

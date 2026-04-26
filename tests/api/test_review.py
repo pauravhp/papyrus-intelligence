@@ -243,3 +243,29 @@ def test_submit_summary_line_fallback_on_llm_failure(client, monkeypatch):
 
     assert resp.status_code == 200
     assert "1 of 1" in resp.json()["summary_line"]  # static fallback
+
+
+def test_review_submit_fires_analytics(client, monkeypatch):
+    from unittest.mock import patch
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+
+    body = {
+        "tasks": [{"task_id": "t1", "task_name": "Write code", "completed": True,
+                   "actual_duration_mins": 60, "estimated_duration_mins": 60,
+                   "scheduled_at": "2026-04-17T09:00:00", "incomplete_reason": None}],
+        "rhythms": [{"rhythm_id": 1, "completed": True}],
+    }
+    with patch("api.routes.review.capture") as mock_capture, \
+         patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review._generate_summary_line", return_value="Solid day."):
+        resp = client.post("/api/review/submit", json=body, headers={"Authorization": "Bearer fake-jwt"})
+    assert resp.status_code == 200
+    mock_capture.assert_called_once()
+    args = mock_capture.call_args[0]
+    assert args[1] == "review_submitted"
+    assert args[2]["tasks_total"] == 1
+    assert args[2]["tasks_completed"] == 1
+    assert args[2]["rhythms_total"] == 1
+    assert args[2]["rhythms_completed"] == 1

@@ -27,6 +27,7 @@ from api.services.schedule_service import schedule_day
 from src.scheduler import compute_free_windows
 from api.services.rhythm_service import get_active_rhythms
 from src.models import TodoistTask as _TodoistTask
+from api.services.analytics import capture as _analytics_capture
 
 
 # ── Python implementations ─────────────────────────────────────────────────────
@@ -299,6 +300,24 @@ def execute_confirm_schedule(schedule: dict, user_ctx: dict) -> dict:
         "gcal_event_ids": _json.dumps(gcal_event_ids),
         "gcal_write_calendar_id": write_cal_id,
     }).execute()
+
+    # Fire analytics — inline because this is not a route handler.
+    # PostHog SDK is non-blocking; failure must never affect the schedule write.
+    try:
+        scheduled_items = schedule.get("scheduled", [])
+        _analytics_capture(
+            user_ctx["user_id"],
+            "schedule_confirmed",
+            {
+                "task_count": len(scheduled_items),
+                "total_duration_minutes": sum(
+                    item.get("duration_minutes", 0) for item in scheduled_items
+                ),
+                "schedule_date": date.today().isoformat(),
+            },
+        )
+    except Exception:
+        pass
 
     return {
         "confirmed": True,
