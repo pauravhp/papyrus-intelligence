@@ -204,6 +204,14 @@ def onboard_scan(
     proposed = raw.get("proposed_config") or {}
     proposed["calendar_rules"] = calendar_rules
 
+    # Browser-detected timezone (body.timezone) is authoritative — the LLM is
+    # not asked for it and must not be trusted with it. Without this overwrite
+    # the saved config has user.timezone=None and the planner silently falls
+    # back to America/Vancouver for everyone.
+    user_block = proposed.get("user") or {}
+    user_block["timezone"] = body.timezone
+    proposed["user"] = user_block
+
     return ScanResponse(
         proposed_config=proposed,
         questions=raw.get("questions_for_stage_2") or [],
