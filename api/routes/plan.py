@@ -19,7 +19,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from api.services import planner
@@ -126,7 +126,7 @@ def _resolve_date(label: str) -> date:
 
 
 @router.post("/plan", response_model=PlanResponse)
-def plan(body: PlanRequest, user: dict = Depends(get_current_user)) -> PlanResponse:
+def plan(body: PlanRequest, user: dict = Depends(require_beta_access)) -> PlanResponse:
     """Propose a schedule for target_date. One LLM call. No external writes."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
@@ -142,7 +142,7 @@ def plan(body: PlanRequest, user: dict = Depends(get_current_user)) -> PlanRespo
 
 
 @router.post("/refine", response_model=PlanResponse)
-def refine(body: RefineRequest, user: dict = Depends(get_current_user)) -> PlanResponse:
+def refine(body: RefineRequest, user: dict = Depends(require_beta_access)) -> PlanResponse:
     """Refine an existing proposal with a new instruction. One LLM call."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
@@ -164,7 +164,7 @@ def refine(body: RefineRequest, user: dict = Depends(get_current_user)) -> PlanR
 
 
 @router.post("/plan/confirm", response_model=ConfirmResponse)
-def confirm(body: ConfirmRequest, user: dict = Depends(get_current_user)) -> ConfirmResponse:
+def confirm(body: ConfirmRequest, user: dict = Depends(require_beta_access)) -> ConfirmResponse:
     """Write the proposed schedule to GCal + Todoist + schedule_log."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)

@@ -80,3 +80,28 @@ def test_require_beta_access_open_when_allowlist_empty(monkeypatch):
     monkeypatch.setattr(settings, "BETA_ALLOWLIST", "")
     user = {"sub": "u6", "email": "anyone@x.com"}
     assert require_beta_access(user) is user
+
+
+def test_protected_route_403_for_rejected_user(client, monkeypatch):
+    """A rejected user gets 403 from a real protected route (today)."""
+    monkeypatch.setattr(settings, "BETA_ALLOWLIST", "ok@x.com")
+    _override({"sub": "u-stranger", "email": "stranger@x.com"})
+    try:
+        resp = client.get("/api/today")
+    finally:
+        _clear()
+    assert resp.status_code == 403
+
+
+def test_protected_route_passes_for_allowlisted_user(monkeypatch):
+    """An allowlisted user reaches the route handler (may then 500 on missing data — that's fine)."""
+    from api.main import app
+    no_raise_client = TestClient(app, raise_server_exceptions=False)
+    monkeypatch.setattr(settings, "BETA_ALLOWLIST", "ok@x.com")
+    _override({"sub": "u-ok", "email": "ok@x.com"})
+    try:
+        resp = no_raise_client.get("/api/today")
+    finally:
+        _clear()
+    # 403 would mean gating broke. Anything else (200, 500, etc.) means gating let through.
+    assert resp.status_code != 403

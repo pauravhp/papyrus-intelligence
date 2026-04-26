@@ -27,7 +27,7 @@ import anthropic
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.db import supabase
 from api.config import settings
 from api.services.agent_tools import TOOL_SCHEMAS, TOOL_DISPATCH
@@ -125,7 +125,7 @@ def _load_user_context(user_id: str) -> dict:
 @router.post("/api/chat", response_model=ChatResponse)
 def chat(
     body: ChatRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ) -> ChatResponse:
     user_id: str = user["sub"]
     user_ctx = _load_user_context(user_id)

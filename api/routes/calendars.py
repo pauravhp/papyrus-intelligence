@@ -5,7 +5,7 @@ GET  /api/calendars            — list user's GCal calendars with metadata
 from fastapi import APIRouter, Depends, HTTPException
 from google.auth.exceptions import RefreshError
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from src.calendar_client import build_gcal_service_from_credentials, list_calendars
@@ -43,7 +43,7 @@ def _get_gcal_service(user_id: str):
 
 
 @router.get("/calendars")
-def get_calendars(user: dict = Depends(get_current_user)) -> list[dict]:
+def get_calendars(user: dict = Depends(require_beta_access)) -> list[dict]:
     """Return all GCal calendars for the authenticated user."""
     user_id: str = user["sub"]
     svc = _get_gcal_service(user_id)

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from src.calendar_client import build_gcal_service_from_credentials, get_events
@@ -140,7 +140,7 @@ def _parse_day(
 
 
 @router.get("/today")
-def get_today_view(user: dict = Depends(get_current_user)) -> dict:
+def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     """
     Returns confirmed schedules for yesterday, today, and tomorrow.
     GCal events are fetched live for each day and merged into the response.

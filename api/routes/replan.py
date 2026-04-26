@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
@@ -118,7 +118,7 @@ class ReplanPreflightRequest(BaseModel):
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.post("/replan")
-def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
+def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> dict:
     """Propose a new afternoon schedule. No external writes."""
     user_id: str = user["sub"]
 
@@ -227,7 +227,7 @@ def replan(body: ReplanRequest, user: dict = Depends(get_current_user)) -> dict:
 
 
 @router.post("/replan/confirm")
-def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)) -> dict:
+def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_beta_access)) -> dict:
     """Commit the proposed afternoon schedule to GCal + Todoist."""
     user_id: str = user["sub"]
 
@@ -340,7 +340,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
 
 
 @router.post("/replan/preflight")
-def replan_preflight(body: ReplanPreflightRequest, user: dict = Depends(get_current_user)) -> dict:
+def replan_preflight(body: ReplanPreflightRequest, user: dict = Depends(require_beta_access)) -> dict:
     """Check which task IDs are already completed in Todoist."""
     user_id: str = user["sub"]
     user_ctx = _load_user_context(user_id)

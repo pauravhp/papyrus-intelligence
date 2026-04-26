@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from api.auth import get_current_user
+from api.auth import get_current_user, require_beta_access
 from api.db import supabase
 
 router = APIRouter()
@@ -25,7 +25,7 @@ class NudgesPayload(BaseModel):
 @router.patch("/api/settings/nudges")
 def patch_nudges(
     payload: NudgesPayload,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ) -> dict:
     user_id: str = user["sub"]
 
@@ -62,7 +62,7 @@ class CalendarsPayload(BaseModel):
 @router.patch("/api/settings/calendars")
 def patch_calendars(
     payload: CalendarsPayload,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_beta_access),
 ) -> dict:
     user_id: str = user["sub"]
 
