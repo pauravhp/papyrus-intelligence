@@ -506,6 +506,18 @@ def test_confirm_writes_gcal_and_todoist_and_logs(client, monkeypatch):
     mock_sb = MagicMock()
     _mock_user_row(mock_sb)
 
+    # Idempotency-guard SELECT returns no existing confirmed row
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = []
+
     (
         mock_sb.from_.return_value
         .insert.return_value
@@ -560,3 +572,152 @@ def test_confirm_writes_gcal_and_todoist_and_logs(client, monkeypatch):
     mock_todoist.schedule_task.assert_called_once()
     args, _ = mock_todoist.schedule_task.call_args
     assert args[0] == "t1"
+
+
+# ── Double-confirm guard (item #4) ────────────────────────────────────────────
+
+
+def _setup_existing_confirmed_row(mock_sb, *, confirmed_at_iso, replan_trigger=None,
+                                   row_id=99, gcal_event_ids='["old-1", "old-2"]'):
+    """Mock the schedule_log SELECT used by planner.confirm's idempotency guard."""
+    existing_row = {
+        "id": row_id,
+        "confirmed_at": confirmed_at_iso,
+        "gcal_event_ids": gcal_event_ids,
+        "replan_trigger": replan_trigger,
+    }
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [existing_row]
+
+
+def test_confirm_rejects_when_older_confirmed_row_exists(client, monkeypatch):
+    """If today is already confirmed (older than the idempotency window), 409."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+
+    # Confirmed 5 minutes ago — well outside the 30s window
+    five_min_ago = (datetime.now(ZoneInfo("UTC")) - timedelta(minutes=5)).isoformat()
+    _setup_existing_confirmed_row(mock_sb, confirmed_at_iso=five_min_ago)
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    schedule = {"scheduled": [], "pushed": []}
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.services.planner.TodoistClient"), \
+         patch("api.services.planner.create_event") as mock_create:
+
+        resp = client.post(
+            "/api/plan/confirm",
+            json={"target_date": "today", "schedule": schedule},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 409, resp.text
+    assert "already confirmed" in resp.json()["detail"].lower()
+    mock_create.assert_not_called()
+    mock_sb.from_.return_value.insert.assert_not_called()
+
+
+def test_confirm_returns_idempotent_when_recently_confirmed(client, monkeypatch):
+    """Double-click on plan/confirm: existing recent row → return its id, no writes."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+
+    # Confirmed 2 seconds ago — well inside the window
+    two_sec_ago = (datetime.now(ZoneInfo("UTC")) - timedelta(seconds=2)).isoformat()
+    _setup_existing_confirmed_row(
+        mock_sb, confirmed_at_iso=two_sec_ago, row_id=77,
+        gcal_event_ids='["evt-a", "evt-b"]',
+    )
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    schedule = {
+        "scheduled": [
+            {"task_id": "t1", "task_name": "X",
+             "start_time": f"{_today()}T14:00:00-07:00",
+             "end_time": f"{_today()}T15:00:00-07:00",
+             "duration_minutes": 60},
+        ],
+        "pushed": [],
+    }
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.services.planner.TodoistClient"), \
+         patch("api.services.planner.create_event") as mock_create:
+
+        resp = client.post(
+            "/api/plan/confirm",
+            json={"target_date": "today", "schedule": schedule},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["confirmed"] is True
+    assert data["schedule_log_id"] == 77
+    # No new GCal events created, no new schedule_log row inserted
+    mock_create.assert_not_called()
+    mock_sb.from_.return_value.insert.assert_not_called()
+
+
+def test_confirm_proceeds_when_no_existing_row(client, monkeypatch):
+    """No prior confirm today → normal write path runs."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+
+    # SELECT returns empty list → no existing confirmed row
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = []
+    (
+        mock_sb.from_.return_value
+        .insert.return_value
+        .execute.return_value
+    ).data = [{"id": 100}]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    schedule = {
+        "scheduled": [
+            {"task_id": "t1", "task_name": "X",
+             "start_time": f"{_today()}T14:00:00-07:00",
+             "end_time": f"{_today()}T15:00:00-07:00",
+             "duration_minutes": 60},
+        ],
+        "pushed": [],
+    }
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.services.planner.TodoistClient"), \
+         patch("api.services.planner.create_event", return_value="new-evt-1") as mock_create:
+
+        resp = client.post(
+            "/api/plan/confirm",
+            json={"target_date": "today", "schedule": schedule},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["schedule_log_id"] == 100
+    assert mock_create.call_count == 1

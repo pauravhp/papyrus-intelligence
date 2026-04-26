@@ -49,6 +49,42 @@ _DEFAULT_MEAL_BLOCKS = [
 # allow tiny rounding (LLM emits 89 vs original 90) without rejecting it.
 _TRUNCATION_TOLERANCE = 0.95
 
+# Window in which a repeat /api/plan/confirm or /api/replan/confirm POST is
+# treated as a UI double-click and replayed idempotently instead of writing
+# duplicate GCal events. Sized to absorb network retries without blocking a
+# legitimate "confirm now, replan later" flow (which takes minutes of UI work).
+IDEMPOTENCY_WINDOW_SECONDS = 30
+
+
+class AlreadyConfirmedError(Exception):
+    """Raised when plan/confirm is called for a date that already has a
+    confirmed schedule_log row outside the idempotency window. The route
+    layer translates this to HTTP 409."""
+
+
+def _parse_confirmed_at(value) -> datetime | None:
+    """Best-effort parse of schedule_log.confirmed_at (ISO text). Returns
+    a tz-aware datetime, or None if unparseable."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        # Accept trailing 'Z' as UTC
+        normalized = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt
+
+
+def _is_within_idempotency_window(confirmed_at_iso) -> bool:
+    dt = _parse_confirmed_at(confirmed_at_iso)
+    if dt is None:
+        return False
+    now = datetime.now(dt.tzinfo)
+    return 0 <= (now - dt).total_seconds() < IDEMPOTENCY_WINDOW_SECONDS
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -638,7 +674,40 @@ def confirm(
     """
     Write the proposed schedule: GCal events + Todoist due_datetimes +
     schedule_log row with confirmed=1. Zero LLM calls.
+
+    Double-confirm guard: if a confirmed schedule_log row already exists for
+    (user, target_date), either replay it idempotently (recent click) or
+    raise AlreadyConfirmedError (older row — caller should use replan).
     """
+    supabase = user_ctx["supabase"]
+
+    existing = (
+        supabase.from_("schedule_log")
+        .select("id, confirmed_at, gcal_event_ids, replan_trigger")
+        .eq("user_id", user_ctx["user_id"])
+        .eq("schedule_date", target_date.isoformat())
+        .eq("confirmed", 1)
+        .order("confirmed_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    existing_row = (existing.data or [None])[0]
+    if existing_row:
+        if _is_within_idempotency_window(existing_row.get("confirmed_at")):
+            try:
+                gcal_ids = json.loads(existing_row.get("gcal_event_ids") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                gcal_ids = []
+            return {
+                "confirmed": True,
+                "gcal_events_created": len(gcal_ids),
+                "todoist_updated": 0,
+                "schedule_log_id": existing_row.get("id"),
+            }
+        raise AlreadyConfirmedError(
+            "Today is already confirmed. Use Replan to update the rest of the day."
+        )
+
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
     write_cal_id = config.get("write_calendar_id", "primary")

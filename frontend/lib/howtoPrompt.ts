@@ -6,6 +6,8 @@ Each morning, tell it anything in chat ("plan my day", "low energy today"). It r
 
 Required Todoist setup:
 
+0. Turn OFF Todoist's Google Calendar integration (Settings → Integrations → Calendar). Papyrus writes events to GCal directly; if Todoist's sync is also on, every scheduled task appears twice on the calendar.
+
 1. Scheduling labels — tells Papyrus how to place each task:
    @deep-work — focused, uninterrupted work. Scheduled in peak energy windows only.
    @admin — low-cognitive tasks (emails, coordination). Flexible timing.

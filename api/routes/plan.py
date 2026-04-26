@@ -168,5 +168,8 @@ def confirm(body: ConfirmRequest, user: dict = Depends(get_current_user)) -> Con
     """Write the proposed schedule to GCal + Todoist + schedule_log."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
-    result = planner.confirm(user_ctx, body.schedule, target_date)
+    try:
+        result = planner.confirm(user_ctx, body.schedule, target_date)
+    except planner.AlreadyConfirmedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return ConfirmResponse(**result)

@@ -112,6 +112,12 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
               a <em>Scheduling hint</em> that tells Papyrus when they fit best (e.g.{" "}
               <em>"mornings only"</em> or <em>"before deep work"</em>).
             </p>
+            <p style={{ marginTop: 12, fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" as const }}>
+              One quick check: in Todoist's settings, turn off the{" "}
+              <strong style={{ fontWeight: 600 }}>Google Calendar integration</strong> if it's on.
+              Papyrus writes events directly, so leaving Todoist's sync on would duplicate every
+              scheduled task on your calendar.
+            </p>
           </div>
         </div>
       );
