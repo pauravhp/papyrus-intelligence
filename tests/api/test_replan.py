@@ -189,6 +189,72 @@ def test_replan_delegates_to_planner_pipeline(client, monkeypatch):
     assert "context" in kw["prose"]
 
 
+def test_replan_keep_task_project_id_is_string(client, monkeypatch):
+    """Kept-from-today tasks must respect TodoistTask.project_id: str (not None).
+    The model's annotation is non-Optional and downstream code in sync_engine
+    + the sqlite writes treat project_id as a string. Passing None is a type
+    lie that only doesn't crash because dataclasses don't runtime-check."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
+    # Schedule one task at 15:00 — after mock_now=14:00, so it WILL be in
+    # afternoon_tasks_raw and the keep-task constructor runs. Other tests in
+    # this file accidentally use 13:00 (before mock_now) which makes the
+    # afternoon-filter exclude everything — keep_tasks ends up empty and any
+    # type-check passes vacuously.
+    today = date.today()
+    scheduled_item = {
+        "task_id": "t1",
+        "task_name": "Deep work",
+        "start_time": f"{today.isoformat()}T15:00:00-07:00",
+        "end_time":   f"{today.isoformat()}T16:30:00-07:00",
+        "duration_minutes": 90,
+    }
+    row, _ = _mock_schedule_log_today(mock_sb, scheduled=[scheduled_item])
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
+
+    captured = {}
+    def fake_replan(**kwargs):
+        captured["candidate_tasks"] = kwargs.get("candidate_tasks") or []
+        return {"scheduled": [], "pushed": [], "reasoning_summary": "ok",
+                "blocks": [], "cutoff_override": None, "free_windows_used": []}
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.routes.replan._get_now", return_value=mock_now), \
+         patch("api.services.planner.replan", side_effect=fake_replan):
+
+        MockTodoist.return_value.is_task_completed.return_value = False
+        MockTodoist.return_value.get_tasks.return_value = []  # no backlog noise
+
+        resp = client.post(
+            "/api/replan",
+            json={"task_states": {"t1": "keep"}, "context_note": "", "refinement_message": None},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    candidates = captured["candidate_tasks"]
+    # Sanity: the kept task actually made it through (otherwise the test is vacuous)
+    kept = [t for t in candidates if t.id == "t1"]
+    assert len(kept) == 1, f"kept task t1 missing from candidates: {[t.id for t in candidates]}"
+    assert isinstance(kept[0].project_id, str), (
+        f"keep task t1 has project_id={kept[0].project_id!r} — must be str per model annotation"
+    )
+
+
 def test_replan_disabled_before_noon(client, monkeypatch):
     """POST /api/replan returns 400 if called before noon."""
     mock_sb = MagicMock()
