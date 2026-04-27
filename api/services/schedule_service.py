@@ -43,7 +43,9 @@ OUTPUT RULES
 
 REASONING_SUMMARY RULES
 - ONE or TWO short sentences in second person ("you"/"your"). Coach voice. Conversational.
-- FORBIDDEN in this field: task IDs, priority codes (p1/p2/p3/p4), category labels (deep_work/admin), arithmetic ("30m + 60m"), hour totals or duration totals of any kind (no phrases like "the 220-minute window", "the 90-min block", "your 3 hours of focus work" — never name a duration), restating the current time, restating the cutoff, the words "the user", "hard rule", "soft block", "suggested window".
+- ABSOLUTELY NO NUMBERS attached to a time unit. Banned tokens include but are not limited to: "220-minute", "90-min", "135m", "3 hours", "2hr", "45 minutes", "1.5h", "an X-minute window". If you are about to write a digit followed (with or without a space or hyphen) by m, min, mins, minute(s), h, hr, hrs, or hour(s) — REWRITE THE SENTENCE WITHOUT THE NUMBER. Use "the window", "the morning", "your remaining time" instead.
+- FORBIDDEN tokens: task IDs, priority codes (p1/p2/p3/p4), the literal JSON labels "deep_work" or "admin" (refer to them as "deep work" / "admin tasks" instead), arithmetic ("30m + 60m"), restating the current time, restating the cutoff, the words "the user", "hard rule", "soft block", "suggested window".
+- The Python layer SCRUBS this field if it contains any banned numeric-duration token or JSON label — your summary will be replaced with an empty string and the user sees nothing. Treat that as a hard failure and avoid it.
 - Refer to tasks by their human name (or omit the name).
 
 PUSHED.REASON RULES
@@ -209,6 +211,36 @@ GUIDANCE
 - {_overflow_rule(config)}"""
 
 
+# Patterns that indicate the LLM leaked internal scheduler state into the
+# coach-voice reasoning_summary. Detection-only: if any pattern hits, the
+# whole summary is dropped (replaced with ""), since stripping the offending
+# phrase usually leaves a sentence fragment that reads worse than nothing.
+#
+# Anchored on the recurring leak in the bug report — numeric durations like
+# "the 220-minute window". Also catches priority codes and the JSON label
+# values. Verbal time references ("by an hour", "this morning") stay intact.
+_REASONING_LEAK_PATTERNS = [
+    # digit + optional sep + time-unit suffix
+    re.compile(r"\b\d+(?:\.\d+)?\s*[-]?\s*(?:m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b", re.IGNORECASE),
+    # priority codes: p1 / P2 / etc.
+    re.compile(r"\bp[1-4]\b", re.IGNORECASE),
+    # JSON category-label tokens (the underscore form is the giveaway —
+    # "deep work" without underscore is acceptable coach-speak)
+    re.compile(r"\bdeep_work\b", re.IGNORECASE),
+]
+
+
+def _sanitize_reasoning_summary(text: str) -> str:
+    """Drop the summary if it contains a leaked internal phrasing. Returns
+    the original text when clean. The frontend tolerates an empty string."""
+    if not text:
+        return text
+    for pat in _REASONING_LEAK_PATTERNS:
+        if pat.search(text):
+            return ""
+    return text
+
+
 def _extract_json(text: str) -> str:
     text = text.strip()
     if "```" in text:
@@ -310,5 +342,6 @@ def schedule_day(
     result.setdefault("scheduled", [])
     result.setdefault("pushed", [])
     result.setdefault("reasoning_summary", "")
+    result["reasoning_summary"] = _sanitize_reasoning_summary(result["reasoning_summary"])
     result["pushed"].extend(no_duration_pushed)
     return result

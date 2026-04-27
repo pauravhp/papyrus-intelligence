@@ -160,6 +160,46 @@ def _apply_cutoff_override(config: dict, cutoff_iso: str | None, target_date: da
     return {**config, "sleep": new_sleep}
 
 
+def _load_self_written_event_ids(supabase, user_id: str, target_date: date) -> set[str]:
+    """Return GCal event IDs Papyrus wrote during the most recent confirmed
+    schedule for (user, target_date), or an empty set if no row exists or the
+    column is unparseable.
+
+    Used to keep the planner from treating its own writes as calendar
+    conflicts when re-planning the same day (e.g. /api/refine after
+    /api/plan/confirm). Without this, the LLM sees the events it just placed
+    as immovable obstacles and pushes the rescheduled tasks.
+    """
+    try:
+        result = (
+            supabase.from_("schedule_log")
+            .select("gcal_event_ids")
+            .eq("user_id", user_id)
+            .eq("schedule_date", target_date.isoformat())
+            .eq("confirmed", 1)
+            .order("confirmed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("[planner] schedule_log lookup failed: %s", exc)
+        return set()
+
+    rows = result.data or []
+    if not rows:
+        return set()
+    raw = rows[0].get("gcal_event_ids")
+    if not raw:
+        return set()
+    try:
+        ids = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return set()
+    if not isinstance(ids, list):
+        return set()
+    return {x for x in ids if isinstance(x, str)}
+
+
 def _compute_rhythm_sessions_done_this_week(supabase, user_id: str, target_date: date) -> dict[str, int]:
     week_start = target_date - timedelta(days=target_date.weekday())
     try:
@@ -527,6 +567,21 @@ def run_schedule_pipeline(
         if user_ctx.get("gcal_service")
         else []
     )
+
+    # Drop events Papyrus itself wrote during a prior confirm for this date.
+    # Otherwise the LLM treats its own writes as conflicts on the next
+    # /api/refine and pushes the rescheduled tasks.
+    self_written_ids = _load_self_written_event_ids(
+        user_ctx.get("supabase"), user_ctx.get("user_id"), target_date,
+    )
+    if self_written_ids:
+        before = len(real_events)
+        real_events = [e for e in real_events if e.id not in self_written_ids]
+        logger.info(
+            "[pipeline] excluded %d self-written events from %d total",
+            before - len(real_events), before,
+        )
+
     logger.info(
         "[pipeline] tz=%s real_events=%d user_blocks=%d cutoff_override=%s",
         tz_str, len(real_events), len(user_blocks_events), extracted.cutoff_override_iso,
