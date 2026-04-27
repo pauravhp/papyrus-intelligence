@@ -145,3 +145,98 @@ body {
   .today-desktop { display: none; }
   .today-mobile  { display: block; }
 }
+
+/* Inner padding for the auth'd app shell main content. Clamps on mobile. */
+.app-main-pad { padding: 32px 48px 48px; }
+.app-settings-pad { padding: 40px 48px 80px; }
+.app-rhythms-pad { padding: 40px 48px 80px; }
+@media (max-width: 640px) {
+  .app-main-pad { padding: 20px 16px 32px; }
+  .app-settings-pad { padding: 24px 16px 56px; }
+  .app-rhythms-pad { padding: 24px 16px 56px; }
+}
+
+/* Today page header row: stack actions under the title on narrow screens */
+.today-header-row {
+  margin-bottom: 32px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.today-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 640px) {
+  .today-header-row { flex-direction: column; align-items: stretch; gap: 14px; margin-bottom: 20px; }
+  .today-header-actions { justify-content: flex-start; }
+}
+
+/* Settings tab bar — allow horizontal scroll on narrow screens */
+.settings-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-top: 28px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-tab-bar::-webkit-scrollbar { display: none; }
+
+/* Today tab bar (yesterday/today/tomorrow) — taller hit target on mobile */
+.today-mobile-tab { padding: 12px 0; min-height: 44px; }
+
+/* Replan modal dialog padding */
+.replan-dialog { padding: 28px; }
+@media (max-width: 480px) { .replan-dialog { padding: 20px; } }
+
+/* Planning panel: fixed-width 340px on desktop, near-full-width on mobile */
+.planning-panel-shell { width: 340px; }
+@media (max-width: 640px) {
+  .planning-panel-shell { width: calc(100vw - 56px); max-width: 360px; }
+}
+
+/* ── Onboarding responsive overrides ──────────────────────────────────── */
+.onboard-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.onboard-card-pad { padding: 28px 28px 24px; }
+.onboard-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+@media (max-width: 480px) {
+  .onboard-grid-2 { grid-template-columns: 1fr; gap: 4px; }
+  .onboard-card-pad { padding: 22px 18px 20px; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Bigger hit areas on touch devices via padding (visual swatch stays small) */
+  .onboard-color-swatch {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* ── Landing page responsive overrides ─────────────────────────────────── */
+.landing-nav { padding: 16px 32px; }
+.landing-hero-inner { padding: 0 48px; }
+.landing-section { padding: 96px 48px; }
+
+@media (max-width: 600px) {
+  .landing-nav { padding: 14px 20px; }
+  .landing-hero-inner { padding: 0 24px; }
+  .landing-section { padding: 64px 24px; }
+}

@@ -50,8 +50,9 @@ const INPUT: CSSProperties = {
   border: "1px solid var(--border)",
   color: "var(--text)",
   borderRadius: 8,
-  padding: "6px 10px",
-  fontSize: 13,
+  padding: "10px 10px",
+  minHeight: 40,
+  fontSize: 16,
   outline: "none",
   width: "100%",
   fontFamily: "var(--font-literata)",
@@ -219,13 +220,13 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: "spring", stiffness: 100, damping: 16 }}
+            className="onboard-card-pad"
             style={{
               width: "calc(100% - 32px)",
               maxWidth: 480,
               background: "var(--surface)",
               border: "1px solid var(--border)",
               borderRadius: 20,
-              padding: "28px 28px 24px",
             }}
           >
             <h2
@@ -244,7 +245,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
 
             {/* Sleep & Schedule */}
             <p style={SECTION_HEADING}>Sleep &amp; Schedule</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
+            <div className="onboard-grid-2" style={{ marginBottom: 20 }}>
               {[
                 { label: "Wake time", key: "default_wake_time", type: "time", tooltip: undefined },
                 {
@@ -320,7 +321,7 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
 
             {/* Scheduling */}
             <p style={{ ...SECTION_HEADING, marginTop: 20 }}>Scheduling</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div className="onboard-grid-2">
               {[
                 {
                   label: "Min gap (min)",

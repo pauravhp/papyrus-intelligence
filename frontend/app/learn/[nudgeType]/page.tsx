@@ -80,11 +80,12 @@ export default async function LearnPage({ params }: Props) {
         <Link
           href="/today"
           style={{
-            fontSize: 12,
+            fontSize: 13,
             color: "var(--text-faint)",
             textDecoration: "none",
             display: "inline-block",
             marginBottom: 40,
+            padding: "8px 0",
             letterSpacing: "0.04em",
           }}
         >
@@ -106,7 +107,7 @@ export default async function LearnPage({ params }: Props) {
 
         <h1
           style={{
-            fontSize: 26,
+            fontSize: "clamp(22px, 5.2vw, 26px)",
             fontWeight: 400,
             lineHeight: 1.3,
             letterSpacing: "-0.02em",
@@ -204,12 +205,14 @@ export default async function LearnPage({ params }: Props) {
         <Link
           href="/today"
           style={{
-            display: "inline-block",
-            padding: "10px 22px",
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "12px 22px",
+            minHeight: 44,
             background: "var(--accent)",
             color: "var(--bg)",
             borderRadius: 9,
-            fontSize: 13,
+            fontSize: 14,
             textDecoration: "none",
             letterSpacing: "0.01em",
           }}

@@ -171,7 +171,7 @@ export default function PlanningPanel({
   // ── RENDER: Working state ────────────────────────────────────────
   if (status === "working") {
     return (
-      <div style={panelShell}>
+      <div className="planning-panel-shell" style={panelShell}>
         <PanelHeader onClose={onClose} />
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 24px", gap: 20 }}>
           <div style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent-tint)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--accent)" }}>
@@ -218,7 +218,7 @@ export default function PlanningPanel({
   // ── RENDER: Proposal state ───────────────────────────────────────
   if (status === "proposal") {
     return (
-      <div style={panelShell}>
+      <div className="planning-panel-shell" style={panelShell}>
         <PanelHeader onClose={onClose} />
 
         {/* Reasoning stream */}
@@ -361,7 +361,7 @@ export default function PlanningPanel({
 
   // ── RENDER: Confirmed state ──────────────────────────────────────
   return (
-    <div style={panelShell}>
+    <div className="planning-panel-shell" style={panelShell}>
       <PanelHeader onClose={onClose} />
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: "32px 24px" }}>
         <motion.div
@@ -396,8 +396,8 @@ export default function PlanningPanel({
 }
 
 // ── Shared shell style ───────────────────────────────────────────
+// width applied via .planning-panel-shell class (340px desktop, fluid on mobile)
 const panelShell: React.CSSProperties = {
-  width: 340,
   height: "100%",
   flexShrink: 0,
   background: "var(--surface)",

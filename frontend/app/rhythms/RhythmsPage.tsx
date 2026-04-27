@@ -163,17 +163,15 @@ export default function RhythmsPage() {
 
   return (
     <div
+      className="app-rhythms-pad"
       style={{
-        padding: "40px 48px 64px",
         maxWidth: 768,
       }}
     >
       {/* Page header */}
       <div
+        className="today-header-row"
         style={{
-          display: "flex",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
           marginBottom: 36,
         }}
       >
@@ -181,7 +179,7 @@ export default function RhythmsPage() {
           <h1
             className="font-display"
             style={{
-              fontSize: 32,
+              fontSize: "clamp(24px, 6vw, 32px)",
               fontWeight: 400,
               color: "var(--text)",
               letterSpacing: "-0.01em",
@@ -207,10 +205,11 @@ export default function RhythmsPage() {
           whileHover={{ background: "var(--accent-hover)" }}
           whileTap={{ scale: 0.96 }}
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
             gap: 7,
-            padding: "9px 16px",
+            padding: "11px 18px",
+            minHeight: 42,
             background: "var(--accent)",
             color: "#fff",
             border: "none",
@@ -219,6 +218,7 @@ export default function RhythmsPage() {
             fontSize: 13,
             cursor: "pointer",
             whiteSpace: "nowrap",
+            alignSelf: "flex-start",
           }}
         >
           <Plus size={14} />

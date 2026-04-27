@@ -17,11 +17,11 @@ export default async function SettingsPage() {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       <Sidebar />
-      <main style={{ flex: 1, marginLeft: 56, padding: "40px 48px 80px" }}>
+      <main className="app-settings-pad" style={{ flex: 1, marginLeft: 56 }}>
         <div style={{ maxWidth: 620 }}>
           <h1
             className="font-display"
-            style={{ fontSize: 32, fontWeight: 400, color: "var(--text)", letterSpacing: "-0.01em", lineHeight: 1.1 }}
+            style={{ fontSize: "clamp(24px, 6vw, 32px)", fontWeight: 400, color: "var(--text)", letterSpacing: "-0.01em", lineHeight: 1.1 }}
           >
             Settings
           </h1>

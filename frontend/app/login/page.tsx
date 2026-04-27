@@ -81,12 +81,13 @@ export default function LoginPage() {
           disabled={loading}
           style={{
             width: "100%",
-            padding: "10px 0",
+            padding: "13px 0",
+            minHeight: 46,
             borderRadius: 8,
             background: "var(--accent)",
             color: "var(--bg)",
             border: "none",
-            fontSize: 14,
+            fontSize: 15,
             fontFamily: "var(--font-literata)",
             cursor: loading ? "not-allowed" : "pointer",
             opacity: loading ? 0.6 : 1,
