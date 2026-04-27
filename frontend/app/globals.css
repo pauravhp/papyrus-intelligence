@@ -146,6 +146,36 @@ body {
   .today-mobile  { display: block; }
 }
 
+/* ── Onboarding responsive overrides ──────────────────────────────────── */
+.onboard-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.onboard-card-pad { padding: 28px 28px 24px; }
+.onboard-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+}
+
+@media (max-width: 480px) {
+  .onboard-grid-2 { grid-template-columns: 1fr; gap: 4px; }
+  .onboard-card-pad { padding: 22px 18px 20px; }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  /* Bigger hit areas on touch devices via padding (visual swatch stays small) */
+  .onboard-color-swatch {
+    width: 32px;
+    height: 32px;
+  }
+}
+
 /* ── Landing page responsive overrides ─────────────────────────────────── */
 .landing-nav { padding: 16px 32px; }
 .landing-hero-inner { padding: 0 48px; }

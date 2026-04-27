@@ -63,16 +63,20 @@ export default function ColorRuleCard({
         aria-label="Remove category"
         style={{
           position: "absolute",
-          top: 12,
-          right: 12,
+          top: 6,
+          right: 6,
           background: "none",
           border: "none",
           color: "var(--text-faint)",
-          fontSize: 18,
+          fontSize: 20,
           lineHeight: 1,
           cursor: "pointer",
-          padding: "2px 5px",
-          borderRadius: 4,
+          width: 36,
+          height: 36,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 8,
         }}
       >
         ×
@@ -103,10 +107,10 @@ export default function ColorRuleCard({
           border: "none",
           borderBottom: `1px solid ${rule.name.trim() === "" ? "var(--danger)" : "var(--border-strong)"}`,
           color: "var(--text)",
-          fontSize: 14,
+          fontSize: 16,
           fontWeight: 600,
-          padding: "2px 0 5px",
-          width: "calc(100% - 28px)",
+          padding: "6px 0 8px",
+          width: "calc(100% - 40px)",
           outline: "none",
           fontFamily: "var(--font-literata)",
           marginBottom: 14,
@@ -120,7 +124,7 @@ export default function ColorRuleCard({
 
       {/* Colour swatch picker */}
       <span style={LABEL}>Colour on your calendar</span>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
         {Object.entries(GCAL_COLOR_NAMES).map(([id, name]) => (
           <button
             key={id}
@@ -129,8 +133,8 @@ export default function ColorRuleCard({
             aria-pressed={rule.colorId === id}
             onClick={() => onChange({ ...rule, colorId: id })}
             style={{
-              width: 22,
-              height: 22,
+              width: 28,
+              height: 28,
               borderRadius: "50%",
               background: GCAL_COLOR_HEX[id],
               border: rule.colorId === id ? "2.5px solid var(--text)" : "2.5px solid transparent",
@@ -161,12 +165,13 @@ export default function ColorRuleCard({
             onClick={() => onChange({ ...rule, bufferBefore: value })}
             style={{
               flex: 1,
-              padding: "6px 0",
+              padding: "10px 0",
+              minHeight: 38,
               borderRadius: 8,
               border: `1px solid ${rule.bufferBefore === value ? "var(--accent)" : "var(--border-strong)"}`,
               background: rule.bufferBefore === value ? "var(--accent-tint)" : "var(--surface)",
               color: rule.bufferBefore === value ? "var(--accent)" : "var(--text-muted)",
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: rule.bufferBefore === value ? 600 : 400,
               cursor: "pointer",
               fontFamily: "var(--font-literata)",
@@ -189,12 +194,13 @@ export default function ColorRuleCard({
             onClick={() => onChange({ ...rule, bufferAfter: value })}
             style={{
               flex: 1,
-              padding: "6px 0",
+              padding: "10px 0",
+              minHeight: 38,
               borderRadius: 8,
               border: `1px solid ${rule.bufferAfter === value ? "var(--accent)" : "var(--border-strong)"}`,
               background: rule.bufferAfter === value ? "var(--accent-tint)" : "var(--surface)",
               color: rule.bufferAfter === value ? "var(--accent)" : "var(--text-muted)",
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: rule.bufferAfter === value ? 600 : 400,
               cursor: "pointer",
               fontFamily: "var(--font-literata)",

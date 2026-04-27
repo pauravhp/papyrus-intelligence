@@ -181,8 +181,9 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
                       color: "var(--bg)",
                       border: "none",
                       borderRadius: 8,
-                      padding: "6px 14px",
-                      fontSize: 12,
+                      padding: "10px 18px",
+                      minHeight: 40,
+                      fontSize: 13,
                       fontWeight: 500,
                       cursor: "pointer",
                     }}
@@ -225,8 +226,9 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
                       color: "var(--bg)",
                       border: "none",
                       borderRadius: 8,
-                      padding: "6px 14px",
-                      fontSize: 12,
+                      padding: "10px 18px",
+                      minHeight: 40,
+                      fontSize: 13,
                       fontWeight: 500,
                       cursor: "pointer",
                     }}
@@ -272,12 +274,14 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
                     style={{
                       background: "var(--accent)",
                       color: "var(--bg)",
-                      padding: "6px 12px",
+                      padding: "10px 14px",
+                      minHeight: 40,
                       borderRadius: 6,
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: 500,
                       textDecoration: "none",
-                      display: "inline-block",
+                      display: "inline-flex",
+                      alignItems: "center",
                     }}
                   >
                     Open Todoist settings
@@ -287,11 +291,12 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
                     disabled={syncCheckLoading}
                     style={{
                       background: "transparent",
-                      color: "var(--text-secondary)",
+                      color: "var(--text-muted)",
                       border: "1px solid var(--border-strong)",
-                      padding: "6px 12px",
+                      padding: "10px 14px",
+                      minHeight: 40,
                       borderRadius: 6,
-                      fontSize: 12,
+                      fontSize: 13,
                       cursor: syncCheckLoading ? "wait" : "pointer",
                     }}
                   >
