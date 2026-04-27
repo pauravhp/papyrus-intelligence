@@ -137,7 +137,10 @@ has its own systemd unit, venv, and `.env` file.
 `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `TODOIST_CLIENT_ID`, `TODOIST_CLIENT_SECRET`,
 `ANTHROPIC_API_KEY`, `FRONTEND_URL` (set to Vercel URL),
-`POSTHOG_API_KEY`, `BETA_ALLOWLIST` (comma-separated emails),
+`BACKEND_URL` (set to public Caddy hostname, e.g.
+`https://papyrus.5-78-200-61.nip.io` — used to build OAuth callback URIs;
+must match the redirect URIs registered in Google Cloud Console + Todoist
+app settings), `POSTHOG_API_KEY`, `BETA_ALLOWLIST` (comma-separated emails),
 `BACKEND_CORS_ORIGINS` (comma-separated origins).
 
 ### Frontend Env Vars (Vercel)

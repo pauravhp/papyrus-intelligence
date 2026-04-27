@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str        # now required (was Optional)
     POSTHOG_API_KEY: str = ""   # empty string disables PostHog in local dev without the key
     FRONTEND_URL: str = "http://localhost:3000"
+    # Public URL the backend is reachable at — used to construct OAuth callback
+    # URIs that Google and Todoist redirect the user's browser to. Must match
+    # the redirect URIs registered in each provider's developer console.
+    BACKEND_URL: str = "http://localhost:8001"
     BETA_ALLOWLIST: str = ""    # comma-separated emails; empty = open access (dev/test)
     BACKEND_CORS_ORIGINS: str = "http://localhost:3000"  # comma-separated
 

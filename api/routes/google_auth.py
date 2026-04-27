@@ -32,7 +32,7 @@ from api.db import supabase
 
 router = APIRouter()
 
-_REDIRECT_URI = "http://localhost:8001/auth/google/callback"
+_REDIRECT_URI = f"{settings.BACKEND_URL}/auth/google/callback"
 _SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
