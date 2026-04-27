@@ -2,16 +2,45 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
 import { apiPatch } from "@/utils/api";
 
-export default function NudgeBanner({ show }: { show: boolean }) {
+export interface SetupNudge {
+  show: boolean;
+  needs_calendar: boolean;
+  needs_todoist: boolean;
+}
+
+function buildCopy(needsCalendar: boolean, needsTodoist: boolean): { title: string; body: string } {
+  if (needsCalendar && needsTodoist) {
+    return {
+      title: "Finish connecting Papyrus",
+      body: "Your Google Calendar and Todoist aren’t linked yet. Connect them so Papyrus can read your tasks and write your schedule.",
+    };
+  }
+  if (needsTodoist) {
+    return {
+      title: "Connect Todoist",
+      body: "Papyrus needs your tasks to plan your day. Link your Todoist account to get started.",
+    };
+  }
+  return {
+    title: "Your calendars haven’t been set up yet",
+    body: "Papyrus is reading from your primary calendar only.",
+  };
+}
+
+export default function NudgeBanner({ nudge }: { nudge: SetupNudge | null }) {
+  const router = useRouter();
   const [dismissed, setDismissed] = useState(false);
 
-  if (!show || dismissed) return null;
+  if (!nudge?.show || dismissed) return null;
 
-  const handleOpenPrefs = () => {
-    window.dispatchEvent(new Event("papyrus:open-prefs"));
+  const { title, body } = buildCopy(nudge.needs_calendar, nudge.needs_todoist);
+
+  const handleOpenSettings = () => {
+    router.push("/dashboard/settings");
   };
 
   const handleDismiss = async () => {
@@ -46,12 +75,12 @@ export default function NudgeBanner({ show }: { show: boolean }) {
       </svg>
       <div style={{ flex: 1 }}>
         <p style={{ fontSize: 13, color: "var(--text)", fontWeight: 500, marginBottom: 3, lineHeight: 1.4 }}>
-          Your calendars haven&apos;t been set up yet
+          {title}
         </p>
         <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
-          Papyrus is reading from your primary calendar only.{" "}
+          {body}{" "}
           <button
-            onClick={handleOpenPrefs}
+            onClick={handleOpenSettings}
             style={{
               fontSize: 12,
               color: "var(--accent)",
@@ -65,7 +94,7 @@ export default function NudgeBanner({ show }: { show: boolean }) {
               textUnderlineOffset: "2px",
             }}
           >
-            Set up calendar sources →
+            Open Integrations &rarr;
           </button>
         </p>
       </div>
