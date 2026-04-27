@@ -145,3 +145,14 @@ body {
   .today-desktop { display: none; }
   .today-mobile  { display: block; }
 }
+
+/* ── Landing page responsive overrides ─────────────────────────────────── */
+.landing-nav { padding: 16px 32px; }
+.landing-hero-inner { padding: 0 48px; }
+.landing-section { padding: 96px 48px; }
+
+@media (max-width: 600px) {
+  .landing-nav { padding: 14px 20px; }
+  .landing-hero-inner { padding: 0 24px; }
+  .landing-section { padding: 64px 24px; }
+}

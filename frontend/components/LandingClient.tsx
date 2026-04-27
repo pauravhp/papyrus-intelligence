@@ -11,7 +11,8 @@ const CTA_PRIMARY: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  padding: "11px 28px",
+  padding: "13px 28px",
+  minHeight: 46,
   borderRadius: 8,
   background: "var(--accent)",
   color: "var(--bg)",
@@ -27,7 +28,8 @@ const CTA_SECONDARY: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  padding: "11px 28px",
+  padding: "13px 28px",
+  minHeight: 46,
   borderRadius: 8,
   background: "transparent",
   color: "var(--text-muted)",
@@ -44,6 +46,7 @@ const CTA_SECONDARY: React.CSSProperties = {
 function Nav() {
   return (
     <nav
+      className="landing-nav"
       style={{
         position: "fixed",
         top: 0,
@@ -53,7 +56,6 @@ function Nav() {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "16px 32px",
         background: "var(--bg)",
         borderBottom: "1px solid var(--border)",
       }}
@@ -72,7 +74,10 @@ function Nav() {
           background: "none",
           border: "1px solid var(--border-strong)",
           borderRadius: 8,
-          padding: "6px 16px",
+          padding: "10px 16px",
+          minHeight: 40,
+          display: "inline-flex",
+          alignItems: "center",
           cursor: "pointer",
           fontFamily: "var(--font-literata)",
           textDecoration: "none",
@@ -114,11 +119,12 @@ function Hero() {
       <InkWash />
 
       <div
+        className="landing-hero-inner"
         style={{
           position: "relative",
           zIndex: 10,
           maxWidth: 680,
-          padding: "0 48px",
+          width: "100%",
         }}
       >
         <motion.h1
@@ -239,7 +245,8 @@ function ADayWithPapyrus() {
   return (
     <section
       id="how-it-works"
-      style={{ padding: "96px 48px", background: "var(--surface)" }}
+      className="landing-section"
+      style={{ background: "var(--surface)" }}
     >
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         <motion.p
@@ -365,10 +372,8 @@ function ADayWithPapyrus() {
 function WhyPapyrus() {
   return (
     <section
-      style={{
-        padding: "96px 48px",
-        background: "var(--bg)",
-      }}
+      className="landing-section"
+      style={{ background: "var(--bg)" }}
     >
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
         <motion.p
@@ -444,10 +449,8 @@ function WhyPapyrus() {
 function CTAStrip() {
   return (
     <section
-      style={{
-        padding: "96px 48px 120px",
-        background: "var(--surface)",
-      }}
+      className="landing-section"
+      style={{ background: "var(--surface)" }}
     >
       <motion.div
         initial={{ opacity: 0, y: 20 }}
