@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
+import { needsOnboarding } from "@/utils/onboarding";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
@@ -53,6 +54,16 @@ export async function GET(request: NextRequest) {
   }
 
   if (allowed) {
+    // First-sign-in guard: a brand-new beta user has google_credentials = null
+    // and todoist_oauth_token = null. Send them through /onboard before /today
+    // so they don't land on an empty schedule with no idea what to do.
+    // Respect an explicit ?next= that already points to /onboard.
+    if (next === "/onboard") {
+      return NextResponse.redirect(new URL("/onboard", request.url));
+    }
+    if (await needsOnboarding(supabase)) {
+      return NextResponse.redirect(new URL("/onboard", request.url));
+    }
     return NextResponse.redirect(new URL(next, request.url));
   }
 
