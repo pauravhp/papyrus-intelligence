@@ -28,7 +28,7 @@ export default async function WaitlistPendingPage({
           background: "var(--surface)",
           border: "1px solid var(--border)",
           borderRadius: 16,
-          padding: "40px 36px",
+          padding: "32px 24px",
         }}
       >
         <h1
@@ -81,11 +81,12 @@ export default async function WaitlistPendingPage({
           href="/"
           style={{
             display: "inline-block",
-            padding: "10px 18px",
+            padding: "12px 20px",
+            minHeight: 44,
             background: "var(--accent)",
             color: "#fff",
             borderRadius: 9,
-            fontSize: 13,
+            fontSize: 14,
             fontFamily: "var(--font-literata)",
             textDecoration: "none",
           }}
