@@ -197,3 +197,63 @@ def test_schedule_day_filters_no_duration_and_surfaces_them_in_pushed():
     assert pushed_ids == {"b", "c"}
     for p in result["pushed"]:
         assert "duration" in p["reason"].lower()
+
+
+# ── Reasoning-summary leak filter (item #15) ──────────────────────────────────
+
+
+@pytest.mark.parametrize("leak", [
+    "Stacked your focus blocks into the 220-minute window before your cutoff.",
+    "Front-loaded the 90-min block this morning.",
+    "Scheduled 4 tasks adding to 135m before your cutoff.",
+    "Your 3 hours of focus work goes first.",
+    "Placed it in the 45 minute slot.",
+    "Used the 2hr afternoon stretch for deep work.",
+    "Scheduled 6gJjJ7M3 (60m, p2) in the morning.",
+    "Front-loaded deep_work this morning.",
+])
+def test_sanitize_reasoning_summary_drops_leaked_phrasings(leak):
+    """Numeric durations, priority codes, and the literal `deep_work` token
+    must never appear in the coach-voice summary. The Python sanitizer is the
+    final defence — Haiku occasionally slips past the prompt's forbidden list
+    (e.g. \"the 220-minute window\")."""
+    from api.services.schedule_service import _sanitize_reasoning_summary
+    assert _sanitize_reasoning_summary(leak) == ""
+
+
+@pytest.mark.parametrize("clean", [
+    "Stacked your focus blocks into the late-night window before your cutoff.",
+    "Front-loaded the deep work this morning so admin tasks fall into the afternoon.",
+    "Shifted things by an hour to clear the morning.",
+    "",
+])
+def test_sanitize_reasoning_summary_passes_clean_coach_text(clean):
+    """Clean coach voice — no numeric durations, no JSON-shaped category
+    labels, no priority codes — must round-trip unchanged. Verbal time
+    references like \"by an hour\" are acceptable."""
+    from api.services.schedule_service import _sanitize_reasoning_summary
+    assert _sanitize_reasoning_summary(clean) == clean
+
+
+def test_schedule_day_strips_leaked_summary_from_llm_output():
+    """End-to-end: when the LLM (mocked) returns a summary containing a
+    duration total, schedule_day's response surfaces an empty summary rather
+    than leaking the phrasing through to the client."""
+    from api.services.schedule_service import schedule_day
+
+    leaked = '{"scheduled":[],"pushed":[],"reasoning_summary":"Stacked focus into the 220-minute window."}'
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(type="text", text=leaked)]
+
+    with patch("api.services.schedule_service.anthropic.Anthropic") as MockAnthropic:
+        MockAnthropic.return_value.messages.create.return_value = mock_response
+        result = schedule_day(
+            tasks=_make_tasks(),
+            free_windows=_make_windows(),
+            config=_make_config(),
+            context_note="",
+            anthropic_api_key="sk-ant-test",
+            target_date="2026-04-12",
+        )
+
+    assert result["reasoning_summary"] == ""
