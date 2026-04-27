@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import time
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import requests
 from fastapi import APIRouter, HTTPException, Query, status
@@ -84,11 +85,16 @@ def todoist_oauth_start(
         {"oauth_redirect_after": redirect_after}
     ).eq("id", user_id).execute()
 
+    # Always pass redirect_uri explicitly. Todoist will fall back to the
+    # registered URL if exactly one is configured, but errors with
+    # "Redirect URI required" when multiple URLs are registered (because it
+    # can't safely choose). Sending it always is the durable fix.
     auth_url = (
         "https://api.todoist.com/oauth/authorize"
         f"?client_id={settings.TODOIST_CLIENT_ID}"
         "&scope=data:read_write"
         f"&state={_sign_state(user_id)}"
+        f"&redirect_uri={quote(_REDIRECT_URI, safe='')}"
     )
     return RedirectResponse(url=auth_url, status_code=302)
 
