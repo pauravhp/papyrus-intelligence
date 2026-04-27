@@ -174,16 +174,20 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     # Fetch user config + google credentials
     config: dict = {}
     gcal_service = None
+    todoist_connected = False
     try:
         user_row = (
             supabase.from_("users")
-            .select("config, google_credentials")
+            .select("config, google_credentials, todoist_oauth_token")
             .eq("id", user_id)
             .single()
             .execute()
         )
         if user_row.data:
             config = user_row.data.get("config") or {}
+            todoist_connected = bool(
+                (user_row.data.get("todoist_oauth_token") or {}).get("access_token")
+            )
             gcal_creds = user_row.data.get("google_credentials")
             if gcal_creds:
                 try:
@@ -221,10 +225,14 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         or config.get("calendar_ids")
         or ["primary"]
     )
-    show_calendar_nudge = (
-        not config.get("source_calendar_ids")
-        and not (config.get("nudges") or {}).get("calendar_dismissed")
-    )
+    needs_calendar = not config.get("source_calendar_ids")
+    needs_todoist = not todoist_connected
+    dismissed = bool((config.get("nudges") or {}).get("calendar_dismissed"))
+    setup_nudge = {
+        "show": (needs_calendar or needs_todoist) and not dismissed,
+        "needs_calendar": needs_calendar,
+        "needs_todoist": needs_todoist,
+    }
     date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
 
     gcal_results: list[tuple[list, list]] = []
@@ -239,5 +247,5 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         "today":     _parse_day(by_date.get(dates[1]), dates[1], gcal_results[1][0], gcal_results[1][1]),
         "tomorrow":  _parse_day(by_date.get(dates[2]), dates[2], gcal_results[2][0], gcal_results[2][1]),
         "review_available": _compute_review_available(config, has_confirmed_schedule),
-        "show_calendar_nudge": show_calendar_nudge,
+        "setup_nudge": setup_nudge,
     }

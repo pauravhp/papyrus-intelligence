@@ -115,11 +115,10 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
             <p style={{ marginTop: 12, fontSize: 12, color: "var(--text-faint)", fontStyle: "italic" as const }}>
               One quick check before you start planning: in Todoist, go to{" "}
               <strong style={{ fontWeight: 600 }}>Settings → Integrations → Calendar</strong>{" "}
-              and turn off the Google Calendar integration if it's on. Papyrus writes events
-              directly, so leaving Todoist's sync on would mirror every scheduled task and
-              you'd see each one twice on your calendar. Papyrus tries to detect this during
-              setup and will warn you, but the toggle has to come from you — Todoist doesn't
-              expose an API to flip it.
+              and turn off the Google Calendar sync if it's on. Papyrus writes events to your
+              calendar directly, so leaving Todoist's sync on would show every scheduled task
+              twice. Papyrus tries to spot this during setup and will warn you — but you'll
+              need to flip the toggle yourself.
             </p>
           </div>
         </div>
@@ -262,16 +261,16 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
             </div>
             <div style={{ background: "var(--surface-raised)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
-                <div style={{ flex: 1, height: 20, borderRadius: 4, background: "var(--accent-tint)", border: "1px solid var(--accent-soft)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "var(--accent)", fontFamily: "var(--font-literata)" }}>
+                <div style={{ flex: 1, height: 20, borderRadius: 4, background: "var(--accent-tint)", border: "1px solid var(--accent-soft)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-literata)" }}>
                   @90min
                 </div>
-                <div style={{ width: 32, height: 20, borderRadius: 4, background: "var(--surface)", border: "1px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "var(--text-faint)", flexShrink: 0 }}>
+                <div style={{ width: 32, height: 20, borderRadius: 4, background: "var(--surface)", border: "1px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "var(--text-faint)", flexShrink: 0 }}>
                   break
                 </div>
-                <div style={{ flex: 1, height: 20, borderRadius: 4, background: "var(--accent-tint)", border: "1px solid var(--accent-soft)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "var(--accent)", fontFamily: "var(--font-literata)" }}>
+                <div style={{ flex: 1, height: 20, borderRadius: 4, background: "var(--accent-tint)", border: "1px solid var(--accent-soft)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "var(--accent)", fontFamily: "var(--font-literata)" }}>
                   @90min
                 </div>
-                <span style={{ fontSize: 9, color: "var(--text-faint)", marginLeft: 4, flexShrink: 0 }}>= 3h</span>
+                <span style={{ fontSize: 10, color: "var(--text-faint)", marginLeft: 4, flexShrink: 0 }}>= 3h</span>
               </div>
               <div style={{ fontSize: 10, color: "var(--text-faint)", fontStyle: "italic" as const, lineHeight: 1.5, fontFamily: "var(--font-literata)" }}>
                 Your brain cycles through ~90-min focus windows (ultradian rhythms). Beyond two cycles, cognitive output drops regardless of motivation.
@@ -313,12 +312,12 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
                 { time: "10:15", width: 70, task: "Write update doc" },
               ].map(({ time, width, task }) => (
                 <div key={time} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 9, color: "var(--text-faint)", minWidth: 36, fontFamily: "var(--font-literata)" }}>{time}</span>
+                  <span style={{ fontSize: 10, color: "var(--text-faint)", minWidth: 36, fontFamily: "var(--font-literata)" }}>{time}</span>
                   <div style={{ width, height: 5, borderRadius: 3, background: "var(--accent-soft)", flexShrink: 0 }} />
                   <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{task}</span>
                 </div>
               ))}
-              <div style={{ fontSize: 9, color: "var(--text-faint)", fontStyle: "italic" as const, marginTop: 2 }}>Deep work moved to tomorrow · Gym skipped</div>
+              <div style={{ fontSize: 10, color: "var(--text-faint)", fontStyle: "italic" as const, marginTop: 2 }}>Deep work moved to tomorrow · Gym skipped</div>
             </div>
           </div>
         </div>
@@ -340,7 +339,7 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
             <div style={{ display: "flex", gap: 10 }}>
               {/* Morning */}
               <div style={{ flex: 1, background: "var(--surface-raised)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
-                <div style={{ fontSize: 9, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--text-faint)", marginBottom: 10 }}>Morning · Plan</div>
+                <div style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--text-faint)", marginBottom: 10 }}>Morning · Plan</div>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 18, padding: "6px 10px", fontSize: 11, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
                   <span style={{ flex: 1 }}>plan my day</span>
                   <div style={{ width: 16, height: 16, borderRadius: "50%", background: "var(--accent)", flexShrink: 0 }} />
@@ -349,7 +348,7 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
               </div>
               {/* Afternoon */}
               <div style={{ flex: 1, background: "var(--surface-raised)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
-                <div style={{ fontSize: 9, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--text-faint)", marginBottom: 10 }}>Afternoon · Replan</div>
+                <div style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--text-faint)", marginBottom: 10 }}>Afternoon · Replan</div>
                 <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "var(--text-secondary)", textAlign: "center" as const, marginBottom: 6 }}>↺ Replan</div>
                 <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>
                   {[
@@ -357,7 +356,7 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
                     { label: "→ tmrw", active: false },
                     { label: "keep", active: false },
                   ].map(({ label, active }) => (
-                    <div key={label} style={{ flex: 1, textAlign: "center" as const, padding: "3px 0", borderRadius: 5, fontSize: 9, border: "1px solid var(--border)", color: active ? "var(--accent)" : "var(--text-muted)", background: active ? "var(--accent-tint)" : "var(--surface)" }}>{label}</div>
+                    <div key={label} style={{ flex: 1, textAlign: "center" as const, padding: "3px 0", borderRadius: 5, fontSize: 10, border: "1px solid var(--border)", color: active ? "var(--accent)" : "var(--text-muted)", background: active ? "var(--accent-tint)" : "var(--surface)" }}>{label}</div>
                   ))}
                 </div>
                 <div style={{ fontSize: 10, color: "var(--text-faint)", lineHeight: 1.45 }}>Triage what happened, tell Papyrus how you feel, get a calmer afternoon. The morning's plan doesn't fail — it gets updated.</div>

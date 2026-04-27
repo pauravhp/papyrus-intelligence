@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import { apiFetch } from "@/utils/api";
-import NudgeBanner from "@/components/NudgeBanner";
+import NudgeBanner, { type SetupNudge } from "@/components/NudgeBanner";
 import DayColumn from "./DayColumn";
 import TodaySkeleton from "./TodaySkeleton";
 import ResearchSnippet from "./ResearchSnippet";
@@ -63,7 +63,7 @@ interface TodayResponse {
   today: DayData | null;
   tomorrow: DayData | null;
   review_available: boolean;
-  show_calendar_nudge: boolean;
+  setup_nudge: SetupNudge | null;
 }
 
 const FADE = {
@@ -85,7 +85,7 @@ export default function TodayPage() {
   const [activeTab, setActiveTab] = useState<"yesterday" | "today" | "tomorrow">("today");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [replanOpen, setReplanOpen] = useState(false);
-  const [showCalendarNudge, setShowCalendarNudge] = useState(false);
+  const [setupNudge, setSetupNudge] = useState<SetupNudge | null>(null);
 
   const [planningOpen, setPlanningOpen] = useState(false);
   const [planningContext, setPlanningContext] = useState<string | undefined>();
@@ -102,7 +102,7 @@ export default function TodayPage() {
     try {
       const result = await apiFetch<TodayResponse>("/api/today", tok);
       setData(result);
-      setShowCalendarNudge(result.show_calendar_nudge ?? false);
+      setSetupNudge(result.setup_nudge ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load schedule");
     } finally {
@@ -213,7 +213,7 @@ export default function TodayPage() {
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       {/* Main today content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "32px 48px 48px" }}>
-        <NudgeBanner show={showCalendarNudge} />
+        <NudgeBanner nudge={setupNudge} />
         {/* Header */}
         <motion.div
           initial="hidden" animate="show" custom={0} variants={FADE}
