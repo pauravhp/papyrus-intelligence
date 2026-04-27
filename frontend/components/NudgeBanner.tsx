@@ -102,7 +102,8 @@ export default function NudgeBanner({ nudge }: { nudge: SetupNudge | null }) {
         onClick={handleDismiss}
         aria-label="Dismiss"
         style={{
-          width: 24, height: 24,
+          width: 32, height: 32,
+          marginRight: -8, marginTop: -4,
           borderRadius: 6,
           border: "none", background: "none",
           color: "var(--text-faint)",

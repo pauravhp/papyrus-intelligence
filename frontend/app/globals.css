@@ -190,6 +190,10 @@ body {
 /* Today tab bar (yesterday/today/tomorrow) — taller hit target on mobile */
 .today-mobile-tab { padding: 12px 0; min-height: 44px; }
 
+/* Replan modal dialog padding */
+.replan-dialog { padding: 28px; }
+@media (max-width: 480px) { .replan-dialog { padding: 20px; } }
+
 /* Planning panel: fixed-width 340px on desktop, near-full-width on mobile */
 .planning-panel-shell { width: 340px; }
 @media (max-width: 640px) {

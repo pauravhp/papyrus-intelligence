@@ -257,6 +257,7 @@ export default function ReplanModal({
         alignItems: "center",
         justifyContent: "center",
         zIndex: 1000,
+        padding: "16px",
       }}
     >
       {/* Dialog */}
@@ -266,10 +267,10 @@ export default function ReplanModal({
         aria-modal="true"
         aria-label="Replan your afternoon"
         tabIndex={-1}
+        className="replan-dialog"
         style={{
           background: "var(--surface)",
           borderRadius: 16,
-          padding: 28,
           width: "100%",
           maxWidth: 580,
           maxHeight: "85vh",
