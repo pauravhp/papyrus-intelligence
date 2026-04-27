@@ -146,6 +146,56 @@ body {
   .today-mobile  { display: block; }
 }
 
+/* Inner padding for the auth'd app shell main content. Clamps on mobile. */
+.app-main-pad { padding: 32px 48px 48px; }
+.app-settings-pad { padding: 40px 48px 80px; }
+.app-rhythms-pad { padding: 40px 48px 80px; }
+@media (max-width: 640px) {
+  .app-main-pad { padding: 20px 16px 32px; }
+  .app-settings-pad { padding: 24px 16px 56px; }
+  .app-rhythms-pad { padding: 24px 16px 56px; }
+}
+
+/* Today page header row: stack actions under the title on narrow screens */
+.today-header-row {
+  margin-bottom: 32px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.today-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 640px) {
+  .today-header-row { flex-direction: column; align-items: stretch; gap: 14px; margin-bottom: 20px; }
+  .today-header-actions { justify-content: flex-start; }
+}
+
+/* Settings tab bar — allow horizontal scroll on narrow screens */
+.settings-tab-bar {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-top: 28px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-tab-bar::-webkit-scrollbar { display: none; }
+
+/* Today tab bar (yesterday/today/tomorrow) — taller hit target on mobile */
+.today-mobile-tab { padding: 12px 0; min-height: 44px; }
+
+/* Planning panel: fixed-width 340px on desktop, near-full-width on mobile */
+.planning-panel-shell { width: 340px; }
+@media (max-width: 640px) {
+  .planning-panel-shell { width: calc(100vw - 56px); max-width: 360px; }
+}
+
 /* ── Onboarding responsive overrides ──────────────────────────────────── */
 .onboard-grid-2 {
   display: grid;

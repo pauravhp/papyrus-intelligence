@@ -62,13 +62,7 @@ export default function SettingsClient() {
   return (
     <div>
       {/* Tab bar */}
-      <div
-        style={{
-          display: "flex",
-          marginTop: 28,
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
+      <div className="settings-tab-bar">
         {TABS.map(({ id, label }) => {
           const active = activeTab === id;
           return (
@@ -76,10 +70,11 @@ export default function SettingsClient() {
               key={id}
               onClick={() => setActiveTab(id)}
               style={{
-                padding: "0 2px 11px",
+                padding: "10px 2px 11px",
                 marginRight: 26,
+                minHeight: 40,
                 fontFamily: "var(--font-literata)",
-                fontSize: 13,
+                fontSize: 14,
                 color: active ? "var(--text)" : "var(--text-muted)",
                 cursor: "pointer",
                 border: "none",
@@ -88,6 +83,7 @@ export default function SettingsClient() {
                 outline: "none",
                 transition: "color 0.15s",
                 whiteSpace: "nowrap",
+                flexShrink: 0,
               }}
             >
               {label}

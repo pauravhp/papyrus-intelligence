@@ -212,17 +212,17 @@ export default function TodayPage() {
   return (
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       {/* Main today content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "32px 48px 48px" }}>
+      <div className="app-main-pad" style={{ flex: 1, overflowY: "auto" }}>
         <NudgeBanner nudge={setupNudge} />
         {/* Header */}
         <motion.div
           initial="hidden" animate="show" custom={0} variants={FADE}
-          style={{ marginBottom: 32, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}
+          className="today-header-row"
         >
           <div>
             <h1
               className="font-display"
-              style={{ fontSize: 32, letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 4 }}
+              style={{ fontSize: "clamp(24px, 6vw, 32px)", letterSpacing: "-0.02em", color: "var(--text)", marginBottom: 4 }}
             >
               Schedule
             </h1>
@@ -230,7 +230,7 @@ export default function TodayPage() {
               Yesterday, today, and what&apos;s ahead.
             </p>
           </div>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <div className="today-header-actions">
             {data?.review_available && (
               <ReviewButton onClick={() => setReviewOpen(true)} />
             )}
@@ -302,14 +302,14 @@ export default function TodayPage() {
                 aria-selected={activeTab === d.key}
                 aria-controls="today-tabpanel"
                 onClick={() => setActiveTab(d.key)}
+                className="today-mobile-tab"
                 style={{
                   flex: 1,
-                  padding: "10px 0",
                   background: "none",
                   border: "none",
                   borderBottom: activeTab === d.key ? "2px solid var(--accent)" : "2px solid transparent",
                   color: activeTab === d.key ? "var(--accent)" : "var(--text-muted)",
-                  fontSize: 13,
+                  fontSize: 14,
                   fontFamily: "var(--font-literata)",
                   cursor: "pointer",
                   marginBottom: -1,
