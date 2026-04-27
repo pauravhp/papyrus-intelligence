@@ -1,151 +1,47 @@
 // frontend/components/LandingClient.tsx
 "use client";
 
-import { useState } from "react";
 import { motion } from "framer-motion";
 import { Sun, RefreshCw, BookOpen } from "lucide-react";
 import InkWash from "./InkWash";
 
-// ── Waitlist Form ─────────────────────────────────────────────────────────────
+// ── Shared CTA ────────────────────────────────────────────────────────────────
 
-function WaitlistForm() {
-  const [firstName, setFirstName] = useState("");
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [errorMsg, setErrorMsg] = useState("");
+const CTA_PRIMARY: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "11px 28px",
+  borderRadius: 8,
+  background: "var(--accent)",
+  color: "var(--bg)",
+  fontSize: 14,
+  border: "none",
+  cursor: "pointer",
+  fontFamily: "var(--font-literata)",
+  textDecoration: "none",
+  transition: "background 0.15s",
+};
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || status === "loading") return;
-    setStatus("loading");
-    setErrorMsg("");
-
-    try {
-      const res = await fetch("/api/waitlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, firstName: firstName.trim() }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setErrorMsg((data as { error?: string }).error ?? "Something went wrong. Try again.");
-        setStatus("error");
-        return;
-      }
-
-      setStatus("success");
-    } catch {
-      setErrorMsg("Something went wrong. Try again.");
-      setStatus("error");
-    }
-  };
-
-  if (status === "success") {
-    return (
-      <motion.p
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        style={{
-          fontSize: 15,
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-literata)",
-          fontStyle: "italic",
-        }}
-      >
-        You&apos;re on the list. We&apos;ll be in touch.
-      </motion.p>
-    );
-  }
-
-  const inputStyle: React.CSSProperties = {
-    padding: "11px 16px",
-    borderRadius: 8,
-    border: "1px solid var(--border-strong)",
-    background: "var(--bg)",
-    color: "var(--text)",
-    fontSize: 14,
-    fontFamily: "var(--font-literata)",
-    outline: "none",
-    transition: "border-color 0.15s",
-    width: "100%",
-  };
-
-  return (
-    <div style={{ width: "100%" }}>
-      <form
-        onSubmit={handleSubmit}
-        style={{ display: "flex", gap: 8, alignItems: "stretch" }}
-      >
-        <input
-          type="text"
-          placeholder="First name"
-          value={firstName}
-          onChange={(e) => setFirstName(e.target.value)}
-          style={{ ...inputStyle, flex: "0 0 130px" }}
-          onFocus={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--accent)")}
-          onBlur={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--border-strong)")}
-        />
-        <input
-          type="email"
-          placeholder="Email address"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          style={{ ...inputStyle, flex: "1 1 0" }}
-          onFocus={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--accent)")}
-          onBlur={(e) => ((e.currentTarget as HTMLInputElement).style.borderColor = "var(--border-strong)")}
-        />
-        <button
-          type="submit"
-          disabled={status === "loading"}
-          style={{
-            flex: "0 0 auto",
-            padding: "11px 24px",
-            borderRadius: 8,
-            background: "var(--accent)",
-            color: "var(--bg)",
-            fontSize: 14,
-            border: "none",
-            cursor: status === "loading" ? "default" : "pointer",
-            fontFamily: "var(--font-literata)",
-            opacity: status === "loading" ? 0.7 : 1,
-            transition: "background 0.15s, opacity 0.15s",
-            whiteSpace: "nowrap",
-          }}
-          onMouseEnter={(e) => {
-            if (status !== "loading")
-              (e.currentTarget as HTMLElement).style.background = "var(--accent-hover)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "var(--accent)";
-          }}
-        >
-          {status === "loading" ? "Joining…" : "Join the waitlist"}
-        </button>
-      </form>
-      <p
-        style={{
-          marginTop: 10,
-          fontSize: 12,
-          color: status === "error" ? "var(--danger)" : "var(--text-faint)",
-          fontFamily: "var(--font-literata)",
-        }}
-      >
-        {status === "error" ? errorMsg : "No spam. Just early access when it\u2019s ready."}
-      </p>
-    </div>
-  );
-}
+const CTA_SECONDARY: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "11px 28px",
+  borderRadius: 8,
+  background: "transparent",
+  color: "var(--text-muted)",
+  border: "1px solid var(--border-strong)",
+  fontSize: 14,
+  cursor: "pointer",
+  fontFamily: "var(--font-literata)",
+  textDecoration: "none",
+  transition: "color 0.15s, border-color 0.15s",
+};
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
 function Nav() {
-  const scrollToWaitlist = () => {
-    document.getElementById("waitlist")?.scrollIntoView({ behavior: "smooth" });
-  };
-
   return (
     <nav
       style={{
@@ -168,8 +64,8 @@ function Nav() {
       >
         Papyrus
       </span>
-      <button
-        onClick={scrollToWaitlist}
+      <a
+        href="/login"
         style={{
           fontSize: 13,
           color: "var(--text-muted)",
@@ -179,6 +75,7 @@ function Nav() {
           padding: "6px 16px",
           cursor: "pointer",
           fontFamily: "var(--font-literata)",
+          textDecoration: "none",
           transition: "color 0.15s, border-color 0.15s",
         }}
         onMouseEnter={(e) => {
@@ -190,8 +87,8 @@ function Nav() {
           (e.currentTarget as HTMLElement).style.borderColor = "var(--border-strong)";
         }}
       >
-        Join the waitlist
-      </button>
+        Get started
+      </a>
     </nav>
   );
 }
@@ -199,9 +96,6 @@ function Nav() {
 // ── Hero ──────────────────────────────────────────────────────────────────────
 
 function Hero() {
-  const scrollToWaitlist = () => {
-    document.getElementById("waitlist")?.scrollIntoView({ behavior: "smooth" });
-  };
   const scrollToHowItWorks = () => {
     document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -265,22 +159,9 @@ function Hero() {
           transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           style={{ marginTop: 36, display: "flex", gap: 12, flexWrap: "wrap" }}
         >
-          <button
-            onClick={scrollToWaitlist}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "11px 28px",
-              borderRadius: 8,
-              background: "var(--accent)",
-              color: "var(--bg)",
-              fontSize: 14,
-              border: "none",
-              cursor: "pointer",
-              fontFamily: "var(--font-literata)",
-              transition: "background 0.15s",
-            }}
+          <a
+            href="/login"
+            style={CTA_PRIMARY}
             onMouseEnter={(e) =>
               ((e.currentTarget as HTMLElement).style.background = "var(--accent-hover)")
             }
@@ -288,24 +169,11 @@ function Hero() {
               ((e.currentTarget as HTMLElement).style.background = "var(--accent)")
             }
           >
-            Join the waitlist
-          </button>
+            Get started
+          </a>
           <button
             onClick={scrollToHowItWorks}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "11px 28px",
-              borderRadius: 8,
-              background: "transparent",
-              color: "var(--text-muted)",
-              border: "1px solid var(--border-strong)",
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: "var(--font-literata)",
-              transition: "color 0.15s, border-color 0.15s",
-            }}
+            style={CTA_SECONDARY}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLElement).style.color = "var(--text)";
               (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)";
@@ -357,13 +225,13 @@ const STEPS = [
     Icon: RefreshCw,
     time: "Mid-day",
     title: "When things slip, adapt. Not spiral.",
-    body: "Mark what's done, decide what moves, get a revised afternoon in seconds. The goal was never a perfect plan. It was a day that bends without breaking.",
+    body: "A note like “running behind, skip the gym” is enough to reshape the rest of your day. Mark what’s done, decide what moves, and get a revised afternoon in seconds.",
   },
   {
     Icon: BookOpen,
     time: "End of day",
     title: "See what you actually built",
-    body: "Not what you planned. What you did. A short reflection that compounds over time: your patterns, your capacity, the wins that are easy to miss.",
+    body: "Not what you planned. What you did. A short reflection at day’s end — the wins, the shifts, what tomorrow inherits.",
   },
 ];
 
@@ -492,15 +360,93 @@ function ADayWithPapyrus() {
   );
 }
 
+// ── Why Papyrus (positioning) ─────────────────────────────────────────────────
+
+function WhyPapyrus() {
+  return (
+    <section
+      style={{
+        padding: "96px 48px",
+        background: "var(--bg)",
+      }}
+    >
+      <div style={{ maxWidth: 720, margin: "0 auto" }}>
+        <motion.p
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+          viewport={{ once: true }}
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "var(--accent)",
+            marginBottom: 16,
+          }}
+        >
+          Why Papyrus
+        </motion.p>
+
+        <motion.h2
+          initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.05 }}
+          viewport={{ once: true }}
+          className="font-display"
+          style={{
+            fontSize: "clamp(1.75rem, 4vw, 2.5rem)",
+            letterSpacing: "-0.02em",
+            textAlign: "center",
+            color: "var(--text)",
+            marginBottom: 40,
+          }}
+        >
+          Built for you, not your team.
+        </motion.h2>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.1 }}
+          viewport={{ once: true }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 22,
+            color: "var(--text-secondary)",
+            fontSize: "clamp(1rem, 1.6vw, 1.05rem)",
+            lineHeight: 1.75,
+            textAlign: "center",
+          }}
+        >
+          <p style={{ margin: 0 }}>
+            Most scheduling tools assume the problem is coordinating across people
+            &mdash; defending blocks, finding meeting slots, optimising shared
+            calendars. Papyrus is the opposite. It is built for the one person
+            who has to actually do the work: you, alone with your task list at
+            9am, trying to figure out what kind of day this is going to be.
+          </p>
+          <p style={{ margin: 0 }}>
+            The point is not a perfect schedule. It is understanding what you
+            actually do, on the days you do it well &mdash; and getting better
+            at choosing.
+          </p>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
 // ── CTA strip ─────────────────────────────────────────────────────────────────
 
 function CTAStrip() {
   return (
     <section
-      id="waitlist"
       style={{
-        padding: "96px 48px",
-        background: "var(--bg)",
+        padding: "96px 48px 120px",
+        background: "var(--surface)",
       }}
     >
       <motion.div
@@ -508,7 +454,11 @@ function CTAStrip() {
         whileInView={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.7 }}
         viewport={{ once: true }}
-        style={{ maxWidth: 560, margin: "0 auto" }}
+        style={{
+          maxWidth: 560,
+          margin: "0 auto",
+          textAlign: "center",
+        }}
       >
         <h2
           className="font-display"
@@ -523,7 +473,18 @@ function CTAStrip() {
           <br />
           Planning it shouldn&apos;t be.
         </h2>
-        <WaitlistForm />
+        <a
+          href="/login"
+          style={CTA_PRIMARY}
+          onMouseEnter={(e) =>
+            ((e.currentTarget as HTMLElement).style.background = "var(--accent-hover)")
+          }
+          onMouseLeave={(e) =>
+            ((e.currentTarget as HTMLElement).style.background = "var(--accent)")
+          }
+        >
+          Get started
+        </a>
       </motion.div>
     </section>
   );
@@ -537,6 +498,7 @@ export default function LandingClient() {
       <Nav />
       <Hero />
       <ADayWithPapyrus />
+      <WhyPapyrus />
       <CTAStrip />
     </main>
   );
