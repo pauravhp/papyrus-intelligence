@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
-from src.models import TodoistTask, FreeWindow
+from src.models import CalendarEvent, TodoistTask, FreeWindow
 from api.services.extractor import Block, ExtractionResult
 
 
@@ -721,3 +721,192 @@ def test_confirm_proceeds_when_no_existing_row(client, monkeypatch):
     data = resp.json()
     assert data["schedule_log_id"] == 100
     assert mock_create.call_count == 1
+
+
+# ── Refine self-conflict (item #5) ────────────────────────────────────────────
+
+
+def _set_self_written_log_row(mock_sb, *, gcal_event_ids: str):
+    """Mock the schedule_log SELECT used by the planner pipeline to look up
+    GCal event IDs Papyrus itself wrote for (user, target_date). Mirrors the
+    chain length (3 .eq() → .order → .limit → .execute) used by the helper."""
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value.eq.return_value.eq.return_value
+        .order.return_value.limit.return_value.execute.return_value
+    ).data = [{"gcal_event_ids": gcal_event_ids}]
+
+
+def _ev(eid, hour_start, hour_end):
+    tz = ZoneInfo("America/Vancouver")
+    today = date.today()
+    return CalendarEvent(
+        id=eid, summary=f"evt {eid}",
+        start=datetime(today.year, today.month, today.day, hour_start, 0, tzinfo=tz),
+        end=datetime(today.year, today.month, today.day, hour_end, 0, tzinfo=tz),
+        color_id=None, is_all_day=False,
+    )
+
+
+def test_refine_excludes_self_written_gcal_events(client, monkeypatch):
+    """After /api/plan/confirm, GCal returns events that Papyrus itself wrote.
+    On the next /api/refine the pipeline must filter those event IDs out, or
+    the LLM treats its own writes as conflicts and pushes the rescheduled
+    tasks. Looks up schedule_log.gcal_event_ids for (user, target_date) and
+    drops matching events from both compute_free_windows and the LLM input."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    _set_self_written_log_row(mock_sb, gcal_event_ids='["self-1", "self-2"]')
+
+    self_event = _ev("self-1", 14, 15)
+    other_self = _ev("self-2", 15, 16)
+    external = _ev("external-evt", 16, 17)
+
+    captured = {}
+
+    def fake_compute_free_windows(events, target_date, config, scheduled_tasks=None, **_kw):
+        captured["compute_events"] = list(events)
+        return [_stub_window()]
+
+    def fake_schedule_day(**kwargs):
+        captured["schedule_events"] = list(kwargs.get("events") or [])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+    mock_todoist.get_tasks.return_value = []
+    mock_todoist.get_todays_scheduled_tasks.return_value = []
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.get_events", return_value=[self_event, other_self, external]), \
+         patch("api.services.planner.compute_free_windows", side_effect=fake_compute_free_windows), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints",
+               return_value=ExtractionResult(blocks=[], cutoff_override_iso=None)), \
+         patch("api.services.planner.schedule_day", side_effect=fake_schedule_day):
+
+        resp = client.post(
+            "/api/refine",
+            json={
+                "target_date": "today",
+                "previous_proposal": {"scheduled": [], "pushed": [], "blocks": [], "cutoff_override": None},
+                "refinement_message": "shift things later",
+            },
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    compute_ids = {e.id for e in captured["compute_events"]}
+    schedule_ids = {e.id for e in captured["schedule_events"]}
+    # Papyrus-written events filtered out at every downstream stop
+    assert "self-1" not in compute_ids
+    assert "self-2" not in compute_ids
+    assert "self-1" not in schedule_ids
+    assert "self-2" not in schedule_ids
+    # External events still pass through
+    assert "external-evt" in compute_ids
+    assert "external-evt" in schedule_ids
+
+
+def test_refine_handles_no_schedule_log_row(client, monkeypatch):
+    """If no confirmed schedule_log row exists for target_date (refine before
+    any confirm), the exclusion must no-op and not raise. All events flow
+    through to the scheduler."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    # Empty data list — no confirmed row
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value.eq.return_value.eq.return_value
+        .order.return_value.limit.return_value.execute.return_value
+    ).data = []
+
+    external = _ev("external-evt", 16, 17)
+    captured = {}
+
+    def fake_schedule_day(**kwargs):
+        captured["events"] = list(kwargs.get("events") or [])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+    mock_todoist.get_tasks.return_value = []
+    mock_todoist.get_todays_scheduled_tasks.return_value = []
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.get_events", return_value=[external]), \
+         patch("api.services.planner.compute_free_windows", return_value=[_stub_window()]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints",
+               return_value=ExtractionResult(blocks=[], cutoff_override_iso=None)), \
+         patch("api.services.planner.schedule_day", side_effect=fake_schedule_day):
+
+        resp = client.post(
+            "/api/refine",
+            json={
+                "target_date": "today",
+                "previous_proposal": {"scheduled": [], "pushed": [], "blocks": [], "cutoff_override": None},
+                "refinement_message": "tweak",
+            },
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert {e.id for e in captured["events"]} == {"external-evt"}
+
+
+def test_refine_handles_malformed_gcal_event_ids(client, monkeypatch):
+    """Malformed gcal_event_ids JSON in schedule_log must fall back to an
+    empty exclusion set rather than 500. Defensive parse — this column is a
+    plain text field that could be corrupted by a partial write."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    _set_self_written_log_row(mock_sb, gcal_event_ids="not-valid-json{{")
+
+    external = _ev("external-evt", 16, 17)
+    captured = {}
+
+    def fake_schedule_day(**kwargs):
+        captured["events"] = list(kwargs.get("events") or [])
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+    mock_todoist.get_tasks.return_value = []
+    mock_todoist.get_todays_scheduled_tasks.return_value = []
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.get_events", return_value=[external]), \
+         patch("api.services.planner.compute_free_windows", return_value=[_stub_window()]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints",
+               return_value=ExtractionResult(blocks=[], cutoff_override_iso=None)), \
+         patch("api.services.planner.schedule_day", side_effect=fake_schedule_day):
+
+        resp = client.post(
+            "/api/refine",
+            json={
+                "target_date": "today",
+                "previous_proposal": {"scheduled": [], "pushed": [], "blocks": [], "cutoff_override": None},
+                "refinement_message": "tweak",
+            },
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    # Nothing was filtered (we couldn't decode the IDs), external event stays
+    assert {e.id for e in captured["events"]} == {"external-evt"}
