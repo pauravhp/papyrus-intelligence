@@ -31,6 +31,12 @@ from src.models import CalendarEvent, FreeWindow, ScheduledBlock, TodoistTask
 MAX_WINDOW_MINUTES = 90
 BREAK_BETWEEN_WINDOWS_MINUTES = 15
 
+# Threshold for the auto-roll heuristic on no_tasks_after. A cutoff with an hour
+# strictly less than this is treated as "next day" semantics (e.g. "01:00"
+# → 1 AM tomorrow). Anything >= this is treated as a same-day cutoff that is
+# simply already in the past (no roll, no schedulable time today).
+AUTO_ROLL_MORNING_HOUR = 8
+
 _TIMEZONE_ALIASES = {
     "PST": "America/Vancouver",
     "PST/Vancouver": "America/Vancouver",
@@ -219,10 +225,22 @@ def compute_free_windows(
         effective_start = start_override
 
     # Supports "HH:MM next day" for windows that extend past midnight.
-    # Also auto-rolls to next day when the parsed cutoff falls before effective_start
-    # (e.g. user sets 01:00 via the Settings time picker to mean 1 AM tomorrow).
+    # Also auto-rolls to next day when the parsed cutoff falls before
+    # effective_start AND the cutoff hour is in the early-morning range
+    # (< AUTO_ROLL_MORNING_HOUR). That captures the intended use case — user
+    # types "01:00" via the HTML5 time picker meaning "1 AM tomorrow" — without
+    # over-firing on the late-night case where the user is already past today's
+    # evening cutoff (e.g. now=23:30, cutoff=23:00). Without this gate, the old
+    # heuristic produced a 23-hour window spanning today 23:30 → next day 23:00.
     day_end = _parse_time_extended(no_tasks_after_str, target_date, tz)
-    if day_end <= effective_start and "next day" not in no_tasks_after_str:
+    cutoff_hour, _cutoff_min = _parse_hm(
+        no_tasks_after_str.replace("next day", "").strip()
+    )
+    if (
+        day_end <= effective_start
+        and "next day" not in no_tasks_after_str
+        and cutoff_hour < AUTO_ROLL_MORNING_HOUR
+    ):
         day_end = day_end + timedelta(days=1)
 
     if effective_start >= day_end:

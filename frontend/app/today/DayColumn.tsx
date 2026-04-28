@@ -9,6 +9,12 @@ const GRID_START = 8;
 const GRID_DEFAULT_END = 24;
 const PX_PER_HOUR = 72;
 const GUTTER_WIDTH = 44;
+// Hard ceiling on how far past GRID_START the grid is allowed to extend.
+// Backstop for the "runaway timestamp" case (e.g. backend bug or LLM
+// hallucination places a task 18 hours into tomorrow): without this, the
+// today column auto-grew to a single 28+ hour scrolling mess. Anything past
+// this gets clipped + a "Schedule extends beyond view" notice surfaces.
+const GRID_MAX_HOURS_FROM_START = 28;
 
 interface DayColumnProps {
   label: string;
@@ -68,7 +74,13 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
   const latestTaskEndHour = taskEndHours.length > 0 ? Math.max(...taskEndHours) : 0;
   const nowHour = isToday ? new Date().getHours() : 0;
   const baseEnd = isToday ? Math.max(GRID_DEFAULT_END, nowHour + 1) : GRID_DEFAULT_END;
-  const gridEnd = Math.max(baseEnd, Math.ceil(latestTaskEndHour));
+  const desiredEnd = Math.max(baseEnd, Math.ceil(latestTaskEndHour));
+  // Defensive ceiling: never let the column grow past GRID_START + N hours.
+  // A backend that returned tasks with timestamps deep into the next day would
+  // otherwise produce an 18-hour scrolling mess in today's column.
+  const hardCeiling = GRID_START + GRID_MAX_HOURS_FROM_START;
+  const gridEnd = Math.min(desiredEnd, hardCeiling);
+  const overflowsCap = latestTaskEndHour > hardCeiling;
   const gridHeight = (gridEnd - GRID_START) * PX_PER_HOUR;
 
   // Hour markers: one line + label per hour from GRID_START to gridEnd (inclusive start, exclusive end)
@@ -315,6 +327,26 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
             {/* Now indicator (today column only) */}
             {isToday && <NowIndicator />}
           </div>
+        </div>
+      )}
+
+      {/* Overflow notice — schedule extends past the defensive cap. Surfaces
+          backend / LLM bugs that placed timestamps far past the day boundary
+          rather than silently clipping them out of view. */}
+      {overflowsCap && (
+        <div
+          style={{
+            padding: "8px 14px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--accent-tint)",
+            fontSize: 11,
+            color: "var(--accent)",
+            fontFamily: "var(--font-literata)",
+            fontStyle: "italic",
+            lineHeight: 1.4,
+          }}
+        >
+          Schedule extends beyond view — open Tomorrow&apos;s view to see the rest.
         </div>
       )}
 

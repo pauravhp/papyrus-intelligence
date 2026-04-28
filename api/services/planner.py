@@ -55,6 +55,12 @@ _TRUNCATION_TOLERANCE = 0.95
 # legitimate "confirm now, replan later" flow (which takes minutes of UI work).
 IDEMPOTENCY_WINDOW_SECONDS = 30
 
+# Floor on schedulable time below which "Plan today" returns the empty-with-
+# suggestion shape rather than calling schedule_day. < 30 minutes can't fit a
+# meaningful task block (the smallest @duration label users typically use is
+# @15min and even that needs setup/transition time at this hour).
+_LATE_NIGHT_MIN_MINUTES = 30
+
 
 class AlreadyConfirmedError(Exception):
     """Raised when plan/confirm is called for a date that already has a
@@ -600,6 +606,29 @@ def run_schedule_pipeline(
     )
     already_ids = {t.id for t in scheduled_tasks}
     tasks = [t for t in tasks if t.id not in already_ids]
+
+    # Late-night short-circuit. Plan today is meaningless once today's effective
+    # cutoff has passed (or only a sliver of time is left). Fixed-frontend
+    # contract: scheduled == [] && pushed == [] && free_windows_used == [] +
+    # populated reasoning_summary mentioning "no meaningful time" → frontend
+    # renders a "Plan tomorrow" CTA instead of an empty schedule grid. We
+    # short-circuit BEFORE the schedule_day LLM call to save tokens and to keep
+    # the response shape unambiguous (no rejected items leaking into pushed[]).
+    total_free_minutes = sum(w.duration_minutes for w in free_windows)
+    if target_date == date.today() and total_free_minutes < _LATE_NIGHT_MIN_MINUTES:
+        tz = ZoneInfo(tz_str)
+        now_local = datetime.now(tz).strftime("%I:%M %p").lstrip("0")
+        return {
+            "scheduled": [],
+            "pushed": [],
+            "reasoning_summary": (
+                f"It's already {now_local} — there's no meaningful time left "
+                f"to plan today. Want to plan tomorrow instead?"
+            ),
+            "blocks": [b.to_dict() for b in extracted.blocks],
+            "cutoff_override": extracted.cutoff_override_iso,
+            "free_windows_used": [],
+        }
 
     original_durations = _build_original_durations(tasks)
 

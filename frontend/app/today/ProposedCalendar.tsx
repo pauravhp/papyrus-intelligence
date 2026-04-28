@@ -6,6 +6,11 @@ import TaskCard from "./TaskCard";
 import { type ScheduledItem } from "./TodayPage";
 
 const PX_PER_HOUR = 72;
+// Same defensive ceiling DayColumn applies: a proposed item more than this
+// many hours past the earliest item is treated as a runaway timestamp from
+// the backend. We still render the cards (so nothing silently disappears),
+// but surface an overflow notice so the user knows something's off.
+const MAX_PROPOSAL_SPAN_HOURS = 28;
 function blockHeight(minutes: number): number {
   return Math.max(22, (minutes / 60) * PX_PER_HOUR);
 }
@@ -44,8 +49,43 @@ export default function ProposedCalendar({
     }
   }
 
+  // Detect runaway-span proposals: if the latest item is more than the
+  // defensive horizon past the earliest, the backend likely placed something
+  // far past the day boundary (the late-night fix should prevent this — this
+  // banner is the second layer).
+  let overflowsSpan = false;
+  if (scheduled.length >= 2) {
+    const ms = scheduled
+      .map((item) => new Date(item.end_time).getTime())
+      .filter((t) => Number.isFinite(t));
+    const startMs = scheduled
+      .map((item) => new Date(item.start_time).getTime())
+      .filter((t) => Number.isFinite(t));
+    if (ms.length && startMs.length) {
+      const spanHours = (Math.max(...ms) - Math.min(...startMs)) / 3_600_000;
+      overflowsSpan = spanHours > MAX_PROPOSAL_SPAN_HOURS;
+    }
+  }
+
   return (
     <div>
+      {overflowsSpan && (
+        <p
+          style={{
+            fontSize: 11,
+            color: "var(--accent)",
+            fontFamily: "var(--font-literata)",
+            fontStyle: "italic",
+            marginBottom: 8,
+            padding: "6px 8px",
+            background: "var(--accent-tint)",
+            borderRadius: 6,
+            lineHeight: 1.4,
+          }}
+        >
+          Schedule extends beyond view — open Tomorrow&apos;s view to see the rest.
+        </p>
+      )}
       {/* Proposed blocks */}
       <div style={{ marginBottom: 12 }}>
         {scheduled.length === 0 ? (

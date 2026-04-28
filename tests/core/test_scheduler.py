@@ -641,3 +641,87 @@ def test_daily_block_and_gcal_event_both_respected():
     after_meeting = [w for w in windows if w.start >= meeting_buf_end]
     assert after_meeting, "Expected a window after the meeting buffer"
     assert _hm(after_meeting[0].start) == (16, 15)
+
+
+# ── Late-night window boundary cases ──────────────────────────────────────────
+# Regression coverage for the "Plan today at 23:30 generated a 23-hour window
+# spanning into tomorrow" bug. Auto-roll past-midnight is intended for users
+# who type "01:00" via the HTML time picker meaning "1 AM tomorrow"; it is NOT
+# intended for evening cutoffs that have already been crossed by the current
+# clock time (those should yield no schedulable windows today).
+
+
+def test_late_night_evening_cutoff_already_passed_returns_no_windows():
+    """At 23:30 with default cutoff '23:00', today has no schedulable time —
+    must NOT auto-roll the cutoff to tomorrow 23:00 (which would produce a
+    23-hour window crossing midnight).
+
+    Uses date.today() so the mid-day "advance effective_start to now" branch
+    in compute_free_windows actually fires (it gates on target_date == today)."""
+    today = date.today()
+    now_2330 = datetime(today.year, today.month, today.day, 23, 30, tzinfo=TZ)
+
+    windows = compute_free_windows([], today, BASE_CONTEXT, now_override=now_2330)
+
+    assert windows == [], (
+        f"Expected no windows when current time is past today's cutoff; "
+        f"got {[(w.start.isoformat(), w.end.isoformat()) for w in windows]}"
+    )
+
+
+def test_late_night_early_morning_cutoff_does_auto_roll():
+    """The legitimate use case: cutoff '01:00' (typed via HTML time picker)
+    means "1 AM next day". At 23:30, the window should run today 23:30 →
+    next day 01:00 (90 min)."""
+    ctx = {**BASE_CONTEXT, "sleep": {**BASE_CONTEXT["sleep"], "no_tasks_after": "01:00"}}
+    today = date.today()
+    now_2330 = datetime(today.year, today.month, today.day, 23, 30, tzinfo=TZ)
+
+    windows = compute_free_windows([], today, ctx, now_override=now_2330)
+
+    assert len(windows) == 1
+    w = windows[0]
+    assert (w.start.hour, w.start.minute) == (23, 30)
+    assert w.start.date() == today
+    assert (w.end.hour, w.end.minute) == (1, 0)
+    assert w.end.date() == today + timedelta(days=1)
+    assert w.duration_minutes == 90
+
+
+def test_explicit_next_day_cutoff_still_supported():
+    """The explicit 'HH:MM next day' form continues to work for advanced /
+    CLI users (was the original past-midnight escape hatch before auto-roll)."""
+    ctx = {**BASE_CONTEXT, "sleep": {**BASE_CONTEXT["sleep"], "no_tasks_after": "02:30 next day"}}
+    today = date.today()
+    now_2330 = datetime(today.year, today.month, today.day, 23, 30, tzinfo=TZ)
+
+    windows = compute_free_windows([], today, ctx, now_override=now_2330)
+
+    assert len(windows) == 1
+    assert windows[0].end.date() == today + timedelta(days=1)
+    assert (windows[0].end.hour, windows[0].end.minute) == (2, 30)
+
+
+def test_late_night_exactly_at_cutoff_returns_no_windows():
+    """Edge case: now == cutoff. No remaining time today, no auto-roll."""
+    today = date.today()
+    now_2300 = datetime(today.year, today.month, today.day, 23, 0, tzinfo=TZ)
+
+    windows = compute_free_windows([], today, BASE_CONTEXT, now_override=now_2300)
+
+    assert windows == []
+
+
+def test_morning_planning_with_evening_cutoff_unaffected():
+    """Sanity: planning at 9 AM with cutoff 23:00 still gives a full day —
+    confirms the fix doesn't break the normal use case."""
+    today = date.today()
+    now_morning = datetime(today.year, today.month, today.day, 9, 0, tzinfo=TZ)
+
+    windows = compute_free_windows([], today, BASE_CONTEXT, now_override=now_morning)
+
+    assert len(windows) == 1
+    w = windows[0]
+    assert w.start.date() == today
+    assert w.end.date() == today
+    assert (w.end.hour, w.end.minute) == (23, 0)
