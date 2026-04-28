@@ -1,0 +1,150 @@
+{
+  "tasks": [
+    {
+      "content": "Email Sarah re Q2 budget",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Email task, standard admin work, no urgency indicated."
+    },
+    {
+      "content": "Call the bank about the wire transfer",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Phone call for financial coordination, moderate priority."
+    },
+    {
+      "content": "Pick up dry cleaning",
+      "priority": 2,
+      "duration_minutes": 15,
+      "category_label": "@quick",
+      "deadline": null,
+      "reasoning": "Quick errand, low urgency unless time-sensitive."
+    },
+    {
+      "content": "Draft pitch deck for Tuesday meeting",
+      "priority": 4,
+      "duration_minutes": 90,
+      "category_label": "@deep-work",
+      "deadline": "2026-04-29",
+      "reasoning": "Meeting is tomorrow (Tuesday), requires focused work, high priority."
+    },
+    {
+      "content": "Schedule annual physical",
+      "priority": 2,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Administrative task, no immediate deadline."
+    },
+    {
+      "content": "Reply to Jane's Slack about the contract",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Quick communication task, moderate priority."
+    },
+    {
+      "content": "Renew domain name",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Administrative task, standard priority unless expiring soon."
+    },
+    {
+      "content": "Buy birthday gift for Alex",
+      "priority": 2,
+      "duration_minutes": 30,
+      "category_label": null,
+      "deadline": null,
+      "reasoning": "Errand with no explicit deadline, moderate priority."
+    },
+    {
+      "content": "Submit expense report",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Administrative task, standard priority."
+    },
+    {
+      "content": "Book flights for the conference",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Coordination task, moderate priority unless conference is imminent."
+    },
+    {
+      "content": "Update LinkedIn after the promo announcement",
+      "priority": 2,
+      "duration_minutes": 15,
+      "category_label": "@quick",
+      "deadline": null,
+      "reasoning": "Quick social update, low urgency."
+    },
+    {
+      "content": "Review intern's first PR",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Code review requires focused attention, moderate priority."
+    }
+  ],
+  "rhythms": [
+    {
+      "name": "Workout",
+      "scheduling_hint": "mornings on Mon/Wed/Fri",
+      "sessions_per_week": 3,
+      "session_min_minutes": 45,
+      "session_max_minutes": 60,
+      "days_of_week": [
+        "mon",
+        "wed",
+        "fri"
+      ],
+      "reasoning": "Explicit recurrence pattern three times per week."
+    },
+    {
+      "name": "Read before bed",
+      "scheduling_hint": "every evening",
+      "sessions_per_week": 7,
+      "session_min_minutes": 15,
+      "session_max_minutes": 30,
+      "days_of_week": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "reasoning": "Daily recurring habit, evening placement."
+    },
+    {
+      "name": "Meditate",
+      "scheduling_hint": "every morning",
+      "sessions_per_week": 7,
+      "session_min_minutes": 10,
+      "session_max_minutes": 30,
+      "days_of_week": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "reasoning": "Daily recurring habit, morning placement."
+    }
+  ],
+  "unmatched": []
+}

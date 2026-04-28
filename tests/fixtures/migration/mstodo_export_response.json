@@ -1,0 +1,80 @@
+{
+  "tasks": [
+    {
+      "content": "Quarterly tax filing",
+      "priority": 4,
+      "duration_minutes": 90,
+      "category_label": "@admin",
+      "deadline": "2026-05-02",
+      "reasoning": "Explicit deadline Friday (May 2), tax work is administrative and complex."
+    },
+    {
+      "content": "Update resume with the new role",
+      "priority": 3,
+      "duration_minutes": 60,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Writing/editing task requiring focus; no deadline given, default P2."
+    },
+    {
+      "content": "Backup laptop before the OS upgrade",
+      "priority": 3,
+      "duration_minutes": 45,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Technical maintenance task; no deadline, but implied urgency before upgrade."
+    },
+    {
+      "content": "Call insurance about the claim",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Quick phone call, administrative, no deadline specified."
+    },
+    {
+      "content": "Review the new vendor proposal",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Review task requiring focus; default priority."
+    },
+    {
+      "content": "Order the standing desk add-ons",
+      "priority": 2,
+      "duration_minutes": 15,
+      "category_label": "@quick",
+      "deadline": null,
+      "reasoning": "Quick administrative task with no urgency indicated."
+    },
+    {
+      "content": "Confirm hotel booking for the trip",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Quick coordination task; no deadline given but trip implies some time sensitivity."
+    }
+  ],
+  "rhythms": [
+    {
+      "name": "Daily yoga",
+      "scheduling_hint": "Every morning",
+      "sessions_per_week": 7,
+      "session_min_minutes": 30,
+      "session_max_minutes": 30,
+      "days_of_week": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "reasoning": "Explicit 'every morning' recurrence with fixed 30-min duration."
+    }
+  ],
+  "unmatched": []
+}

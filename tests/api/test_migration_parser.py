@@ -154,3 +154,36 @@ def test_parse_migration_dump_applies_validator():
     assert t["duration_minutes"] == 10
     assert t["category_label"] is None
     assert t["deadline"] is None
+
+
+# ── Frozen real-LLM fixtures ─────────────────────────────────────────────────
+
+from pathlib import Path
+
+_FIXTURES = Path(__file__).parent.parent / "fixtures" / "migration"
+_FIXTURE_NAMES = [
+    "notion_checkbox_export",
+    "notion_ai_structured_export",
+    "apple_notes_dump",
+    "mstodo_export",
+    "brain_dump",
+]
+_BLESSED_DURATIONS = {10, 15, 30, 45, 60, 75, 90, 120, 180}
+_VALID_CATEGORIES = {"@deep-work", "@admin", "@quick", None}
+_VALID_DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+
+@pytest.mark.parametrize("name", _FIXTURE_NAMES)
+def test_fixture_roundtrip_validates(name):
+    """Every captured fixture response is structurally valid post-validator."""
+    response = json.loads((_FIXTURES / f"{name}_response.json").read_text())
+    for t in response["tasks"]:
+        assert t["duration_minutes"] in _BLESSED_DURATIONS
+        assert 1 <= t["priority"] <= 4
+        assert t["category_label"] in _VALID_CATEGORIES
+    for r in response["rhythms"]:
+        assert r["session_min_minutes"] in _BLESSED_DURATIONS
+        assert r["session_max_minutes"] in _BLESSED_DURATIONS
+        assert r["session_min_minutes"] <= r["session_max_minutes"]
+        assert 1 <= r["sessions_per_week"] <= 21
+        assert all(d in _VALID_DAYS for d in r["days_of_week"])

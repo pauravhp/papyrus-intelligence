@@ -1,0 +1,88 @@
+{
+  "tasks": [
+    {
+      "content": "Call the bank about wire transfer",
+      "priority": 4,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": "2026-04-28",
+      "reasoning": "Urgent blocker mentioned first with explicit today context."
+    },
+    {
+      "content": "Email Sarah about Q2 budget",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Admin task in drafts for a week; no explicit deadline but overdue."
+    },
+    {
+      "content": "Write launch announcement",
+      "priority": 3,
+      "duration_minutes": 90,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Focused writing work estimated at 1\u20132 hours; inferred 90 min as mid-range."
+    },
+    {
+      "content": "Renew car registration",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@admin",
+      "deadline": "2026-04-30",
+      "reasoning": "Hard deadline end of month (2 days away); admin task."
+    },
+    {
+      "content": "Refactor auth code",
+      "priority": 1,
+      "duration_minutes": 90,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Explicitly deferred ('not urgent, maybe next week'); low priority."
+    }
+  ],
+  "rhythms": [
+    {
+      "name": "Workout",
+      "scheduling_hint": "Monday, Wednesday, Friday mornings or afternoons",
+      "sessions_per_week": 3,
+      "session_min_minutes": 45,
+      "session_max_minutes": 60,
+      "days_of_week": [
+        "mon",
+        "wed",
+        "fri"
+      ],
+      "reasoning": "Recurring M/W/F pattern; user notes it's been slipping so needs reinforcement."
+    },
+    {
+      "name": "Weekly review",
+      "scheduling_hint": "Every Friday",
+      "sessions_per_week": 1,
+      "session_min_minutes": 30,
+      "session_max_minutes": 60,
+      "days_of_week": [
+        "fri"
+      ],
+      "reasoning": "Explicit 'weekly review on Friday like usual' indicates established rhythm."
+    },
+    {
+      "name": "Read before bed",
+      "scheduling_hint": "Every evening",
+      "sessions_per_week": 7,
+      "session_min_minutes": 15,
+      "session_max_minutes": 30,
+      "days_of_week": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "reasoning": "Daily habit user wants to establish ('every night before bed')."
+    }
+  ],
+  "unmatched": []
+}
