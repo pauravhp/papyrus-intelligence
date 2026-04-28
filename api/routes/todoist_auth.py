@@ -12,7 +12,11 @@ Flow:
 
 State param format: "<user_id>:<unix_timestamp>:<hmac_sha256_hex>"
 No PKCE — Todoist OAuth 2.0 does not support code_verifier.
-Todoist access tokens are indefinite — no refresh_token issued.
+
+Token storage: Todoist apps registered after early 2025 issue 1-hour
+access tokens with mandatory rotating refresh_tokens. We persist the
+full blob (access_token + refresh_token + expires_at) and rely on
+api.services.todoist_token.get_valid_todoist_token to keep it fresh.
 """
 
 import hashlib
@@ -154,9 +158,19 @@ def todoist_oauth_callback(
             detail="Todoist did not return an access_token",
         )
 
+    # Capture refresh_token + expires_at so background calls can refresh
+    # before the 1-hour access token dies. Apps registered after early 2025
+    # always include refresh_token here; if absent (legacy long-lived flow)
+    # we store None and the token helper will treat it as long-lived.
+    expires_in = token_data.get("expires_in")
+    expires_at = int(time.time()) + expires_in if isinstance(expires_in, int) else None
+
     supabase.from_("users").update({
         "todoist_oauth_token": {
             "access_token": access_token,
+            "refresh_token": token_data.get("refresh_token"),
+            "expires_at": expires_at,
+            "token_type": token_data.get("token_type", "Bearer"),
             "granted_at": datetime.now(timezone.utc).isoformat(),
         },
         "oauth_redirect_after": None,

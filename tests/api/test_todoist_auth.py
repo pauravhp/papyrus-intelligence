@@ -65,6 +65,74 @@ def test_todoist_callback_uses_redirect_after(mock_post, mock_verify_state, mock
 @patch("api.routes.todoist_auth.supabase")
 @patch("api.routes.todoist_auth._verify_state", return_value=FAKE_USER_ID)
 @patch("api.routes.todoist_auth.requests.post")
+def test_todoist_callback_stores_full_token_blob(mock_post, mock_verify_state, mock_sb):
+    """Callback persists access_token + refresh_token + expires_at + token_type
+    so the background refresh helper has everything it needs."""
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {
+            "access_token": "fresh-access",
+            "refresh_token": "fresh-refresh",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        },
+    )
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"oauth_redirect_after": None}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    client.get("/auth/todoist/callback?code=abc&state=fake-state")
+
+    update_calls = mock_sb.from_.return_value.update.call_args_list
+    blobs = [
+        call[0][0]["todoist_oauth_token"]
+        for call in update_calls
+        if "todoist_oauth_token" in call[0][0]
+    ]
+    assert blobs, "expected at least one update call writing todoist_oauth_token"
+    blob = blobs[0]
+    assert blob["access_token"] == "fresh-access"
+    assert blob["refresh_token"] == "fresh-refresh"
+    assert blob["token_type"] == "Bearer"
+    assert isinstance(blob["expires_at"], int) and blob["expires_at"] > 0
+
+
+@patch("api.routes.todoist_auth.supabase")
+@patch("api.routes.todoist_auth._verify_state", return_value=FAKE_USER_ID)
+@patch("api.routes.todoist_auth.requests.post")
+def test_todoist_callback_handles_legacy_long_lived_response(mock_post, mock_verify_state, mock_sb):
+    """Older Todoist apps (and the grandfathered legacy app) omit
+    refresh_token + expires_in. We must still persist the access_token
+    and leave refresh_token / expires_at as None so the helper treats
+    the blob as legacy long-lived."""
+    mock_post.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"access_token": "legacy-tok"},
+    )
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"oauth_redirect_after": None}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    client.get("/auth/todoist/callback?code=abc&state=fake-state")
+
+    update_calls = mock_sb.from_.return_value.update.call_args_list
+    blobs = [
+        call[0][0]["todoist_oauth_token"]
+        for call in update_calls
+        if "todoist_oauth_token" in call[0][0]
+    ]
+    assert blobs
+    blob = blobs[0]
+    assert blob["access_token"] == "legacy-tok"
+    assert blob["refresh_token"] is None
+    assert blob["expires_at"] is None
+
+
+@patch("api.routes.todoist_auth.supabase")
+@patch("api.routes.todoist_auth._verify_state", return_value=FAKE_USER_ID)
+@patch("api.routes.todoist_auth.requests.post")
 def test_todoist_callback_clears_redirect_after(mock_post, mock_verify_state, mock_sb):
     """Callback clears oauth_redirect_after after use."""
     mock_post.return_value = MagicMock(status_code=200, json=lambda: {"access_token": "tok"})
