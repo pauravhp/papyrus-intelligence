@@ -50,7 +50,7 @@ function hoursPastColumnMidnight(iso: string, columnDateIso: string): number {
 }
 
 export default function DayColumn({ label, dayData, isToday, planningStatus }: DayColumnProps) {
-  const showSkeleton = isToday && planningStatus === "working";
+  const showSkeleton = planningStatus === "working";
   const scheduled = dayData?.scheduled ?? [];
   const pushed = dayData?.pushed ?? [];
   const isEmpty = scheduled.length === 0;
