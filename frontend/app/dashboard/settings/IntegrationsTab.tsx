@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AlertTriangle, CalendarDays, CheckSquare } from "lucide-react";
 import { apiFetch } from "@/utils/api";
+import Toast, { type ToastState } from "@/components/Toast";
 
 interface IntegrationsTabProps {
   gcalConnected: boolean;
@@ -104,8 +105,9 @@ export default function IntegrationsTab({ gcalConnected, todoistConnected, getTo
   const [syncDetected, setSyncDetected] = useState<boolean | null>(null);
   const [syncCheckLoading, setSyncCheckLoading] = useState(false);
   const [syncRecheckedAtLeastOnce, setSyncRecheckedAtLeastOnce] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
-  const runSyncDetection = useCallback(async () => {
+  const runSyncDetection = useCallback(async (): Promise<{ ok: boolean; detected: boolean }> => {
     setSyncCheckLoading(true);
     try {
       const token = await getToken();
@@ -114,8 +116,10 @@ export default function IntegrationsTab({ gcalConnected, todoistConnected, getTo
         token,
       );
       setSyncDetected(result.detected);
+      return { ok: true, detected: result.detected };
     } catch {
       setSyncDetected(false);
+      return { ok: false, detected: false };
     } finally {
       setSyncCheckLoading(false);
     }
@@ -129,7 +133,14 @@ export default function IntegrationsTab({ gcalConnected, todoistConnected, getTo
 
   const handleRecheck = useCallback(async () => {
     setSyncRecheckedAtLeastOnce(true);
-    await runSyncDetection();
+    const result = await runSyncDetection();
+    if (!result.ok) {
+      setToast({ message: "Re-check failed", tone: "error" });
+    } else if (result.detected) {
+      setToast({ message: "Sync still detected", tone: "error" });
+    } else {
+      setToast({ message: "Sync cleared", tone: "success" });
+    }
   }, [runSyncDetection]);
 
   const handleReconnectGoogle = async () => {
@@ -232,6 +243,7 @@ export default function IntegrationsTab({ gcalConnected, todoistConnected, getTo
           onReconnect={handleReconnectTodoist}
         />
       </div>
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

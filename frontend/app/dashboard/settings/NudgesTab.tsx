@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { apiPatch } from "@/utils/api";
+import Toast, { type ToastState } from "@/components/Toast";
 
 interface NudgesTabProps {
   config: Record<string, unknown>;
@@ -73,6 +74,7 @@ export default function NudgesTab({ config, getToken }: NudgesTabProps) {
     coaching_enabled:            initNudges.coaching_enabled            ?? true,
     weekly_reflection_enabled:   initNudges.weekly_reflection_enabled   ?? true,
   });
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const handleToggle = async (key: NudgeKey) => {
     const prev = values[key];
@@ -84,9 +86,12 @@ export default function NudgesTab({ config, getToken }: NudgesTabProps) {
     try {
       const token = await getToken();
       await apiPatch("/api/settings/nudges", { [key]: next }, token);
-    } catch {
+      setToast({ message: "Saved", tone: "success" });
+    } catch (e) {
       // Revert on error
       setValues((v) => ({ ...v, [key]: prev }));
+      const msg = e instanceof Error ? e.message : "Save failed";
+      setToast({ message: msg, tone: "error" });
     }
   };
 
@@ -119,6 +124,7 @@ export default function NudgesTab({ config, getToken }: NudgesTabProps) {
           </div>
         ))}
       </div>
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }
