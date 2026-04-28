@@ -333,6 +333,58 @@ def test_refine_carries_blocks_into_extractor(client, monkeypatch):
 # ── Validators ────────────────────────────────────────────────────────────────
 
 
+# ── Todoist reconnect surface ─────────────────────────────────────────────────
+
+
+def test_plan_returns_400_todoist_reconnect_required_when_helper_raises(client, monkeypatch):
+    """When get_valid_todoist_token raises TodoistTokenError (refresh rejected,
+    network error, etc.), /api/plan must return 400 with the structured
+    {code: todoist_reconnect_required} that the frontend banner pivots on."""
+    from api.services.todoist_token import TodoistTokenError
+
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.get_valid_todoist_token",
+               side_effect=TodoistTokenError("refresh rejected")):
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "todoist_reconnect_required"
+
+
+def test_plan_surfaces_runtime_auth_failure_as_reconnect_required(client, monkeypatch):
+    """If our refresh check passes but Todoist later 401s mid-call (revoked
+    between checks), the planner raises RuntimeError('Todoist API auth
+    failed …'). The route must repackage that as the same reconnect code."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_gcal = MagicMock()
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials",
+               return_value=(mock_gcal, False)), \
+         patch("api.routes.plan.get_valid_todoist_token", return_value="tok-abc"), \
+         patch("api.routes.plan.planner.plan",
+               side_effect=RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")):
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "todoist_reconnect_required"
+
+
 def test_validator_rejects_block_overlapping_item(client, monkeypatch):
     """LLM placed an item in time the extractor declared blocked → moved to pushed."""
     mock_sb = MagicMock()
