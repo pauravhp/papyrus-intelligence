@@ -31,6 +31,20 @@ def _mock_schedule_log(sb, rows):
         .execute.return_value
     )
     chain.data = rows
+    # Default the queue chain to empty so pre-existing tests don't trip on the new query
+    sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.gte.return_value.lte.return_value.order.return_value.execute.return_value.data = []
+
+
+def _build_today_mock_with_unreviewed_dates(dates: list[str]) -> MagicMock:
+    """Build a supabase MagicMock configured for both schedule_log queries and the review_queue query."""
+    mock_sb = MagicMock()
+    # Main schedule_log query (yesterday/today/tomorrow) — return empty rows
+    _mock_schedule_log(mock_sb, [])
+    # Queue query chain: .eq(user_id).eq(confirmed).is_(reviewed_at).gte().lte().order().execute()
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.gte.return_value.lte.return_value.order.return_value.execute.return_value.data = [
+        {"schedule_date": d} for d in dates
+    ]
+    return mock_sb
 
 
 def test_get_today_returns_three_days(client, monkeypatch):
@@ -301,3 +315,29 @@ def test_today_separates_all_day_events(client, monkeypatch):
     assert data["today"]["all_day_events"] == ["Holiday"]
     assert len(data["today"]["gcal_events"]) == 1
     assert data["today"]["gcal_events"][0]["summary"] == "Meeting"
+
+
+def test_today_response_includes_empty_review_queue(client, monkeypatch):
+    """review_queue has has_unreviewed=False and empty dates when no unreviewed rows exist."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = _build_today_mock_with_unreviewed_dates([])
+    with patch("api.routes.today.supabase", mock_sb):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+    assert resp.status_code == 200
+    q = resp.json()["review_queue"]
+    assert q == {"has_unreviewed": False, "count": 0, "dates": []}
+
+
+def test_today_response_includes_unreviewed_dates_oldest_first(client, monkeypatch):
+    """review_queue.dates are sorted oldest-first and count matches."""
+    from datetime import date, timedelta
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mon = (date.today() - timedelta(days=2)).isoformat()
+    wed = (date.today() - timedelta(days=1)).isoformat()
+    mock_sb = _build_today_mock_with_unreviewed_dates([wed, mon])  # unsorted input
+    with patch("api.routes.today.supabase", mock_sb):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+    q = resp.json()["review_queue"]
+    assert q["dates"] == sorted([mon, wed])
+    assert q["count"] == 2
+    assert q["has_unreviewed"] is True
