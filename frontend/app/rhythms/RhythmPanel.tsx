@@ -400,50 +400,118 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
               {/* Days of week */}
               <div>
                 <label style={LABEL}>Days</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {ALL_DAYS.map((d, i) => {
-                    const on = form.days_of_week.includes(d.key);
-                    return (
+
+                {/* "Any day" toggle. When on, all 7 days are selected and the
+                    chip picker is hidden. When off, user picks specific days
+                    from the chips below. Toggling off from "any" pre-selects
+                    weekdays (Mon-Fri) — most common starting subset, user
+                    can adjust from there. */}
+                {(() => {
+                  const isAnyDay = form.days_of_week.length === 7;
+                  const setAnyDay = (on: boolean) => {
+                    if (on) {
+                      set("days_of_week", ALL_DAYS.map((d) => d.key));
+                    } else if (isAnyDay) {
+                      // Toggling OFF from all-7 → start from weekdays
+                      set("days_of_week", ["monday", "tuesday", "wednesday", "thursday", "friday"]);
+                    }
+                    // else: already a partial selection, leave untouched
+                  };
+                  return (
+                    <>
                       <button
-                        key={d.key}
                         type="button"
-                        onClick={() => {
-                          const next = on
-                            ? form.days_of_week.filter((k) => k !== d.key)
-                            : [...form.days_of_week, d.key];
-                          // Sort by canonical Mon→Sun order so the array stays predictable.
-                          next.sort((a, b) =>
-                            ALL_DAYS.findIndex((x) => x.key === a) -
-                            ALL_DAYS.findIndex((x) => x.key === b)
-                          );
-                          set("days_of_week", next);
-                        }}
-                        aria-pressed={on}
-                        aria-label={d.key}
+                        onClick={() => setAnyDay(!isAnyDay)}
+                        aria-pressed={isAnyDay}
                         style={{
-                          width: 36,
-                          height: 36,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          padding: "6px 10px",
                           borderRadius: 8,
-                          border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
-                          background: on ? "var(--accent-tint)" : "var(--surface-raised)",
-                          color: on ? "var(--accent)" : "var(--text-muted)",
+                          border: `1px solid ${isAnyDay ? "var(--accent)" : "var(--border)"}`,
+                          background: isAnyDay ? "var(--accent-tint)" : "var(--surface-raised)",
+                          color: isAnyDay ? "var(--accent)" : "var(--text-muted)",
                           fontSize: 12,
-                          fontWeight: on ? 600 : 400,
                           fontFamily: "var(--font-literata)",
                           cursor: "pointer",
                           transition: "all 0.12s",
+                          marginBottom: isAnyDay ? 6 : 8,
                         }}
                       >
-                        {d.short}
-                        <span style={{ position: "absolute", left: -9999 }}>
-                          {/* full name for screen readers */}{d.key}
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 14,
+                            height: 14,
+                            borderRadius: 4,
+                            border: `1px solid ${isAnyDay ? "var(--accent)" : "var(--border-strong, var(--border))"}`,
+                            background: isAnyDay ? "var(--accent)" : "transparent",
+                            color: "var(--bg)",
+                            fontSize: 11,
+                            lineHeight: 1,
+                          }}
+                        >
+                          {isAnyDay ? "✓" : ""}
                         </span>
+                        <span style={{ fontWeight: isAnyDay ? 600 : 400 }}>Any day</span>
                       </button>
-                    );
-                  })}
-                </div>
+
+                      {!isAnyDay && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {ALL_DAYS.map((d) => {
+                            const on = form.days_of_week.includes(d.key);
+                            return (
+                              <button
+                                key={d.key}
+                                type="button"
+                                onClick={() => {
+                                  const next = on
+                                    ? form.days_of_week.filter((k) => k !== d.key)
+                                    : [...form.days_of_week, d.key];
+                                  // Sort by canonical Mon→Sun order so the array stays predictable.
+                                  next.sort((a, b) =>
+                                    ALL_DAYS.findIndex((x) => x.key === a) -
+                                    ALL_DAYS.findIndex((x) => x.key === b)
+                                  );
+                                  set("days_of_week", next);
+                                }}
+                                aria-pressed={on}
+                                aria-label={d.key}
+                                style={{
+                                  width: 36,
+                                  height: 36,
+                                  borderRadius: 8,
+                                  border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                                  background: on ? "var(--accent-tint)" : "var(--surface-raised)",
+                                  color: on ? "var(--accent)" : "var(--text-muted)",
+                                  fontSize: 12,
+                                  fontWeight: on ? 600 : 400,
+                                  fontFamily: "var(--font-literata)",
+                                  cursor: "pointer",
+                                  transition: "all 0.12s",
+                                }}
+                              >
+                                {d.short}
+                                <span style={{ position: "absolute", left: -9999 }}>
+                                  {/* full name for screen readers */}{d.key}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+
                 <p style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic", marginTop: 6 }}>
-                  Pick the days this rhythm can land on. Default: every day.
+                  {form.days_of_week.length === 7
+                    ? "Papyrus can place this rhythm on any day."
+                    : "Papyrus will only place this rhythm on the selected days."}
                 </p>
               </div>
 
