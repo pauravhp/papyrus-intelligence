@@ -10,6 +10,12 @@ from pydantic import BaseModel
 from api.auth import get_current_user, require_beta_access
 from api.db import supabase
 from api.services.analytics import capture
+from api.services.review_aggregate_service import (
+    DayStatRow,
+    compute_per_day_stats,
+    compute_task_detail,
+    generate_aggregate_narrative,
+)
 from src.todoist_client import TodoistClient
 
 logger = logging.getLogger(__name__)
@@ -208,4 +214,48 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
     )
 
     return {"saved": True}
+
+
+class AggregateRequest(BaseModel):
+    schedule_dates: list[str]
+
+
+class AggregateResponse(BaseModel):
+    narrative_line: str
+    per_day: list[DayStatRow]
+
+
+@router.post("/review/aggregate")
+def review_aggregate(
+    body: AggregateRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_beta_access),
+) -> AggregateResponse:
+    user_id = user["sub"]
+
+    if not body.schedule_dates:
+        raise HTTPException(status_code=400, detail="schedule_dates must not be empty")
+    if len(body.schedule_dates) > 7:
+        raise HTTPException(status_code=400, detail="schedule_dates length must be <= 7")
+    for d in body.schedule_dates:
+        _validate_review_date(d)
+
+    per_day = compute_per_day_stats(user_id, body.schedule_dates, supabase)
+    task_detail = compute_task_detail(user_id, body.schedule_dates, supabase)
+    narrative = generate_aggregate_narrative(per_day, task_detail)
+
+    total_tasks_completed = sum(p["tasks_completed"] for p in per_day)
+    total_tasks_total = sum(p["tasks_total"] for p in per_day)
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "review_queue_completed",
+        {
+            "days_submitted": len(per_day),
+            "total_tasks_completed": total_tasks_completed,
+            "total_tasks_total": total_tasks_total,
+        },
+    )
+
+    return AggregateResponse(narrative_line=narrative, per_day=[DayStatRow(**p) for p in per_day])
 
