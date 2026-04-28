@@ -303,6 +303,40 @@ def _inject_synthetic_rhythms(
     return synthetic + base_tasks
 
 
+# Validator's truncation-rejection reason is anchored on this prefix. The
+# auto-retry logic detects truncations in the validated proposal by scanning
+# pushed[] for this exact prefix — keep _validate_proposed and this in sync.
+_TRUNCATION_REASON_PREFIX = "Couldn't fit the full duration"
+
+
+def _detect_truncations(validated: dict) -> list[dict]:
+    """Return pushed entries that are validator-flagged truncations. Empty
+    list means the proposal has no shortened tasks (no retry needed)."""
+    return [
+        p for p in validated.get("pushed", [])
+        if isinstance(p.get("reason"), str)
+        and p["reason"].startswith(_TRUNCATION_REASON_PREFIX)
+    ]
+
+
+def _build_truncation_retry_feedback(truncations: list[dict]) -> str:
+    """Build a one-shot instruction for the LLM listing the exact tasks it
+    truncated. Surfaced as additional context_note on the retry call."""
+    lines = [
+        "YOUR PREVIOUS ATTEMPT TRUNCATED THESE TASKS — PUSH THEM INSTEAD OF SHORTENING:",
+    ]
+    for p in truncations:
+        name = p.get("task_name") or p.get("task_id", "")
+        lines.append(f"  - {name}: {p['reason']}")
+    lines.append(
+        "Re-output the full schedule. For each task above, either place it at its FULL "
+        "stated duration in any free window OR push it with reason \"didn't fit\". "
+        "Do NOT shorten them again — truncated placements are rejected by the validator "
+        "and the task disappears from the schedule entirely."
+    )
+    return "\n".join(lines)
+
+
 def _build_original_durations(tasks: list[TodoistTask]) -> dict[str, dict]:
     """
     Map task_id → {min_duration, max_duration, name} for truncation enforcement.
@@ -671,6 +705,47 @@ def run_schedule_pipeline(
         proposed, real_events, user_blocks_events, free_windows,
         original_durations, task_names,
     )
+
+    # ── 6b. Auto-retry on truncation (single retry, no loop) ──────────────────
+    # The schedule_day prompt tells the LLM "DURATIONS ARE FIXED; never shorten."
+    # Despite that, Haiku occasionally squeezes a task into a too-small window
+    # by truncating its duration. The validator catches it and rejects, but the
+    # task is then invisible to the user (a feature loss with no upside).
+    #
+    # Retry exactly once with explicit feedback naming the truncated tasks.
+    # If the retry's validator output has zero truncations, use it. Otherwise
+    # keep the first attempt's result (the rejections are at least surfaced
+    # in pushed[], and a second LLM call with the same outcome is wasted spend).
+    truncations = _detect_truncations(proposed)
+    if truncations:
+        logger.warning(
+            "[pipeline] schedule_day truncated %d task(s); retrying once with feedback",
+            len(truncations),
+        )
+        feedback = _build_truncation_retry_feedback(
+            _restore_full_names({"pushed": list(truncations)}, task_names)["pushed"]
+        )
+        retry_context = (
+            f"{scheduler_context}\n\n{feedback}" if scheduler_context else feedback
+        )
+        retry_proposed = schedule_day(
+            tasks=tasks,
+            free_windows=free_windows,
+            config=config_for_request,
+            context_note=retry_context,
+            anthropic_api_key=user_ctx.get("anthropic_api_key"),
+            target_date=target_date_str,
+            events=events_for_windows,
+        )
+        retry_validated = _validate_proposed(
+            retry_proposed, real_events, user_blocks_events, free_windows,
+            original_durations, task_names,
+        )
+        if not _detect_truncations(retry_validated):
+            proposed = retry_validated
+        else:
+            logger.warning("[pipeline] retry still truncated — keeping first attempt's result")
+
     proposed = _restore_full_names(proposed, task_names)
 
     # ── 7. Persist constraints + windows for next turn ────────────────────────

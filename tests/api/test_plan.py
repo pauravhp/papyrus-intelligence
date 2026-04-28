@@ -1153,3 +1153,148 @@ def test_rhythm_applies_today_legacy_null_days_applies_every_day():
     # Missing key entirely — same as None
     rhythm_missing = {}
     assert _rhythm_applies_today(rhythm_missing, monday)
+
+
+# ── Truncation auto-retry (2026-04-28) ───────────────────────────────────────
+
+
+def test_truncation_auto_retry_replaces_first_attempt_when_retry_clean(client, monkeypatch):
+    """Validator rejects truncated items. The pipeline retries schedule_day
+    once with explicit feedback. If the retry's output has no truncations,
+    use it (the user gets the better schedule). Asserts schedule_day is
+    called exactly TWICE — once for the original, once for the retry."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    call_count = {"n": 0}
+
+    def fake_schedule_day(**_kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First attempt: truncates the 90-min task to 60 min
+            return {
+                "scheduled": [{
+                    "task_id": "t1", "task_name": "Long task",
+                    "start_time": f"{_today()}T14:00:00-07:00",
+                    "end_time": f"{_today()}T15:00:00-07:00",
+                    "duration_minutes": 60, "category": "deep_work",
+                }],
+                "pushed": [],
+                "reasoning_summary": "Truncated to fit.",
+            }
+        # Retry: pushes instead of truncating
+        return {
+            "scheduled": [],
+            "pushed": [{"task_id": "t1", "reason": "didn't fit"}],
+            "reasoning_summary": "Pushed because the full 90 didn't fit.",
+        }
+
+    stack, _, _ = _patch_pipeline(
+        sb=mock_sb,
+        todoist_tasks=[_stub_task("t1", "Long task", 90)],
+        schedule_day_fn=fake_schedule_day,
+    )
+
+    with stack:
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert call_count["n"] == 2, "expected exactly one retry"
+    data = resp.json()
+    # Retry result is what reaches the user — task was pushed cleanly, not truncated
+    assert data["scheduled"] == []
+    pushed_reasons = [p["reason"] for p in data["pushed"]]
+    assert any("didn't fit" in r for r in pushed_reasons)
+    # No truncation reason in the final response
+    assert not any(r.startswith("Couldn't fit the full duration") for r in pushed_reasons)
+
+
+def test_truncation_auto_retry_falls_back_when_retry_still_truncates(client, monkeypatch):
+    """If the retry STILL produces truncations, keep the first attempt's
+    result. Don't loop indefinitely; one retry is the cap. The user still
+    sees the rejection in pushed[] from the first attempt's validator."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    call_count = {"n": 0}
+
+    def both_attempts_truncate(**_kwargs):
+        call_count["n"] += 1
+        # Same truncation both times — LLM ignores the retry feedback
+        return {
+            "scheduled": [{
+                "task_id": "t1", "task_name": "Long task",
+                "start_time": f"{_today()}T14:00:00-07:00",
+                "end_time": f"{_today()}T15:00:00-07:00",
+                "duration_minutes": 60, "category": "deep_work",
+            }],
+            "pushed": [],
+            "reasoning_summary": "Truncated.",
+        }
+
+    stack, _, _ = _patch_pipeline(
+        sb=mock_sb,
+        todoist_tasks=[_stub_task("t1", "Long task", 90)],
+        schedule_day_fn=both_attempts_truncate,
+    )
+
+    with stack:
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    # Exactly two calls: original + one retry. NEVER three.
+    assert call_count["n"] == 2, f"expected single retry; got {call_count['n']} calls"
+    data = resp.json()
+    pushed_reasons = [p["reason"] for p in data["pushed"]]
+    # Falls back: user still sees the truncation rejection in pushed[]
+    assert any(r.startswith("Couldn't fit the full duration") for r in pushed_reasons)
+
+
+def test_no_truncation_means_no_retry(client, monkeypatch):
+    """When the LLM produces a clean schedule on the first attempt (no
+    truncations), schedule_day should be called exactly ONCE — no wasted
+    retry on the happy path."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    call_count = {"n": 0}
+
+    def clean_schedule(**_kwargs):
+        call_count["n"] += 1
+        return {
+            "scheduled": [{
+                "task_id": "t1", "task_name": "Task",
+                "start_time": f"{_today()}T14:00:00-07:00",
+                "end_time": f"{_today()}T15:00:00-07:00",
+                "duration_minutes": 60, "category": "deep_work",
+            }],
+            "pushed": [],
+            "reasoning_summary": "ok",
+        }
+
+    stack, _, _ = _patch_pipeline(
+        sb=mock_sb,
+        todoist_tasks=[_stub_task("t1", "Task", 60)],
+        schedule_day_fn=clean_schedule,
+    )
+
+    with stack:
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    assert call_count["n"] == 1, "no retry should happen when first attempt is clean"
