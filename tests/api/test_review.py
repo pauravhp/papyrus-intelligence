@@ -335,3 +335,30 @@ def test_submit_rejects_date_older_than_7_days(client, monkeypatch):
     with patch("api.routes.review.supabase", MagicMock()):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
     assert resp.status_code == 400
+
+
+def test_preflight_accepts_date_param(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, SAMPLE_TASKS)
+    _mock_rhythms(mock_sb, SAMPLE_RHYTHMS)
+    mock_todoist = MagicMock()
+    mock_todoist.get_task.return_value = MagicMock()
+
+    target = (date.today() - timedelta(days=2)).isoformat()
+    with patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review.TodoistClient", return_value=mock_todoist):
+        resp = client.get(f"/api/review/preflight?date={target}", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    # schedule_date is the second .eq in the chain: .select().eq(user_id).eq(schedule_date)
+    eq2_calls = mock_sb.from_.return_value.select.return_value.eq.return_value.eq.call_args_list
+    assert any(call.args == ("schedule_date", target) for call in eq2_calls)
+
+
+def test_preflight_rejects_future_date(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    future = (date.today() + timedelta(days=1)).isoformat()
+    with patch("api.routes.review.supabase", MagicMock()):
+        resp = client.get(f"/api/review/preflight?date={future}", headers={"Authorization": "Bearer fake-jwt"})
+    assert resp.status_code == 400

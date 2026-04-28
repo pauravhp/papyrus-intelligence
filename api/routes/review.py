@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 import anthropic
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import get_current_user, require_beta_access
@@ -74,16 +74,19 @@ def _validate_review_date(value: str | None) -> str:
 
 
 @router.get("/review/preflight")
-def review_preflight(user: dict = Depends(require_beta_access)) -> dict:
+def review_preflight(
+    date_param: str | None = Query(default=None, alias="date"),
+    user: dict = Depends(require_beta_access),
+) -> dict:
     user_id = user["sub"]
-    today = date.today().isoformat()
+    target_date = _validate_review_date(date_param)
 
-    # 1. Get today's confirmed schedule
+    # 1. Get the confirmed schedule for the target date
     result = (
         supabase.from_("schedule_log")
         .select("proposed_json")
         .eq("user_id", user_id)
-        .eq("schedule_date", today)
+        .eq("schedule_date", target_date)
         .eq("confirmed", 1)
         .order("id", desc=True)
         .limit(1)
@@ -91,7 +94,7 @@ def review_preflight(user: dict = Depends(require_beta_access)) -> dict:
     )
     rows = result.data or []
     if not rows or not rows[0].get("proposed_json"):
-        raise HTTPException(status_code=404, detail="No confirmed schedule for today")
+        raise HTTPException(status_code=404, detail=f"No confirmed schedule for {target_date}")
 
     schedule = json.loads(rows[0]["proposed_json"])
     tasks = schedule.get("scheduled", [])
