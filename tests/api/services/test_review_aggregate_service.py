@@ -95,3 +95,41 @@ def test_build_aggregate_prompt_multi_day_uses_paragraph_instruction():
     assert "Sun Apr 26" in prompt
     assert "Mon Apr 27" in prompt
     assert "low_energy" in prompt
+
+
+from unittest.mock import patch
+from api.services.review_aggregate_service import generate_aggregate_narrative
+
+
+def test_generate_aggregate_narrative_returns_llm_text_on_success():
+    per_day = [{"schedule_date": "2026-04-27", "weekday": "Mon", "tasks_completed": 1, "tasks_total": 1, "rhythms_completed": 0, "rhythms_total": 0}]
+    task_detail = {"2026-04-27": {"completed": ["X"], "incomplete": []}}
+
+    fake_msg = MagicMock()
+    fake_msg.content = [MagicMock(text="A focused morning of writing closed out Monday cleanly.")]
+    with patch("api.services.review_aggregate_service.anthropic.Anthropic") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.return_value = fake_msg
+        out = generate_aggregate_narrative(per_day, task_detail)
+    assert "Monday" in out
+
+
+def test_generate_aggregate_narrative_retries_once_then_falls_back():
+    per_day = [{"schedule_date": "2026-04-27", "weekday": "Mon", "tasks_completed": 1, "tasks_total": 2, "rhythms_completed": 0, "rhythms_total": 0}]
+    task_detail = {"2026-04-27": {"completed": ["X"], "incomplete": [("Y", "forgot")]}}
+
+    with patch("api.services.review_aggregate_service.anthropic.Anthropic") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.side_effect = Exception("boom")
+        out = generate_aggregate_narrative(per_day, task_detail)
+    assert "1 of 2" in out  # deterministic fallback
+
+
+def test_generate_aggregate_narrative_truncates_long_responses():
+    per_day = [{"schedule_date": "2026-04-27", "weekday": "Mon", "tasks_completed": 1, "tasks_total": 1, "rhythms_completed": 0, "rhythms_total": 0}]
+    task_detail = {"2026-04-27": {"completed": ["X"], "incomplete": []}}
+    long_text = ". ".join(["Sentence " + str(i) for i in range(50)]) + "."
+    fake_msg = MagicMock()
+    fake_msg.content = [MagicMock(text=long_text)]
+    with patch("api.services.review_aggregate_service.anthropic.Anthropic") as mock_client_cls:
+        mock_client_cls.return_value.messages.create.return_value = fake_msg
+        out = generate_aggregate_narrative(per_day, task_detail)
+    assert len(out.split()) <= 100

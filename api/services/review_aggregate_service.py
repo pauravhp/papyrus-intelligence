@@ -153,3 +153,51 @@ def build_aggregate_prompt(per_day: list[dict], task_detail: dict[str, dict]) ->
         f"Days reviewed:\n{per_day_block}\n\n"
         "Output ONLY the prose. No markdown."
     )
+
+
+def _truncate_to_sentence(text: str, soft_word_limit: int = 100) -> str:
+    words = text.split()
+    if len(words) <= soft_word_limit:
+        return text.strip()
+    truncated = " ".join(words[:soft_word_limit])
+    last_period = truncated.rfind(".")
+    return (truncated[: last_period + 1] if last_period > 0 else truncated).strip()
+
+
+def _fallback_narrative(per_day: list[dict]) -> str:
+    n = len(per_day)
+    tasks_completed = sum(d["tasks_completed"] for d in per_day)
+    tasks_total = sum(d["tasks_total"] for d in per_day)
+    day_word = "day" if n == 1 else "days"
+    return (
+        f"You closed out {n} {day_word}. {tasks_completed} of {tasks_total} tasks done overall."
+    )
+
+
+def _call_llm(prompt: str) -> str:
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=120,
+        temperature=0.4,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip()
+
+
+def generate_aggregate_narrative(
+    per_day: list[dict],
+    task_detail: dict[str, dict],
+) -> str:
+    prompt = build_aggregate_prompt(per_day, task_detail)
+    try:
+        text = _call_llm(prompt)
+        return _truncate_to_sentence(text)
+    except Exception as first_err:
+        logger.warning("[aggregate] LLM call failed once: %s — retrying", first_err)
+        try:
+            text = _call_llm(prompt)
+            return _truncate_to_sentence(text)
+        except Exception as second_err:
+            logger.warning("[aggregate] LLM call failed twice: %s — using fallback", second_err)
+            return _fallback_narrative(per_day)
