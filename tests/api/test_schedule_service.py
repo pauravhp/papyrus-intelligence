@@ -672,6 +672,32 @@ def test_build_prompt_includes_48_hour_deadline_rule():
     assert "P1" in prompt
 
 
+def test_build_prompt_renders_todoist_priority_in_standard_P1_to_P4_form():
+    """Regression: Todoist's API stores priority as 4=P1 (most urgent), 1=P4
+    (least). Earlier prompt rendered tasks as `p{priority}` directly, which
+    inverted the urgency the LLM saw — a Todoist P1 (priority=4) appeared as
+    `p4` to the LLM and was treated as low-priority. This test pins the fix:
+    a task with priority=4 must show as `P1` in the prompt; priority=1 as
+    `P4`. The lowercase `p{n}` form must NOT appear adjacent to the task line."""
+    from api.services.schedule_service import _build_prompt
+    tz = ZoneInfo("America/Vancouver")
+    tasks = [
+        TodoistTask(id="urgent", content="Ship the thing", project_id="p1",
+                    priority=4, due_datetime=None, deadline=None,
+                    duration_minutes=60, labels=[], is_inbox=True),
+        TodoistTask(id="someday", content="Read the paper", project_id="p1",
+                    priority=1, due_datetime=None, deadline=None,
+                    duration_minutes=30, labels=[], is_inbox=True),
+    ]
+    prompt = _build_prompt(tasks, _make_windows(), _make_config(), "", "2026-04-12")
+    # Must render as P1 / P4 (uppercase, standard nomenclature)
+    assert "urgent Ship the thing P1" in prompt
+    assert "someday Read the paper P4" in prompt
+    # Must NOT render as the inverted Todoist-API encoding directly
+    assert "urgent Ship the thing p4" not in prompt
+    assert "someday Read the paper p1" not in prompt
+
+
 def test_build_prompt_includes_rhythm_precedence_rule():
     """The prompt must explicitly tell the LLM that rhythms outrank P3/P4
     one-off tasks competing for the same window. Without this rule, the LLM

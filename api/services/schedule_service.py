@@ -97,6 +97,16 @@ def _overflow_rule(config: dict) -> str:
     )
 
 
+_P_LABEL_MAP = {4: "P1", 3: "P2", 2: "P3", 1: "P4"}
+
+
+def _to_p_label(priority: int) -> str:
+    """Map Todoist's inverted priority encoding (4=P1, 1=P4) to the standard
+    P1..P4 nomenclature humans read. Used in prompt rendering so the LLM
+    sees the same priority semantics the rules talk about."""
+    return _P_LABEL_MAP.get(priority, "P3")  # default to P3 for any unexpected value
+
+
 def _build_prompt(
     tasks: list[TodoistTask],
     free_windows: list[FreeWindow],
@@ -110,16 +120,21 @@ def _build_prompt(
 
     lines = []
     for t in tasks:
+        # Todoist's API stores priority inverted: priority=4 means P1 (most
+        # urgent), priority=1 means P4 (least). Render in standard P1..P4
+        # nomenclature so the LLM reads urgency the way humans do AND the
+        # way the rules below reference it ("P1", "P2", etc).
+        p_label = _to_p_label(t.priority)
         if t.is_rhythm and t.session_max_minutes:
             dur_str = f"{t.duration_minutes}-{t.session_max_minutes}min"
             cadence = f" [{t.sessions_per_week}x/week]" if t.sessions_per_week else ""
             # The hint is structured (not embedded in content) so it survives
             # truncation and never leaks into user-facing task_name.
             hint = f" [hint: {t.rhythm_hint}]" if t.rhythm_hint else ""
-            lines.append(f"{t.id} {t.content[:50]} p{t.priority} {dur_str}{cadence}{hint} [rhythm]")
+            lines.append(f"{t.id} {t.content[:50]} {p_label} {dur_str}{cadence}{hint} [rhythm]")
         else:
             lines.append(
-                f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
+                f"{t.id} {t.content[:50]} {p_label} {t.duration_minutes}m"
                 + (f" due={t.deadline}" if t.deadline else "")
             )
     tasks_text = "\n".join(lines)
