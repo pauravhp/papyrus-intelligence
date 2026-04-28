@@ -19,12 +19,13 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from google.oauth2.credentials import Credentials
 
 from api.auth import require_beta_access
+from api.services.analytics import capture
 from api.config import settings
 from api.db import supabase
 from api.services.import_calendar import (
@@ -150,6 +151,7 @@ def _load_user_credentials(user_id: str):
 @router.post("/convert", response_model=ConvertResponse)
 def convert(
     body: ConvertRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(require_beta_access),
 ) -> ConvertResponse:
     """Parse a raw task dump into structured tasks + rhythms. No external writes."""
@@ -173,6 +175,17 @@ def convert(
             },
         )
 
+    user_id = user["sub"]
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "import_pasted",
+        {
+            "char_count": len(text),
+            "line_count": text.count("\n") + 1,
+        },
+    )
+
     today = date.fromisoformat(body.target_date) if body.target_date else date.today()
     try:
         result = parse_migration_dump(
@@ -187,6 +200,12 @@ def convert(
         )
     except MigrationParseError as exc:
         logger.error("[import] parse failed: %s", exc)
+        background_tasks.add_task(
+            capture,
+            user_id,
+            "import_parsed_failed",
+            {"reason": str(exc)},
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -195,12 +214,23 @@ def convert(
             },
         )
 
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "import_parsed_ok",
+        {
+            "tasks_n": len(result.get("tasks", [])),
+            "rhythms_n": len(result.get("rhythms", [])),
+            "unmatched_n": len(result.get("unmatched", [])),
+        },
+    )
     return ConvertResponse(**result)
 
 
 @router.post("/commit", response_model=CommitResponse)
 def commit(
     body: CommitRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(require_beta_access),
 ) -> CommitResponse:
     """Write approved tasks to Todoist, rhythms to Supabase, and ensure the
@@ -275,6 +305,32 @@ def commit(
             errors.append(
                 CommitError(kind="calendar", name="<papyrus>", reason=str(exc)[:200])
             )
+
+    # papyrus_calendar_created: True when we found/created the calendar this run
+    # (non-null ID AND no scope upgrade required — scope upgrade means we couldn't act)
+    papyrus_calendar_created = (
+        papyrus_calendar_id is not None and not calendar_scope_upgrade_required
+    )
+
+    if calendar_scope_upgrade_required:
+        background_tasks.add_task(
+            capture,
+            user_id,
+            "papyrus_calendar_scope_upgrade_required",
+            {},
+        )
+
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "import_committed",
+        {
+            "tasks_created": tasks_created,
+            "rhythms_created": rhythms_created,
+            "errors_n": len(errors),
+            "papyrus_calendar_created": papyrus_calendar_created,
+        },
+    )
 
     return CommitResponse(
         tasks_created=tasks_created,

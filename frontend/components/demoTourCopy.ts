@@ -17,7 +17,7 @@ export type TourStep =
 export const TOUR_COPY: Record<TourStep, { title: string; body: string }> = {
   reveal: {
     title: "Take a look",
-    body: "I found {tasksN} task(s) and {rhythmsN} recurring routine(s) in your dump. Here's how I'd label each so Papyrus can schedule them.",
+    body: "I found {tasksN} task(s) and {rhythmsN} recurring routine(s). Here's how I'd organise each one — edit anything that looks off before saving.",
   },
   post_commit: {
     title: "Saved",
@@ -37,11 +37,11 @@ export const TOUR_COPY: Record<TourStep, { title: string; body: string }> = {
   },
   gcal_confirm: {
     title: "Last step — calendar",
-    body: "I'll create a Papyrus calendar in your Google account and write these blocks to it. Confirm?",
+    body: "Ready to put this on your calendar? I'll create a separate Papyrus calendar in Google Calendar so it stays out of the way.",
   },
   done: {
     title: "You're set",
-    body: "Tomorrow morning come back, hit Plan today, and we'll do this for real.",
+    body: "Come back tomorrow morning, hit Plan today, and we'll do this for real.",
   },
   tiny_batch_warning: {
     title: "Just a small batch",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useReducer, useRef, useCallback, useEffect } from "react";
+import { usePostHog } from "posthog-js/react";
 import { createClient } from "@/utils/supabase/client";
 import { ApiError } from "@/utils/api";
 import {
@@ -321,6 +322,7 @@ export default function ImportStage({ variant, onComplete }: Props) {
   const supabase = supabaseRef.current;
 
   const [state, dispatch] = useReducer(reducer, initialState);
+  const posthog = usePostHog();
 
   // ---------------------------------------------------------------------------
   // Token helper — fetched fresh per call, never stored in state
@@ -371,9 +373,12 @@ export default function ImportStage({ variant, onComplete }: Props) {
   );
 
   const handleSkipOut = useCallback(() => {
+    // Capture the kind BEFORE dispatching EXIT — post-dispatch kind will be "exited"
+    posthog?.capture("import_demo_skipped", { at_step: state.phase.tag });
     dispatch({ type: "EXIT" });
     onComplete();
-  }, [onComplete]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onComplete, state.phase.tag]);
 
   // ---------------------------------------------------------------------------
   // Auto-plan: triggered when phase transitions to post_commit
@@ -397,6 +402,31 @@ export default function ImportStage({ variant, onComplete }: Props) {
         dispatch({ type: "AUTO_PLAN_FAIL", result, message: "Couldn't generate a plan." });
       }
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase]);
+
+  // ---------------------------------------------------------------------------
+  // Analytics: fire events on gcal_done transition
+  // ---------------------------------------------------------------------------
+
+  const gcalDoneFiredRef = useRef(false);
+
+  useEffect(() => {
+    const p = state.phase;
+    if (p.tag !== "gcal_done") return;
+    if (gcalDoneFiredRef.current) return;
+    gcalDoneFiredRef.current = true;
+
+    posthog?.capture("import_demo_completed");
+    posthog?.capture("gcal_first_write_confirmed");
+
+    // papyrus_calendar_created: non-null ID AND no scope upgrade required
+    const calendarCreated =
+      p.result.papyrus_calendar_id != null &&
+      !p.result.calendar_scope_upgrade_required;
+    if (calendarCreated) {
+      posthog?.capture("papyrus_calendar_created");
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase]);
 
@@ -452,6 +482,13 @@ export default function ImportStage({ variant, onComplete }: Props) {
       onComplete();
     }
   }, [variant, onComplete]);
+
+  // Fire import_stage_shown once on mount for non-skip variants
+  useEffect(() => {
+    if (variant === "skip_entirely") return;
+    posthog?.capture("import_stage_shown", { variant });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (variant === "skip_entirely") {
     return null;
