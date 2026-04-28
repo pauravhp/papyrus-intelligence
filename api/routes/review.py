@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import anthropic
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -53,8 +53,24 @@ class ReviewSubmitRhythm(BaseModel):
 
 
 class ReviewSubmitRequest(BaseModel):
+    schedule_date: str | None = None
     tasks: list[ReviewSubmitTask]
     rhythms: list[ReviewSubmitRhythm]
+
+
+def _validate_review_date(value: str | None) -> str:
+    if value is None:
+        return date.today().isoformat()
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="schedule_date must be YYYY-MM-DD")
+    today = date.today()
+    if parsed > today:
+        raise HTTPException(status_code=400, detail="schedule_date cannot be in the future")
+    if parsed < today - timedelta(days=7):
+        raise HTTPException(status_code=400, detail="schedule_date is older than the 7-day review window")
+    return parsed.isoformat()
 
 
 @router.get("/review/preflight")
@@ -165,7 +181,7 @@ def _generate_summary_line(tasks: list[ReviewSubmitTask], rhythms: list[ReviewSu
 @router.post("/review/submit")
 def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_beta_access)) -> dict:
     user_id = user["sub"]
-    today = date.today().isoformat()
+    target_date = _validate_review_date(body.schedule_date)
 
     completed_count = sum(1 for t in body.tasks if t.completed)
     total_count = len(body.tasks)
@@ -176,7 +192,7 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
             "user_id": user_id,
             "task_id": t.task_id,
             "task_name": t.task_name,
-            "schedule_date": today,
+            "schedule_date": target_date,
             "estimated_duration_mins": t.estimated_duration_mins,
             "actual_duration_mins": t.actual_duration_mins if t.completed else None,
             "scheduled_at": t.scheduled_at,
@@ -198,7 +214,7 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
         {
             "user_id": user_id,
             "rhythm_id": r.rhythm_id,
-            "completed_on": today,
+            "completed_on": target_date,
         }
         for r in body.rhythms
         if r.completed
@@ -210,7 +226,12 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
             ignore_duplicates=True,
         ).execute()
 
-    # 3. Generate summary line (graceful fallback)
+    # 3. Stamp reviewed_at on the confirmed schedule_log row (idempotent — only if not already set)
+    supabase.from_("schedule_log").update({
+        "reviewed_at": datetime.now(timezone.utc).isoformat()
+    }).eq("user_id", user_id).eq("schedule_date", target_date).eq("confirmed", 1).is_("reviewed_at", "null").execute()
+
+    # 4. Generate summary line (graceful fallback)
     try:
         summary_line = _generate_summary_line(body.tasks, body.rhythms)
     except Exception:

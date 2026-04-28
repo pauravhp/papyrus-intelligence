@@ -10,6 +10,7 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
 
 import json
 import pytest
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
@@ -269,3 +270,68 @@ def test_review_submit_fires_analytics(client, monkeypatch):
     assert args[2]["tasks_completed"] == 1
     assert args[2]["rhythms_total"] == 1
     assert args[2]["rhythms_completed"] == 1
+
+
+def test_submit_uses_schedule_date_from_body(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+    mock_sb.from_.return_value.update.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value.data = []
+
+    payload = {
+        "schedule_date": "2026-04-26",
+        "tasks": [{
+            "task_id": "t1", "task_name": "Deep work", "completed": True,
+            "actual_duration_mins": 90, "estimated_duration_mins": 90,
+            "scheduled_at": "2026-04-26T09:00:00+05:30", "incomplete_reason": None,
+        }],
+        "rhythms": [],
+    }
+    with patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review._generate_summary_line", return_value="Good day."):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    upsert_calls = [c for c in mock_sb.from_.return_value.upsert.call_args_list]
+    assert any(
+        rows[0].get("schedule_date") == "2026-04-26"
+        for call in upsert_calls
+        for rows in [call.args[0]] if isinstance(rows, list) and rows
+    )
+
+
+def test_submit_sets_reviewed_at_on_schedule_log_row(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+
+    payload = {
+        "schedule_date": "2026-04-27",
+        "tasks": [], "rhythms": [],
+    }
+    with patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review._generate_summary_line", return_value="Good day."):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    mock_sb.from_.assert_any_call("schedule_log")
+    update_calls = mock_sb.from_.return_value.update.call_args_list
+    assert any("reviewed_at" in (c.args[0] if c.args else c.kwargs.get("json", {})) for c in update_calls)
+
+
+def test_submit_rejects_future_date(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    future = (date.today() + timedelta(days=1)).isoformat()
+    payload = {"schedule_date": future, "tasks": [], "rhythms": []}
+    with patch("api.routes.review.supabase", MagicMock()):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+    assert resp.status_code == 400
+
+
+def test_submit_rejects_date_older_than_7_days(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    old = (date.today() - timedelta(days=8)).isoformat()
+    payload = {"schedule_date": old, "tasks": [], "rhythms": []}
+    with patch("api.routes.review.supabase", MagicMock()):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+    assert resp.status_code == 400
