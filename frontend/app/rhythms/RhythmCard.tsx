@@ -16,11 +16,15 @@ export interface Rhythm {
   session_max_minutes: number;
   end_date: string | null;
   sort_order: number;
+  days_of_week: string[] | null;
 }
 
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
+// Index 0=Mon … 6=Sun, matching DAYS above.
+const DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
-// Which day indices (0=Mon … 6=Sun) are "active" for each sessions_per_week value.
+// Fallback dot pattern when days_of_week is null — preserves the legacy
+// "even spread" visual based on sessions_per_week.
 const DOT_INDICES: Record<number, number[]> = {
   1: [3],
   2: [1, 4],
@@ -50,7 +54,9 @@ export default function RhythmCard({ rhythm, onEdit, onDelete }: Props) {
     isDragging,
   } = useSortable({ id: rhythm.id });
 
-  const activeDots = DOT_INDICES[rhythm.sessions_per_week] ?? [];
+  const activeDots = rhythm.days_of_week && rhythm.days_of_week.length > 0
+    ? rhythm.days_of_week.map((d) => DAY_NAMES.indexOf(d)).filter((i) => i >= 0)
+    : (DOT_INDICES[rhythm.sessions_per_week] ?? []);
 
   const formatEndDate = (d: string) => {
     // Parse as local date to avoid UTC offset shifting the day

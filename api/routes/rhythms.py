@@ -11,6 +11,7 @@ from api.auth import get_current_user, require_beta_access
 from api.db import supabase
 from api.services.analytics import capture
 from api.services.rhythm_service import (
+    _DAYS_UNSET,
     _DESCRIPTION_UNSET,
     create_rhythm,
     delete_rhythm,
@@ -29,6 +30,7 @@ class CreateRhythmRequest(BaseModel):
     end_date: str | None = None
     sort_order: int = 0
     description: str | None = None
+    days_of_week: list[str] | None = None
 
 
 class UpdateRhythmRequest(BaseModel):
@@ -38,6 +40,7 @@ class UpdateRhythmRequest(BaseModel):
     end_date: str | None = None
     sort_order: int | None = None
     description: str | None = None
+    days_of_week: list[str] | None = None
 
 
 @router.get("")
@@ -61,6 +64,7 @@ def create_rhythm_route(
         end_date=body.end_date,
         sort_order=body.sort_order,
         description=desc,
+        days_of_week=body.days_of_week,
     )
     background_tasks.add_task(
         capture,
@@ -87,6 +91,8 @@ def update_rhythm_route(
     else:
         desc = _DESCRIPTION_UNSET
 
+    days = body.days_of_week if "days_of_week" in body.model_fields_set else _DAYS_UNSET
+
     return update_rhythm(
         user["sub"], supabase, rhythm_id=rhythm_id,
         sessions_per_week=body.sessions_per_week,
@@ -95,6 +101,7 @@ def update_rhythm_route(
         end_date=body.end_date,
         sort_order=body.sort_order,
         description=desc,
+        days_of_week=days,
     )
 
 

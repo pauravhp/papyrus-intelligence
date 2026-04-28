@@ -10,6 +10,7 @@ from datetime import date, datetime
 # Sentinel: distinguishes "description not supplied to update_rhythm" from
 # "description explicitly set to None (clear to NULL)".
 _DESCRIPTION_UNSET = object()
+_DAYS_UNSET = object()
 
 
 def get_active_rhythms(user_id: str, supabase) -> list[dict]:
@@ -36,6 +37,7 @@ def create_rhythm(
     end_date: str | None = None,
     sort_order: int = 0,
     description: str | None = None,
+    days_of_week: list[str] | None = None,
 ) -> dict:
     """Insert a new rhythm. Returns the created row."""
     now = datetime.now().isoformat()
@@ -48,6 +50,7 @@ def create_rhythm(
         "end_date": end_date,
         "sort_order": sort_order,
         "description": description,
+        "days_of_week": days_of_week,
         "created_at": now,
         "updated_at": now,
     }
@@ -65,6 +68,7 @@ def update_rhythm(
     end_date: str | None = None,
     sort_order: int | None = None,
     description=_DESCRIPTION_UNSET,  # str | None | _DESCRIPTION_UNSET
+    days_of_week=_DAYS_UNSET,  # list[str] | None | _DAYS_UNSET
 ) -> dict:
     """Patch individual fields. Returns the updated row."""
     updates: dict = {"updated_at": datetime.now().isoformat()}
@@ -81,6 +85,8 @@ def update_rhythm(
     if description is not _DESCRIPTION_UNSET:
         # None → stored as NULL (clear); non-empty str → stored as-is
         updates["description"] = description
+    if days_of_week is not _DAYS_UNSET:
+        updates["days_of_week"] = days_of_week
 
     result = (
         supabase.from_("rhythms")
