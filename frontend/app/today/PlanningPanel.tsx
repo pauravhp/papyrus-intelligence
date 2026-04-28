@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { usePostHog } from "posthog-js/react";
+import { createClient } from "@/utils/supabase/client";
 import { type ScheduledItem } from "./TodayPage";
 
 export type PanelStatus = "working" | "proposal" | "confirmed";
@@ -40,6 +41,22 @@ const PROGRESS_STEPS = [
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
+// Best-effort parse of FastAPI's structured error envelope. Returns the
+// detail.code string when the server raised HTTPException(400, {code, message}),
+// e.g. "todoist_reconnect_required" or "google_reconnect_required". Returns
+// null when the body is missing, malformed, or doesn't carry a code.
+async function parseErrorCode(res: Response): Promise<string | null> {
+  try {
+    const json = await res.clone().json();
+    if (json?.detail && typeof json.detail === "object" && typeof json.detail.code === "string") {
+      return json.detail.code;
+    }
+  } catch {
+    /* non-JSON body */
+  }
+  return null;
+}
+
 export default function PlanningPanel({
   token,
   contextNote,
@@ -55,6 +72,7 @@ export default function PlanningPanel({
   const [refineLoading, setRefineLoading] = useState(false);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [needsTodoistReconnect, setNeedsTodoistReconnect] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
   const refinementRef = useRef<HTMLTextAreaElement>(null);
   const hasFired = useRef(false);
@@ -84,7 +102,14 @@ export default function PlanningPanel({
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ target_date: targetDate, context_note: contextNote ?? null }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+          setNeedsTodoistReconnect(true);
+          setStatus("proposal");
+          return;
+        }
+        throw new Error(`API error: ${res.status}`);
+      }
       const data: Proposal = await res.json();
       setProposal(data);
       setReasoning(data.reasoning_summary);
@@ -118,7 +143,14 @@ export default function PlanningPanel({
           original_context_note: contextNote ?? null,
         }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+          setNeedsTodoistReconnect(true);
+          setStatus("proposal");
+          return;
+        }
+        throw new Error(`API error: ${res.status}`);
+      }
       const data: Proposal = await res.json();
       setProposal(data);
       setReasoning(data.reasoning_summary);
@@ -142,7 +174,15 @@ export default function PlanningPanel({
           schedule: { scheduled: proposal.scheduled, pushed: proposal.pushed },
         }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+          setNeedsTodoistReconnect(true);
+          setStatus("proposal");
+          isConfirmingRef.current = false;
+          return;
+        }
+        throw new Error(`API error: ${res.status}`);
+      }
       setStatus("confirmed");
       setTimeout(() => onConfirm(), 1200);
     } catch (err) {
@@ -150,6 +190,13 @@ export default function PlanningPanel({
       isConfirmingRef.current = false;
       setReasoning("Confirm failed — please try again.");
     }
+  }
+
+  async function handleTodoistReconnect() {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const sessionToken = data.session?.access_token ?? token;
+    window.location.href = `${API_BASE}/auth/todoist?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
   }
 
   async function handleRefinement() {
@@ -246,8 +293,36 @@ export default function PlanningPanel({
             </div>
           )}
 
+          {/* Todoist reconnect surface — mirrors CalendarSection.tsx */}
+          {needsTodoistReconnect && (
+            <div>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 12, fontFamily: "var(--font-literata)" }}>
+                Your Todoist connection has expired.<br />
+                <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+                  Reconnect to continue planning — your settings will stay intact.
+                </span>
+              </p>
+              <button
+                onClick={handleTodoistReconnect}
+                style={{
+                  padding: "7px 14px",
+                  background: "transparent",
+                  color: "var(--accent)",
+                  border: "1px solid var(--accent)",
+                  borderRadius: 8,
+                  fontFamily: "var(--font-literata)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+              >
+                Reconnect Todoist
+              </button>
+            </div>
+          )}
+
           {/* Agent reasoning — prose, not bubbles */}
-          {planError ? (
+          {!needsTodoistReconnect && (planError ? (
             <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-literata)", fontStyle: "italic" }}>
               {planError} — close the panel and try again.
             </p>
@@ -262,12 +337,12 @@ export default function PlanningPanel({
                 </p>
               </div>
             )
-          )}
+          ))}
         </div>
 
         {/* Footer */}
         <div style={{ padding: "12px 16px 18px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-          {!planError && (
+          {!planError && !needsTodoistReconnect && (
             <button
               onClick={handleConfirm}
               style={{

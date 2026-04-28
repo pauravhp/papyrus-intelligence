@@ -21,6 +21,7 @@ from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from api.services import planner
+from api.services.todoist_token import TodoistTokenError, get_valid_todoist_token
 from src.calendar_client import build_gcal_service_from_credentials
 
 router = APIRouter(prefix="/api")
@@ -86,9 +87,16 @@ def _load_user_ctx(user_id: str) -> dict:
     if not config:
         raise HTTPException(status_code=400, detail="User config is empty. Complete onboarding first.")
 
-    todoist_token: str | None = (row.get("todoist_oauth_token") or {}).get("access_token")
-    if not todoist_token:
+    if not (row.get("todoist_oauth_token") or {}).get("access_token"):
         raise HTTPException(status_code=400, detail="Todoist not connected.")
+
+    try:
+        todoist_token = get_valid_todoist_token(supabase, user_id)
+    except TodoistTokenError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "todoist_reconnect_required", "message": str(exc)},
+        )
 
     gcal_creds = row.get("google_credentials")
     gcal_service = None
@@ -123,12 +131,30 @@ def _resolve_date(label: str) -> date:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 
+def _surface_todoist_auth_failure(exc: RuntimeError) -> None:
+    """If a downstream Todoist call hit a 401 (token revoked between our
+    refresh-check and the actual API call — a race we can't prevent), raise
+    a structured 400 so the frontend renders the reconnect surface."""
+    if "Todoist API auth failed" in str(exc):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "todoist_reconnect_required",
+                "message": "Todoist connection lost — please reconnect",
+            },
+        )
+    raise exc
+
+
 @router.post("/plan", response_model=PlanResponse)
 def plan(body: PlanRequest, user: dict = Depends(require_beta_access)) -> PlanResponse:
     """Propose a schedule for target_date. One LLM call. No external writes."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
-    result = planner.plan(user_ctx, target_date, body.context_note or "")
+    try:
+        result = planner.plan(user_ctx, target_date, body.context_note or "")
+    except RuntimeError as exc:
+        _surface_todoist_auth_failure(exc)
     return PlanResponse(
         scheduled=result.get("scheduled", []),
         pushed=result.get("pushed", []),
@@ -144,13 +170,16 @@ def refine(body: RefineRequest, user: dict = Depends(require_beta_access)) -> Pl
     """Refine an existing proposal with a new instruction. One LLM call."""
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
-    result = planner.refine(
-        user_ctx,
-        target_date,
-        previous_proposal=body.previous_proposal,
-        refinement_message=body.refinement_message,
-        original_context_note=body.original_context_note or "",
-    )
+    try:
+        result = planner.refine(
+            user_ctx,
+            target_date,
+            previous_proposal=body.previous_proposal,
+            refinement_message=body.refinement_message,
+            original_context_note=body.original_context_note or "",
+        )
+    except RuntimeError as exc:
+        _surface_todoist_auth_failure(exc)
     return PlanResponse(
         scheduled=result.get("scheduled", []),
         pushed=result.get("pushed", []),
@@ -170,4 +199,6 @@ def confirm(body: ConfirmRequest, user: dict = Depends(require_beta_access)) -> 
         result = planner.confirm(user_ctx, body.schedule, target_date)
     except planner.AlreadyConfirmedError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        _surface_todoist_auth_failure(exc)
     return ConfirmResponse(**result)

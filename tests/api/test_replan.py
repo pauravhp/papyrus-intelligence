@@ -334,6 +334,74 @@ def _today_dt():
     return date.today()
 
 
+# ── Todoist reconnect surface ─────────────────────────────────────────────────
+
+
+def test_replan_returns_400_todoist_reconnect_required_when_helper_raises(client, monkeypatch):
+    """When refresh fails, /api/replan must return 400 with the structured
+    reconnect code so the frontend can prompt re-auth (not a generic toast)."""
+    from api.services.todoist_token import TodoistTokenError
+
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.get_valid_todoist_token",
+               side_effect=TodoistTokenError("refresh rejected")), \
+         patch("api.routes.replan._get_now", return_value=mock_now):
+        resp = client.post(
+            "/api/replan",
+            json={"task_states": {}, "context_note": "", "refinement_message": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "todoist_reconnect_required"
+
+
+def test_replan_surfaces_runtime_auth_failure_as_reconnect_required(client, monkeypatch):
+    """If Todoist 401s mid-call after our refresh check passed, the route
+    must repackage RuntimeError('Todoist API auth failed') as the reconnect
+    code rather than a generic 500."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    row, _ = _mock_schedule_log_today(mock_sb)
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.get_valid_todoist_token", return_value="tok-abc"), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.routes.replan._get_now", return_value=mock_now), \
+         patch("api.services.planner.replan",
+               side_effect=RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")):
+        MockTodoist.return_value.is_task_completed.return_value = False
+        MockTodoist.return_value.get_tasks.return_value = []
+        resp = client.post(
+            "/api/replan",
+            json={"task_states": {}, "context_note": "", "refinement_message": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "todoist_reconnect_required"
+
+
 def test_replan_confirm_deletes_afternoon_gcal_events(client, monkeypatch):
     """POST /api/replan/confirm deletes afternoon GCal events and creates new ones."""
     mock_sb = MagicMock()

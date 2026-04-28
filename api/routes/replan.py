@@ -17,6 +17,7 @@ from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
 from api.services.planner import _is_within_idempotency_window
+from api.services.todoist_token import TodoistTokenError, get_valid_todoist_token
 from src.calendar_client import build_gcal_service_from_credentials, create_event, delete_event, get_events
 from src.todoist_client import TodoistClient
 
@@ -54,7 +55,16 @@ def _load_user_context(user_id: str) -> dict:
 
     row = row_result.data
     config = row.get("config") or {}
-    tod_token: str | None = (row.get("todoist_oauth_token") or {}).get("access_token")
+    has_stored_token = bool((row.get("todoist_oauth_token") or {}).get("access_token"))
+    tod_token: str | None = None
+    if has_stored_token:
+        try:
+            tod_token = get_valid_todoist_token(supabase, user_id)
+        except TodoistTokenError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "todoist_reconnect_required", "message": str(exc)},
+            )
 
     gcal_creds = row.get("google_credentials")
     gcal_service = None
@@ -76,6 +86,20 @@ def _load_user_context(user_id: str) -> dict:
         "gcal_service": gcal_service,
         "supabase": supabase,
     }
+
+
+def _surface_todoist_auth_failure(exc: RuntimeError) -> None:
+    """If a Todoist call hit a 401 between our refresh-check and the actual
+    API call, surface the same structured 400 the frontend already handles."""
+    if "Todoist API auth failed" in str(exc):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "todoist_reconnect_required",
+                "message": "Todoist connection lost — please reconnect",
+            },
+        )
+    raise exc
 
 
 def _load_today_schedule(user_id: str) -> dict | None:
@@ -216,13 +240,16 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
 
     from api.services import planner
 
-    proposed = planner.replan(
-        user_ctx=user_ctx,
-        target_date=date.today(),
-        candidate_tasks=candidate_tasks,
-        prose=prose,
-        previous_proposal=body.previous_proposal,
-    )
+    try:
+        proposed = planner.replan(
+            user_ctx=user_ctx,
+            target_date=date.today(),
+            candidate_tasks=candidate_tasks,
+            prose=prose,
+            previous_proposal=body.previous_proposal,
+        )
+    except RuntimeError as exc:
+        _surface_todoist_auth_failure(exc)
 
     return proposed
 
