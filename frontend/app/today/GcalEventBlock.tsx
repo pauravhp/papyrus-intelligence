@@ -1,20 +1,20 @@
 import { type GCalEvent } from "./TodayPage";
 import { gcalColorToPapyrus } from "./utils/gcalColor";
 
-const GRID_START = 8;
 const PX_PER_HOUR = 72;
 
 interface Props {
   event: GCalEvent;
+  gridStart: number;
 }
 
-export default function GcalEventBlock({ event }: Props) {
+export default function GcalEventBlock({ event, gridStart }: Props) {
   const start = new Date(event.start_time);
   const end = new Date(event.end_time);
   const startHour = start.getHours() + start.getMinutes() / 60;
   const durationMin = (end.getTime() - start.getTime()) / 60000;
 
-  const top = (startHour - GRID_START) * PX_PER_HOUR;
+  const top = (startHour - gridStart) * PX_PER_HOUR;
   const height = Math.max(18, (durationMin / 60) * PX_PER_HOUR);
 
   const colors = gcalColorToPapyrus(event.color_hex ?? "");
