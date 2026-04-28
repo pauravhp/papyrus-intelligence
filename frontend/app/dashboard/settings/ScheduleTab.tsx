@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { apiPost } from "@/utils/api";
 import NumberField from "@/components/NumberField";
+import Toast, { type ToastState } from "@/components/Toast";
 
 interface ScheduleTabProps {
   config: Record<string, unknown>;
@@ -105,6 +106,7 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const setSleep = (key: string, value: string | number | string[]) =>
     setSleepField((prev) => ({ ...prev, [key]: value }));
@@ -143,9 +145,12 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
       };
       await apiPost("/api/onboard/promote", { config: updated }, token);
       setSaved(true);
+      setToast({ message: "Saved", tone: "success" });
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message;
+      setError(msg);
+      setToast({ message: msg || "Save failed", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -309,6 +314,7 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
       >
         {saved ? "Saved" : saving ? "Saving…" : "Save schedule"}
       </button>
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

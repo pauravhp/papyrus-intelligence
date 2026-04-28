@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiPatch } from "@/utils/api";
+import Toast, { type ToastState } from "@/components/Toast";
 
 interface TimezoneTabProps {
   config: Record<string, unknown>;
@@ -98,6 +99,7 @@ export default function TimezoneTab({ config, getToken }: TimezoneTabProps) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
   const allZones = useMemo(() => {
     const list = getAllZones();
@@ -131,8 +133,11 @@ export default function TimezoneTab({ config, getToken }: TimezoneTabProps) {
       );
       setStored(result.timezone);
       setSaved(true);
+      setToast({ message: "Saved", tone: "success" });
     } catch (e) {
-      setError((e as Error).message);
+      const msg = (e as Error).message;
+      setError(msg);
+      setToast({ message: msg || "Save failed", tone: "error" });
     } finally {
       setSaving(false);
     }
@@ -227,6 +232,7 @@ export default function TimezoneTab({ config, getToken }: TimezoneTabProps) {
           {saved ? "Saved" : saving ? "Saving…" : "Save timezone"}
         </button>
       </div>
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

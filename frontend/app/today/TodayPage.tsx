@@ -98,6 +98,17 @@ export default function TodayPage() {
 
   const windowWidth = useWindowWidth();
 
+  // When the user opens Plan with a target day, focus the schedule view on
+  // that day. Without this, planningTarget="tomorrow" leaves today's column
+  // pinned in the foreground and the user has to manually navigate to see
+  // the proposed schedule.
+  const focusedDay: "today" | "tomorrow" =
+    planningOpen && planningTarget === "tomorrow" ? "tomorrow" : "today";
+
+  useEffect(() => {
+    if (planningOpen) setActiveTab(planningTarget);
+  }, [planningOpen, planningTarget]);
+
   const load = useCallback(async () => {
     const { data: session } = await supabase.auth.getSession();
     const tok = session.session?.access_token ?? "";
@@ -321,7 +332,7 @@ export default function TodayPage() {
           style={{ display: "flex", gap: 24 }}
         >
           <AnimatePresence initial={false}>
-            {!planningOpen && (
+            {!planningOpen && focusedDay === "today" && (
               <motion.div
                 key="yesterday"
                 layout
@@ -336,12 +347,39 @@ export default function TodayPage() {
             )}
           </AnimatePresence>
 
-          <motion.div layout style={{ flex: 1 }}>
-            <DayColumn label="Today" dayData={todayColumnData} isToday={true} planningStatus={planningStatus} />
-          </motion.div>
+          {/* Primary column: switches to tomorrow when planningTarget is tomorrow.
+              This is a SWITCH, not an expand — today is hidden alongside, so the
+              user lands on the day they're actually planning. */}
+          <AnimatePresence initial={false} mode="wait">
+            {focusedDay === "today" ? (
+              <motion.div
+                key="primary-today"
+                layout
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                style={{ flex: 1 }}
+              >
+                <DayColumn label="Today" dayData={todayColumnData} isToday={true} planningStatus={planningStatus} />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="primary-tomorrow"
+                layout
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18 }}
+                style={{ flex: 1 }}
+              >
+                <DayColumn label="Tomorrow" dayData={tomorrowColumnData} isToday={false} planningStatus={planningStatus} />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence initial={false}>
-            {(!planningOpen || windowWidth >= 1100) && (
+            {focusedDay === "today" && (!planningOpen || windowWidth >= 1100) && (
               <motion.div
                 key="tomorrow"
                 layout
@@ -395,8 +433,20 @@ export default function TodayPage() {
           >
             <DayColumn
               label={days.find(d => d.key === activeTab)!.label}
-              dayData={data?.[activeTab] ?? null}
+              dayData={
+                activeTab === "today"
+                  ? todayColumnData
+                  : activeTab === "tomorrow"
+                  ? tomorrowColumnData
+                  : data?.yesterday ?? null
+              }
               isToday={activeTab === "today"}
+              planningStatus={
+                (activeTab === "today" && planningTarget === "today") ||
+                (activeTab === "tomorrow" && planningTarget === "tomorrow")
+                  ? planningStatus
+                  : undefined
+              }
             />
           </div>
         </div>

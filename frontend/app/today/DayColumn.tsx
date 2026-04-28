@@ -5,16 +5,21 @@ import TaskBlock from "./TaskBlock";
 import NowIndicator from "./NowIndicator";
 import GcalEventBlock from "./GcalEventBlock";
 
-const GRID_START = 8;
+const GRID_DEFAULT_START = 8;
+// Hard floor on how early the grid is allowed to start. A 6:30 AM workout
+// pushes gridStart down to fit; nothing earlier than this is rendered in
+// the grid (events before 4 AM are vanishingly rare and would just push
+// every other block 4+ rows down for one outlier).
+const GRID_MIN_START = 4;
 const GRID_DEFAULT_END = 24;
 const PX_PER_HOUR = 72;
 const GUTTER_WIDTH = 44;
-// Hard ceiling on how far past GRID_START the grid is allowed to extend.
-// Backstop for the "runaway timestamp" case (e.g. backend bug or LLM
-// hallucination places a task 18 hours into tomorrow): without this, the
-// today column auto-grew to a single 28+ hour scrolling mess. Anything past
-// this gets clipped + a "Schedule extends beyond view" notice surfaces.
-const GRID_MAX_HOURS_FROM_START = 28;
+// Hard ceiling on how far past GRID_DEFAULT_START the grid is allowed to
+// extend. Backstop for the "runaway timestamp" case (e.g. backend bug or
+// LLM hallucination places a task 18 hours into tomorrow): without this,
+// the today column auto-grew to a single 28+ hour scrolling mess. Anything
+// past this gets clipped + a "Schedule extends beyond view" notice surfaces.
+const GRID_MAX_HOURS_FROM_DEFAULT_START = 28;
 
 interface DayColumnProps {
   label: string;
@@ -50,7 +55,7 @@ function hoursPastColumnMidnight(iso: string, columnDateIso: string): number {
 }
 
 export default function DayColumn({ label, dayData, isToday, planningStatus }: DayColumnProps) {
-  const showSkeleton = isToday && planningStatus === "working";
+  const showSkeleton = planningStatus === "working";
   const scheduled = dayData?.scheduled ?? [];
   const pushed = dayData?.pushed ?? [];
   const isEmpty = scheduled.length === 0;
@@ -75,18 +80,37 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
   const nowHour = isToday ? new Date().getHours() : 0;
   const baseEnd = isToday ? Math.max(GRID_DEFAULT_END, nowHour + 1) : GRID_DEFAULT_END;
   const desiredEnd = Math.max(baseEnd, Math.ceil(latestTaskEndHour));
-  // Defensive ceiling: never let the column grow past GRID_START + N hours.
-  // A backend that returned tasks with timestamps deep into the next day would
-  // otherwise produce an 18-hour scrolling mess in today's column.
-  const hardCeiling = GRID_START + GRID_MAX_HOURS_FROM_START;
+  // Defensive ceiling: never let the column grow past the default start +
+  // N hours. A backend that returned tasks with timestamps deep into the
+  // next day would otherwise produce an 18-hour scrolling mess in today's
+  // column.
+  const hardCeiling = GRID_DEFAULT_START + GRID_MAX_HOURS_FROM_DEFAULT_START;
   const gridEnd = Math.min(desiredEnd, hardCeiling);
   const overflowsCap = latestTaskEndHour > hardCeiling;
-  const gridHeight = (gridEnd - GRID_START) * PX_PER_HOUR;
 
-  // Hour markers: one line + label per hour from GRID_START to gridEnd (inclusive start, exclusive end)
+  // Symmetric to gridEnd: extend gridStart down to fit early-morning events
+  // (e.g. a 6:30 AM workout). Without this the event renders above the grid
+  // and disappears off-screen — user has no idea Papyrus knows about it.
+  // Floored at GRID_MIN_START to keep one rare 5 AM outlier from pushing
+  // every other day's grid 4 rows down.
+  const taskStartHours = scheduled
+    .map((item) => hoursPastColumnMidnight(item.start_time, columnDate))
+    .filter((h) => Number.isFinite(h));
+  const gcalStartHours = (dayData?.gcal_events ?? [])
+    .map((e) => hoursPastColumnMidnight(e.start_time, columnDate))
+    .filter((h) => Number.isFinite(h));
+  const earliestStartHour = Math.min(
+    GRID_DEFAULT_START,
+    ...taskStartHours,
+    ...gcalStartHours,
+  );
+  const gridStart = Math.max(GRID_MIN_START, Math.floor(earliestStartHour));
+  const gridHeight = (gridEnd - gridStart) * PX_PER_HOUR;
+
+  // Hour markers: one line + label per hour from gridStart to gridEnd (inclusive start, exclusive end)
   const hourMarkers = Array.from(
-    { length: gridEnd - GRID_START },
-    (_, i) => GRID_START + i
+    { length: gridEnd - gridStart },
+    (_, i) => gridStart + i
   );
 
   const wrapperStyle: React.CSSProperties = isToday
@@ -200,7 +224,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
                 key={h}
                 style={{
                   position: "absolute",
-                  top: (h - GRID_START) * PX_PER_HOUR,
+                  top: (h - gridStart) * PX_PER_HOUR,
                   right: 6,
                   fontSize: 10,
                   color: "var(--text-faint)",
@@ -230,7 +254,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
                 key={`hr-${h}`}
                 style={{
                   position: "absolute",
-                  top: (h - GRID_START) * PX_PER_HOUR,
+                  top: (h - gridStart) * PX_PER_HOUR,
                   left: 0,
                   right: 0,
                   height: 1,
@@ -245,7 +269,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
                 key={`hh-${h}`}
                 style={{
                   position: "absolute",
-                  top: (h - GRID_START + 0.5) * PX_PER_HOUR,
+                  top: (h - gridStart + 0.5) * PX_PER_HOUR,
                   left: 0,
                   right: 0,
                   height: 1,
@@ -261,7 +285,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
               <div
                 style={{
                   position: "absolute",
-                  top: (24 - GRID_START) * PX_PER_HOUR,
+                  top: (24 - gridStart) * PX_PER_HOUR,
                   left: 0,
                   right: 0,
                   borderTop: "1px dashed var(--accent)",
@@ -314,6 +338,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
                   key={`${item.task_id}__${item.start_time}`}
                   item={item}
                   columnDate={columnDate}
+                  gridStart={gridStart}
                   isProposed={planningStatus === "proposal"}
                 />
               ))
@@ -321,11 +346,11 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
 
             {/* GCal event blocks (read-only, behind confirmed task blocks) */}
             {(dayData?.gcal_events ?? []).map((event) => (
-              <GcalEventBlock key={event.id} event={event} />
+              <GcalEventBlock key={event.id} event={event} gridStart={gridStart} />
             ))}
 
             {/* Now indicator (today column only) */}
-            {isToday && <NowIndicator />}
+            {isToday && <NowIndicator gridStart={gridStart} />}
           </div>
         </div>
       )}

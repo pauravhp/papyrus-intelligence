@@ -3,7 +3,6 @@
 
 import { useEffect, useState } from "react";
 
-const GRID_START_HOUR = 8;
 const PX_PER_HOUR = 72;
 const GUTTER_WIDTH = 44;
 
@@ -11,11 +10,15 @@ function fmtTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-function nowTop(d: Date): number {
-  return (d.getHours() + d.getMinutes() / 60 - GRID_START_HOUR) * PX_PER_HOUR;
+function nowTop(d: Date, gridStartHour: number): number {
+  return (d.getHours() + d.getMinutes() / 60 - gridStartHour) * PX_PER_HOUR;
 }
 
-export default function NowIndicator() {
+interface Props {
+  gridStart: number;
+}
+
+export default function NowIndicator({ gridStart }: Props) {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -25,9 +28,9 @@ export default function NowIndicator() {
 
   const hour = now.getHours();
   // Only show when current time is within the grid span
-  if (hour < GRID_START_HOUR || hour >= 25) return null;
+  if (hour < gridStart || hour >= 25) return null;
 
-  const top = nowTop(now);
+  const top = nowTop(now, gridStart);
 
   return (
     <div
