@@ -34,10 +34,8 @@ def _get_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _compute_review_available(user_config: dict, has_confirmed_schedule: bool) -> bool:
-    """Returns True if review cutoff has passed and a confirmed schedule exists today."""
-    if not has_confirmed_schedule:
-        return False
+def _cutoff_passed(user_config: dict) -> bool:
+    """Returns True if current local time has passed the review cutoff (sleep_time − 2:30)."""
     tz_name = user_config.get("user", {}).get("timezone", "UTC")
     sleep_time_str = user_config.get("user", {}).get("sleep_time", "23:00")
     if not sleep_time_str:
@@ -53,6 +51,37 @@ def _compute_review_available(user_config: dict, has_confirmed_schedule: bool) -
     except Exception:
         logger.warning("Failed to compute review cutoff, defaulting to False")
         return False
+
+
+def _compute_review_available(user_config: dict, has_confirmed_schedule: bool) -> bool:
+    """Returns True if review cutoff has passed and a confirmed schedule exists today."""
+    return has_confirmed_schedule and _cutoff_passed(user_config)
+
+
+def _compute_review_queue(user_id: str, today_local: date, cutoff_passed: bool) -> dict:
+    """Returns unreviewed confirmed schedule_log rows from the last 7 days, oldest first."""
+    floor = (today_local - timedelta(days=7)).isoformat()
+    upper = today_local.isoformat() if cutoff_passed else (today_local - timedelta(days=1)).isoformat()
+    try:
+        result = (
+            supabase.from_("schedule_log")
+            .select("schedule_date")
+            .eq("user_id", user_id)
+            .eq("confirmed", 1)
+            .is_("reviewed_at", "null")
+            .gte("schedule_date", floor)
+            .lte("schedule_date", upper)
+            .order("schedule_date", desc=False)
+            .execute()
+        )
+    except Exception:
+        logger.warning("[today] review_queue lookup failed", exc_info=True)
+        return {"has_unreviewed": False, "count": 0, "dates": []}
+    rows = result.data or []
+    if not isinstance(rows, list):
+        return {"has_unreviewed": False, "count": 0, "dates": []}
+    dates = sorted({r["schedule_date"] for r in rows})
+    return {"has_unreviewed": bool(dates), "count": len(dates), "dates": dates}
 
 
 def _papyrus_ids(row: dict | None) -> set[str]:
@@ -242,10 +271,14 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
             _fetch_gcal_for_date(d_obj, tz_str, cal_ids, gcal_service, papyrus_event_ids)
         )
 
+    cutoff = _cutoff_passed(config)
+    review_queue = _compute_review_queue(user_id, today, cutoff)
+
     return {
         "yesterday": _parse_day(by_date.get(dates[0]), dates[0], gcal_results[0][0], gcal_results[0][1]),
         "today":     _parse_day(by_date.get(dates[1]), dates[1], gcal_results[1][0], gcal_results[1][1]),
         "tomorrow":  _parse_day(by_date.get(dates[2]), dates[2], gcal_results[2][0], gcal_results[2][1]),
-        "review_available": _compute_review_available(config, has_confirmed_schedule),
+        "review_available": has_confirmed_schedule and cutoff,
         "setup_nudge": setup_nudge,
+        "review_queue": review_queue,
     }

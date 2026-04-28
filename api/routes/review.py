@@ -2,16 +2,20 @@
 
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
-import anthropic
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import get_current_user, require_beta_access
-from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
+from api.services.review_aggregate_service import (
+    DayStatRow,
+    compute_per_day_stats,
+    compute_task_detail,
+    generate_aggregate_narrative,
+)
 from src.todoist_client import TodoistClient
 
 logger = logging.getLogger(__name__)
@@ -53,21 +57,40 @@ class ReviewSubmitRhythm(BaseModel):
 
 
 class ReviewSubmitRequest(BaseModel):
+    schedule_date: str | None = None
     tasks: list[ReviewSubmitTask]
     rhythms: list[ReviewSubmitRhythm]
 
 
-@router.get("/review/preflight")
-def review_preflight(user: dict = Depends(require_beta_access)) -> dict:
-    user_id = user["sub"]
-    today = date.today().isoformat()
+def _validate_review_date(value: str | None) -> str:
+    if value is None:
+        return date.today().isoformat()
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="schedule_date must be YYYY-MM-DD")
+    today = date.today()
+    if parsed > today:
+        raise HTTPException(status_code=400, detail="schedule_date cannot be in the future")
+    if parsed < today - timedelta(days=7):
+        raise HTTPException(status_code=400, detail="schedule_date is older than the 7-day review window")
+    return parsed.isoformat()
 
-    # 1. Get today's confirmed schedule
+
+@router.get("/review/preflight")
+def review_preflight(
+    date_param: str | None = Query(default=None, alias="date"),
+    user: dict = Depends(require_beta_access),
+) -> dict:
+    user_id = user["sub"]
+    target_date = _validate_review_date(date_param)
+
+    # 1. Get the confirmed schedule for the target date
     result = (
         supabase.from_("schedule_log")
         .select("proposed_json")
         .eq("user_id", user_id)
-        .eq("schedule_date", today)
+        .eq("schedule_date", target_date)
         .eq("confirmed", 1)
         .order("id", desc=True)
         .limit(1)
@@ -75,7 +98,7 @@ def review_preflight(user: dict = Depends(require_beta_access)) -> dict:
     )
     rows = result.data or []
     if not rows or not rows[0].get("proposed_json"):
-        raise HTTPException(status_code=404, detail="No confirmed schedule for today")
+        raise HTTPException(status_code=404, detail=f"No confirmed schedule for {target_date}")
 
     schedule = json.loads(rows[0]["proposed_json"])
     tasks = schedule.get("scheduled", [])
@@ -128,47 +151,10 @@ def review_preflight(user: dict = Depends(require_beta_access)) -> dict:
     }
 
 
-def _generate_summary_line(tasks: list[ReviewSubmitTask], rhythms: list[ReviewSubmitRhythm]) -> str:
-    """Single LLM call to generate a one-line contextual observation."""
-    completed = [t for t in tasks if t.completed]
-    incomplete = [t for t in tasks if not t.completed]
-    rhythms_done = [r for r in rhythms if r.completed]
-
-    summary_input = {
-        "tasks_completed": [t.task_name for t in completed],
-        "tasks_incomplete": [
-            {"name": t.task_name, "reason": t.incomplete_reason}
-            for t in incomplete
-        ],
-        "rhythms_kept": len(rhythms_done),
-        "rhythms_total": len(rhythms),
-    }
-
-    prompt = (
-        "You are a calm, honest scheduling coach. "
-        "Given this end-of-day summary, write a single sentence (max 15 words) "
-        "that is warm, forward-looking, and specific to what actually happened. "
-        "Never use hollow praise. Never use the word 'great'. "
-        f"Summary: {json.dumps(summary_input)}"
-    )
-
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=60,
-        temperature=0.4,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response.content[0].text.strip()
-
-
 @router.post("/review/submit")
 def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_beta_access)) -> dict:
     user_id = user["sub"]
-    today = date.today().isoformat()
-
-    completed_count = sum(1 for t in body.tasks if t.completed)
-    total_count = len(body.tasks)
+    target_date = _validate_review_date(body.schedule_date)
 
     # 1. Upsert task_history rows
     task_rows = [
@@ -176,7 +162,7 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
             "user_id": user_id,
             "task_id": t.task_id,
             "task_name": t.task_name,
-            "schedule_date": today,
+            "schedule_date": target_date,
             "estimated_duration_mins": t.estimated_duration_mins,
             "actual_duration_mins": t.actual_duration_mins if t.completed else None,
             "scheduled_at": t.scheduled_at,
@@ -198,7 +184,7 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
         {
             "user_id": user_id,
             "rhythm_id": r.rhythm_id,
-            "completed_on": today,
+            "completed_on": target_date,
         }
         for r in body.rhythms
         if r.completed
@@ -210,12 +196,10 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
             ignore_duplicates=True,
         ).execute()
 
-    # 3. Generate summary line (graceful fallback)
-    try:
-        summary_line = _generate_summary_line(body.tasks, body.rhythms)
-    except Exception:
-        logger.warning("LLM summary generation failed, using fallback")
-        summary_line = f"{completed_count} of {total_count} tasks done."
+    # 3. Stamp reviewed_at on the confirmed schedule_log row (idempotent — only if not already set)
+    supabase.from_("schedule_log").update({
+        "reviewed_at": datetime.now(timezone.utc).isoformat()
+    }).eq("user_id", user_id).eq("schedule_date", target_date).eq("confirmed", 1).is_("reviewed_at", "null").execute()
 
     background_tasks.add_task(
         capture,
@@ -229,5 +213,49 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
         },
     )
 
-    return {"saved": True, "summary_line": summary_line}
+    return {"saved": True}
+
+
+class AggregateRequest(BaseModel):
+    schedule_dates: list[str]
+
+
+class AggregateResponse(BaseModel):
+    narrative_line: str
+    per_day: list[DayStatRow]
+
+
+@router.post("/review/aggregate")
+def review_aggregate(
+    body: AggregateRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(require_beta_access),
+) -> AggregateResponse:
+    user_id = user["sub"]
+
+    if not body.schedule_dates:
+        raise HTTPException(status_code=400, detail="schedule_dates must not be empty")
+    if len(body.schedule_dates) > 7:
+        raise HTTPException(status_code=400, detail="schedule_dates length must be <= 7")
+    for d in body.schedule_dates:
+        _validate_review_date(d)
+
+    per_day = compute_per_day_stats(user_id, body.schedule_dates, supabase)
+    task_detail = compute_task_detail(user_id, body.schedule_dates, supabase)
+    narrative = generate_aggregate_narrative(per_day, task_detail)
+
+    total_tasks_completed = sum(p["tasks_completed"] for p in per_day)
+    total_tasks_total = sum(p["tasks_total"] for p in per_day)
+    background_tasks.add_task(
+        capture,
+        user_id,
+        "review_queue_completed",
+        {
+            "days_submitted": len(per_day),
+            "total_tasks_completed": total_tasks_completed,
+            "total_tasks_total": total_tasks_total,
+        },
+    )
+
+    return AggregateResponse(narrative_line=narrative, per_day=[DayStatRow(**p) for p in per_day])
 

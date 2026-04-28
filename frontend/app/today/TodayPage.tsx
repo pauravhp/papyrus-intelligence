@@ -8,7 +8,7 @@ import NudgeBanner, { type SetupNudge } from "@/components/NudgeBanner";
 import DayColumn from "./DayColumn";
 import TodaySkeleton from "./TodaySkeleton";
 import ResearchSnippet from "./ResearchSnippet";
-import ReviewButton from "./ReviewButton";
+import ReviewPill from "./ReviewPill";
 import ReviewModal from "./ReviewModal";
 import SplitPlanButton from "./SplitPlanButton";
 import PlanningPanel from "./PlanningPanel";
@@ -63,6 +63,7 @@ interface TodayResponse {
   today: DayData | null;
   tomorrow: DayData | null;
   review_available: boolean;
+  review_queue: { has_unreviewed: boolean; count: number; dates: string[] };
   setup_nudge: SetupNudge | null;
 }
 
@@ -311,8 +312,8 @@ export default function TodayPage() {
             </p>
           </div>
           <div className="today-header-actions">
-            {data?.review_available && (
-              <ReviewButton onClick={() => setReviewOpen(true)} />
+            {data?.review_queue?.has_unreviewed && (
+              <ReviewPill onClick={() => setReviewOpen(true)} />
             )}
             {showReplan && (
               <ReplanButton onClick={() => setReplanOpen(true)} />
@@ -457,6 +458,7 @@ export default function TodayPage() {
         {reviewOpen && (
           <ReviewModal
             token={token}
+            dates={data?.review_queue?.dates ?? []}
             onClose={() => setReviewOpen(false)}
           />
         )}

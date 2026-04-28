@@ -9,74 +9,85 @@ import ReviewTaskRow, {
 } from "./ReviewTaskRow";
 import ReviewRhythmRow, { ReviewRhythm, ReviewRhythmState } from "./ReviewRhythmRow";
 import ReviewSummary from "./ReviewSummary";
+import MultiDayReviewSummary from "./MultiDayReviewSummary";
 
-type Phase = "review" | "submitting" | "summary";
+type Phase = "review" | "submitting" | "aggregate-loading" | "aggregate";
 
 interface ReviewModalProps {
   token: string;
+  dates: string[];          // queue, oldest → newest, length >= 1
   onClose: () => void;
 }
 
-interface SummaryData {
-  summaryLine: string;
-  tasksCompleted: number;
-  tasksTotal: number;
-  timeOverUnder: number;
-  rhythmsCompleted: number;
-  rhythmsTotal: number;
+interface AggregateData {
+  narrative_line: string;
+  per_day: Array<{
+    schedule_date: string;
+    weekday: string;
+    tasks_completed: number;
+    tasks_total: number;
+    rhythms_completed: number;
+    rhythms_total: number;
+  }>;
 }
 
-export default function ReviewModal({ token, onClose }: ReviewModalProps) {
+function weekdayLabelFor(iso: string): string {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+}
+
+export default function ReviewModal({ token, dates, onClose }: ReviewModalProps) {
+  const [activeIndex, setActiveIndex] = useState(0);
   const [phase, setPhase] = useState<Phase>("review");
   const [tasks, setTasks] = useState<ReviewTask[]>([]);
   const [taskStates, setTaskStates] = useState<Record<string, ReviewTaskState>>({});
   const [rhythms, setRhythms] = useState<ReviewRhythm[]>([]);
   const [rhythmStates, setRhythmStates] = useState<Record<number, ReviewRhythmState>>({});
-  const [summaryData, setSummaryData] = useState<SummaryData | null>(null);
+  const [aggregate, setAggregate] = useState<AggregateData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const activeDate = dates[activeIndex];
+  const isLastDay = activeIndex === dates.length - 1;
+
   useEffect(() => {
+    let cancelled = false;
     async function preflight() {
+      setLoading(true);
+      setError(null);
       try {
-        const res = await fetch("/api/review/preflight", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const url = `/api/review/preflight?date=${encodeURIComponent(activeDate)}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) {
-          setError("No schedule to review today.");
-          setLoading(false);
+          if (!cancelled) {
+            setError("No schedule to review for this day.");
+            setLoading(false);
+          }
           return;
         }
-        const data = await res.json() as {
-          tasks: ReviewTask[];
-          rhythms: ReviewRhythm[];
-        };
-
+        const data = await res.json() as { tasks: ReviewTask[]; rhythms: ReviewRhythm[] };
+        if (cancelled) return;
         setTasks(data.tasks);
-        setTaskStates(
-          Object.fromEntries(
-            data.tasks.map((t) => [
-              t.task_id,
-              {
-                completed: true,
-                actual_duration_mins: t.estimated_duration_mins,
-                incomplete_reason: null as IncompleteReason,
-              },
-            ])
-          )
-        );
+        setTaskStates(Object.fromEntries(
+          data.tasks.map(t => [t.task_id, {
+            completed: true,
+            actual_duration_mins: t.estimated_duration_mins,
+            incomplete_reason: null as IncompleteReason,
+          }])
+        ));
         setRhythms(data.rhythms);
-        setRhythmStates(
-          Object.fromEntries(data.rhythms.map((r) => [r.id, { completed: null }]))
-        );
+        setRhythmStates(Object.fromEntries(data.rhythms.map(r => [r.id, { completed: null }])));
         setLoading(false);
       } catch {
-        setError("Something went wrong loading your review.");
-        setLoading(false);
+        if (!cancelled) {
+          setError("Something went wrong loading your review.");
+          setLoading(false);
+        }
       }
     }
     preflight();
-  }, [token]);
+    return () => { cancelled = true; };
+  }, [token, activeDate]);
 
   function updateTaskState(taskId: string, update: Partial<ReviewTaskState>) {
     setTaskStates((prev) => ({
@@ -92,11 +103,12 @@ export default function ReviewModal({ token, onClose }: ReviewModalProps) {
     }));
   }
 
-  async function handleSubmit() {
+  async function submitCurrentDay(): Promise<boolean> {
     setPhase("submitting");
     try {
       const payload = {
-        tasks: tasks.map((t) => ({
+        schedule_date: activeDate,
+        tasks: tasks.map(t => ({
           task_id: t.task_id,
           task_name: t.task_name,
           completed: taskStates[t.task_id].completed,
@@ -108,52 +120,58 @@ export default function ReviewModal({ token, onClose }: ReviewModalProps) {
           incomplete_reason: taskStates[t.task_id].incomplete_reason ?? null,
         })),
         rhythms: rhythms
-          .filter((r) => rhythmStates[r.id].completed !== null)
-          .map((r) => ({
-            rhythm_id: r.id,
-            completed: rhythmStates[r.id].completed as boolean,
-          })),
+          .filter(r => rhythmStates[r.id].completed !== null)
+          .map(r => ({ rhythm_id: r.id, completed: rhythmStates[r.id].completed as boolean })),
       };
-
       const res = await fetch("/api/review/submit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
-
       if (!res.ok) throw new Error("Submit failed");
-      const result = await res.json() as { saved: boolean; summary_line: string };
-
-      const completedTasks = Object.values(taskStates).filter((s) => s.completed);
-      const completedActualTotal = completedTasks.reduce(
-        (sum, s) => sum + (s.actual_duration_mins ?? 0),
-        0
-      );
-      const estimatedTotal = tasks.reduce((sum, t) => sum + t.estimated_duration_mins, 0);
-
-      setSummaryData({
-        summaryLine: result.summary_line,
-        tasksCompleted: completedTasks.length,
-        tasksTotal: tasks.length,
-        timeOverUnder: completedActualTotal - estimatedTotal,
-        rhythmsCompleted: rhythms.filter((r) => rhythmStates[r.id].completed === true).length,
-        rhythmsTotal: rhythms.length,
-      });
-      setPhase("summary");
+      return true;
     } catch {
       setError("Couldn't save your review. Try again.");
+      setPhase("review");
+      return false;
+    }
+  }
+
+  async function fetchAggregate(): Promise<void> {
+    setPhase("aggregate-loading");
+    try {
+      const res = await fetch("/api/review/aggregate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ schedule_dates: dates }),
+      });
+      if (!res.ok) throw new Error("Aggregate failed");
+      const data = await res.json() as AggregateData;
+      setAggregate(data);
+      setPhase("aggregate");
+    } catch {
+      setError("We saved your review but couldn't generate the wrap.");
       setPhase("review");
     }
   }
 
-  const todayLabel = new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  });
+  async function handleSubmitContinue() {
+    const ok = await submitCurrentDay();
+    if (!ok) return;
+    if (isLastDay) {
+      await fetchAggregate();
+    } else {
+      setActiveIndex(activeIndex + 1);
+      setPhase("review");
+    }
+  }
+
+  async function handleSaveAndExit() {
+    const ok = await submitCurrentDay();
+    if (ok) onClose();
+  }
+
+  const todayLabel = weekdayLabelFor(activeDate);
 
   return (
     <div
@@ -187,8 +205,20 @@ export default function ReviewModal({ token, onClose }: ReviewModalProps) {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {phase === "summary" && summaryData ? (
-          <ReviewSummary {...summaryData} onClose={onClose} />
+        {phase === "aggregate" && aggregate ? (
+          dates.length === 1 ? (
+            <ReviewSummary
+              summaryLine={aggregate.narrative_line}
+              tasksCompleted={aggregate.per_day[0]?.tasks_completed ?? 0}
+              tasksTotal={aggregate.per_day[0]?.tasks_total ?? 0}
+              timeOverUnder={0}
+              rhythmsCompleted={aggregate.per_day[0]?.rhythms_completed ?? 0}
+              rhythmsTotal={aggregate.per_day[0]?.rhythms_total ?? 0}
+              onClose={onClose}
+            />
+          ) : (
+            <MultiDayReviewSummary aggregate={aggregate} onClose={onClose} />
+          )
         ) : (
           <>
             {/* Header */}
@@ -199,18 +229,28 @@ export default function ReviewModal({ token, onClose }: ReviewModalProps) {
                 flexShrink: 0,
               }}
             >
-              <div
-                style={{
-                  fontSize: 10,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.1em",
-                  color: "var(--text-muted, #a88d70)",
-                  marginBottom: 4,
+              {dates.length > 1 ? (
+                <div style={{
+                  fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em",
+                  color: "var(--text-muted, #a88d70)", marginBottom: 4,
                   fontFamily: "var(--font-literata)",
-                }}
-              >
-                {todayLabel}
-              </div>
+                }}>
+                  Day {activeIndex + 1} of {dates.length} · {weekdayLabelFor(activeDate)}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.1em",
+                    color: "var(--text-muted, #a88d70)",
+                    marginBottom: 4,
+                    fontFamily: "var(--font-literata)",
+                  }}
+                >
+                  {todayLabel}
+                </div>
+              )}
               <div
                 style={{
                   fontFamily: "var(--font-gilda, var(--font-display))",
@@ -293,33 +333,31 @@ export default function ReviewModal({ token, onClose }: ReviewModalProps) {
 
             {/* Footer */}
             {!loading && !error && (
-              <div
-                style={{
-                  padding: "16px 24px 24px",
-                  borderTop: "1px solid var(--border)",
-                  flexShrink: 0,
-                }}
-              >
+              <div style={{ padding: "16px 24px 24px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", gap: 8 }}>
                 <button
-                  onClick={handleSubmit}
-                  disabled={phase === "submitting"}
+                  onClick={handleSaveAndExit}
+                  disabled={phase === "submitting" || phase === "aggregate-loading"}
                   style={{
-                    width: "100%",
-                    padding: 13,
-                    background: "var(--text)",
-                    color: "var(--surface)",
-                    border: "none",
-                    borderRadius: 8,
-                    fontFamily: "var(--font-literata)",
-                    fontSize: 14,
-                    fontWeight: 500,
-                    cursor: phase === "submitting" ? "default" : "pointer",
-                    opacity: phase === "submitting" ? 0.6 : 1,
-                    letterSpacing: "0.01em",
-                    transition: "opacity 0.15s",
+                    flex: 1, padding: 13, background: "transparent",
+                    color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8,
+                    fontFamily: "var(--font-literata)", fontSize: 14, fontWeight: 500,
+                    cursor: "pointer", letterSpacing: "0.01em",
                   }}
                 >
-                  {phase === "submitting" ? "Saving…" : "Save & wrap up"}
+                  Save & exit
+                </button>
+                <button
+                  onClick={handleSubmitContinue}
+                  disabled={phase === "submitting" || phase === "aggregate-loading"}
+                  style={{
+                    flex: 2, padding: 13, background: "var(--text)",
+                    color: "var(--surface)", border: "none", borderRadius: 8,
+                    fontFamily: "var(--font-literata)", fontSize: 14, fontWeight: 500,
+                    cursor: "pointer", letterSpacing: "0.01em",
+                    opacity: (phase === "submitting" || phase === "aggregate-loading") ? 0.6 : 1,
+                  }}
+                >
+                  {phase === "submitting" ? "Saving…" : phase === "aggregate-loading" ? "Wrapping up…" : isLastDay ? "Submit & finish" : "Submit & continue →"}
                 </button>
               </div>
             )}
