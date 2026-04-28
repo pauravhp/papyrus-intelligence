@@ -8,8 +8,9 @@ import IntegrationsTab from "./IntegrationsTab";
 import ScheduleTab from "./ScheduleTab";
 import CalendarsTab from "./CalendarsTab";
 import NudgesTab from "./NudgesTab";
+import TimezoneTab from "./TimezoneTab";
 
-type Tab = "integrations" | "schedule" | "calendars" | "nudges";
+type Tab = "integrations" | "schedule" | "calendars" | "timezone" | "nudges";
 
 const COACHING_NUDGES_ENABLED = process.env.NEXT_PUBLIC_COACHING_NUDGES_ENABLED === "true";
 
@@ -17,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "integrations", label: "Integrations" },
   { id: "schedule",     label: "Schedule"     },
   { id: "calendars",    label: "Calendars"    },
+  { id: "timezone",     label: "Timezone"     },
   ...(COACHING_NUDGES_ENABLED ? [{ id: "nudges" as Tab, label: "Nudges" }] : []),
 ];
 
@@ -120,6 +122,9 @@ export default function SettingsClient() {
         )}
         {activeTab === "calendars" && (
           <CalendarsTab config={data.config} getToken={getToken} />
+        )}
+        {activeTab === "timezone" && (
+          <TimezoneTab config={data.config} getToken={getToken} />
         )}
         {activeTab === "nudges" && COACHING_NUDGES_ENABLED && (
           <NudgesTab config={data.config} getToken={getToken} />

@@ -19,7 +19,8 @@ from api.routes import calendars, google_auth, health, nudge, onboard, plan, rep
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    posthog.shutdown()  # flush any queued events before process exits
+    if config_settings.POSTHOG_API_KEY:
+        posthog.shutdown()  # flush any queued events before process exits
 
 
 app = FastAPI(title="schedule-for-me API", version="0.1.0", lifespan=lifespan)

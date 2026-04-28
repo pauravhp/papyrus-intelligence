@@ -14,7 +14,22 @@ export interface RhythmFormData {
   session_min: number;
   session_max: number;
   end_date: string;
+  days_of_week: string[];
 }
+
+const ALL_DAYS: { key: string; short: string }[] = [
+  { key: "monday",    short: "M" },
+  { key: "tuesday",   short: "T" },
+  { key: "wednesday", short: "W" },
+  { key: "thursday",  short: "T" },
+  { key: "friday",    short: "F" },
+  { key: "saturday",  short: "S" },
+  { key: "sunday",    short: "S" },
+];
+
+// 15-min increments from 15 → 240 (4 hours). Matches the ultradian cap
+// referenced elsewhere in CLAUDE.md.
+const DURATION_OPTIONS: number[] = Array.from({ length: 16 }, (_, i) => 15 * (i + 1));
 
 interface Props {
   open: boolean;
@@ -120,13 +135,25 @@ const INPUT: React.CSSProperties = {
 export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
   const isEdit = rhythm !== null;
 
+  // Snap to nearest 15-min increment, clamped to [15, 240].
+  const snap15 = (m: number): number => {
+    const rounded = Math.round(m / 15) * 15;
+    return Math.max(15, Math.min(240, rounded));
+  };
+
   const defaultForm = (): RhythmFormData => ({
     name: rhythm?.rhythm_name ?? "",
     description: rhythm?.description ?? "",
     sessions_per_week: rhythm?.sessions_per_week ?? 3,
-    session_min: rhythm?.session_min_minutes ?? 30,
-    session_max: rhythm?.session_max_minutes ?? 60,
+    session_min: snap15(rhythm?.session_min_minutes ?? 30),
+    session_max: snap15(rhythm?.session_max_minutes ?? 60),
     end_date: rhythm?.end_date ?? "",
+    // New rhythms default to all days; existing rhythms with NULL → all days
+    // for the form (we still send the explicit array on save).
+    days_of_week:
+      rhythm?.days_of_week && rhythm.days_of_week.length > 0
+        ? rhythm.days_of_week
+        : ALL_DAYS.map((d) => d.key),
   });
 
   const [form, setForm] = useState<RhythmFormData>(defaultForm);
@@ -155,6 +182,10 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) return;
+    if (form.days_of_week.length === 0) {
+      setError("Pick at least one day for this rhythm.");
+      return;
+    }
     // Ensure min <= max
     const corrected: RhythmFormData = {
       ...form,
@@ -318,7 +349,7 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
                 />
               </div>
 
-              {/* Duration */}
+              {/* Duration — 15-min increments */}
               <div>
                 <label style={LABEL}>
                   Session duration{" "}
@@ -334,22 +365,86 @@ export default function RhythmPanel({ open, rhythm, onClose, onSave }: Props) {
                     gap: 8,
                   }}
                 >
-                  <Stepper
+                  <select
+                    style={INPUT}
                     value={form.session_min}
-                    min={5}
-                    max={form.session_max}
-                    onChange={(v) => set("session_min", v)}
-                  />
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      set("session_min", v);
+                      if (v > form.session_max) set("session_max", v);
+                    }}
+                  >
+                    {DURATION_OPTIONS.map((m) => (
+                      <option key={m} value={m}>{m} min</option>
+                    ))}
+                  </select>
                   <span style={{ fontSize: 11, color: "var(--text-faint)", textAlign: "center" }}>
                     to
                   </span>
-                  <Stepper
+                  <select
+                    style={INPUT}
                     value={form.session_max}
-                    min={form.session_min}
-                    max={240}
-                    onChange={(v) => set("session_max", v)}
-                  />
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      set("session_max", v);
+                      if (v < form.session_min) set("session_min", v);
+                    }}
+                  >
+                    {DURATION_OPTIONS.map((m) => (
+                      <option key={m} value={m}>{m} min</option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+
+              {/* Days of week */}
+              <div>
+                <label style={LABEL}>Days</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {ALL_DAYS.map((d, i) => {
+                    const on = form.days_of_week.includes(d.key);
+                    return (
+                      <button
+                        key={d.key}
+                        type="button"
+                        onClick={() => {
+                          const next = on
+                            ? form.days_of_week.filter((k) => k !== d.key)
+                            : [...form.days_of_week, d.key];
+                          // Sort by canonical Mon→Sun order so the array stays predictable.
+                          next.sort((a, b) =>
+                            ALL_DAYS.findIndex((x) => x.key === a) -
+                            ALL_DAYS.findIndex((x) => x.key === b)
+                          );
+                          set("days_of_week", next);
+                        }}
+                        aria-pressed={on}
+                        aria-label={d.key}
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 8,
+                          border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                          background: on ? "var(--accent-tint)" : "var(--surface-raised)",
+                          color: on ? "var(--accent)" : "var(--text-muted)",
+                          fontSize: 12,
+                          fontWeight: on ? 600 : 400,
+                          fontFamily: "var(--font-literata)",
+                          cursor: "pointer",
+                          transition: "all 0.12s",
+                        }}
+                      >
+                        {d.short}
+                        <span style={{ position: "absolute", left: -9999 }}>
+                          {/* full name for screen readers */}{d.key}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic", marginTop: 6 }}>
+                  Pick the days this rhythm can land on. Default: every day.
+                </p>
               </div>
 
               {/* End date */}

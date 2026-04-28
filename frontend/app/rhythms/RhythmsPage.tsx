@@ -102,6 +102,7 @@ export default function RhythmsPage() {
             session_max: data.session_max,
             end_date: data.end_date || null,
             description: data.description,
+            days_of_week: data.days_of_week,
           },
           token
         );
@@ -119,6 +120,7 @@ export default function RhythmsPage() {
             end_date: data.end_date || null,
             sort_order: rhythms.length,
             description: data.description,
+            days_of_week: data.days_of_week,
           },
           token
         );

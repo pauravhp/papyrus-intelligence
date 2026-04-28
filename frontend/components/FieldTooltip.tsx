@@ -18,12 +18,12 @@ export default function FieldTooltip({ content }: FieldTooltipProps) {
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 13,
-            height: 13,
+            width: 16,
+            height: 16,
             borderRadius: "50%",
             border: "1px solid var(--border-strong)",
             background: "transparent",
-            color: "var(--text-faint)",
+            color: "var(--text-muted)",
             cursor: "pointer",
             padding: 0,
             flexShrink: 0,
@@ -38,7 +38,7 @@ export default function FieldTooltip({ content }: FieldTooltipProps) {
             (e.currentTarget as HTMLButtonElement).style.color = "var(--text-faint)";
           }}
         >
-          <HelpCircle size={8} strokeWidth={2.5} />
+          <HelpCircle size={11} strokeWidth={2.25} />
         </button>
       </Tooltip.Trigger>
       <Tooltip.Portal>

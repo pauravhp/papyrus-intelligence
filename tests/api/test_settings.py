@@ -133,3 +133,49 @@ def test_patch_nudges_disabled_types_replaces_full_list(mock_sb):
     # Full replacement — not append
     assert nudges["disabled_types"] == ["no_deadline"]
     assert "habit_skipped" not in nudges["disabled_types"]
+
+
+# ── /api/settings/timezone ────────────────────────────────────────────────────
+
+
+@patch("api.routes.settings.supabase")
+def test_patch_timezone_updates_config_user_timezone(mock_sb):
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"config": {"user": {"timezone": "America/Los_Angeles", "name": "Friend"}}}
+    )
+    update_mock = mock_sb.from_.return_value.update
+    update_mock.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    resp = client.patch("/api/settings/timezone", json={"timezone": "America/New_York"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"timezone": "America/New_York"}
+
+    # The route should write the full config back, with timezone updated
+    # and other user fields preserved.
+    written_config = update_mock.call_args[0][0]["config"]
+    assert written_config["user"]["timezone"] == "America/New_York"
+    assert written_config["user"]["name"] == "Friend"
+
+
+@patch("api.routes.settings.supabase")
+def test_patch_timezone_creates_user_block_when_missing(mock_sb):
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"config": {}}
+    )
+    update_mock = mock_sb.from_.return_value.update
+    update_mock.return_value.eq.return_value.execute.return_value = MagicMock()
+
+    resp = client.patch("/api/settings/timezone", json={"timezone": "Europe/London"})
+
+    assert resp.status_code == 200
+    written_config = update_mock.call_args[0][0]["config"]
+    assert written_config["user"]["timezone"] == "Europe/London"
+
+
+@patch("api.routes.settings.supabase")
+def test_patch_timezone_rejects_invalid_iana(mock_sb):
+    resp = client.patch("/api/settings/timezone", json={"timezone": "Not/A_Real_Zone"})
+    assert resp.status_code == 400
+    # The supabase update should never be reached for invalid input.
+    mock_sb.from_.return_value.update.assert_not_called()
