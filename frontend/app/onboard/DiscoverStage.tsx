@@ -296,6 +296,9 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
 
             {/* Event categories */}
             <p style={{ ...SECTION_HEADING, marginTop: 4 }}>Event categories</p>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, lineHeight: 1.55 }}>
+              Papyrus detected these calendar categories from how you use colour. Confirm or rename — this teaches Papyrus what each event type means to you.
+            </p>
             <p style={{ fontSize: 12, color: "var(--text-faint)", fontStyle: "italic", marginBottom: 14 }}>
               I spotted these colour patterns in your last 14 days — rename them to match how you think about your calendar.
             </p>
