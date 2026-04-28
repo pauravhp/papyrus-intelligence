@@ -30,6 +30,14 @@ def _patch_beta_access():
     app.dependency_overrides.pop(require_beta_access, None)
 
 
+@pytest.fixture(autouse=True)
+def _patch_load_user_credentials():
+    """Default: no Google credentials stored — calendar branch is skipped.
+    Tests that need real behaviour override this via their own @patch."""
+    with patch("api.routes.import_tasks._load_user_credentials", return_value=(None, None)):
+        yield
+
+
 client = TestClient(app)
 
 
@@ -242,3 +250,42 @@ def test_commit_returns_400_when_token_error(mock_get_token):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "todoist_reconnect_required"
+
+
+@patch("api.routes.import_tasks.ensure_papyrus_calendar")
+@patch("api.routes.import_tasks._load_user_credentials")
+@patch("api.routes.import_tasks._build_todoist_client")
+def test_commit_returns_papyrus_calendar_id(
+    mock_build_client, mock_load_creds, mock_ensure_cal
+):
+    mock_build_client.return_value = MagicMock()
+    mock_load_creds.return_value = (MagicMock(), "America/Vancouver")
+    mock_ensure_cal.return_value = "papyrus-cal-id-789"
+    resp = client.post(
+        "/api/import/commit",
+        json={"tasks": [], "rhythms": []},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["papyrus_calendar_id"] == "papyrus-cal-id-789"
+    assert resp.json()["calendar_scope_upgrade_required"] is False
+
+
+@patch("api.routes.import_tasks.ensure_papyrus_calendar")
+@patch("api.routes.import_tasks._load_user_credentials")
+@patch("api.routes.import_tasks._build_todoist_client")
+def test_commit_flags_scope_upgrade_required(
+    mock_build_client, mock_load_creds, mock_ensure_cal
+):
+    from api.services.import_calendar import PapyrusCalendarScopeError
+    mock_build_client.return_value = MagicMock()
+    mock_load_creds.return_value = (MagicMock(), "UTC")
+    mock_ensure_cal.side_effect = PapyrusCalendarScopeError("re-OAuth needed")
+    resp = client.post(
+        "/api/import/commit",
+        json={"tasks": [], "rhythms": []},
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["calendar_scope_upgrade_required"] is True
+    assert resp.json()["papyrus_calendar_id"] is None

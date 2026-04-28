@@ -8,7 +8,9 @@ No external writes.
 `/commit` takes the (user-edited) proposal and writes:
 - tasks → Todoist via TodoistClient.create_task
 - rhythms → Supabase via rhythm_service.create_rhythm
-- the Papyrus GCal calendar is created in a follow-up commit (Task 8).
+- finds-or-creates the user's "Papyrus" GCal calendar via
+  api.services.import_calendar.ensure_papyrus_calendar; surfaces
+  calendar_scope_upgrade_required when re-OAuth is needed.
 
 CLAUDE.md Rule 2: writes are human-gated. /convert never writes.
 """
@@ -20,9 +22,15 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from google.oauth2.credentials import Credentials
+
 from api.auth import require_beta_access
 from api.config import settings
 from api.db import supabase
+from api.services.import_calendar import (
+    PapyrusCalendarScopeError,
+    ensure_papyrus_calendar,
+)
 from api.services.migration_parser import (
     MAX_INPUT_CHARS,
     MigrationParseError,
@@ -97,6 +105,7 @@ class CommitResponse(BaseModel):
     errors: list[CommitError]
     todoist_reconnect_required: bool = False
     papyrus_calendar_id: str | None = None
+    calendar_scope_upgrade_required: bool = False
 
 
 # ── Helpers (module-scope so tests can patch them) ────────────────────────────
@@ -114,6 +123,25 @@ def _build_task_labels(t: TaskProposal) -> list[str]:
         # Strip leading "@" — Todoist stores labels without it.
         labels.append(t.category_label.lstrip("@"))
     return labels
+
+
+def _load_user_credentials(user_id: str):
+    """Load the user's stored Google credentials.
+    Returns (Credentials, timezone_str) or (None, None) if not connected."""
+    row = (
+        supabase.from_("users")
+        .select("google_credentials, config")
+        .eq("id", user_id)
+        .single()
+        .execute()
+    )
+    creds_data = (row.data or {}).get("google_credentials")
+    if not creds_data:
+        return None, None
+    config = (row.data or {}).get("config") or {}
+    timezone_str = (config.get("user") or {}).get("timezone", "UTC")
+    creds = Credentials.from_authorized_user_info(creds_data)
+    return creds, timezone_str
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -175,11 +203,8 @@ def commit(
     body: CommitRequest,
     user: dict = Depends(require_beta_access),
 ) -> CommitResponse:
-    """Write approved tasks to Todoist and rhythms to Supabase.
-
-    GCal calendar creation is deferred to Task 8; papyrus_calendar_id is null
-    for now.
-    """
+    """Write approved tasks to Todoist, rhythms to Supabase, and ensure the
+    Papyrus GCal calendar exists."""
     user_id = user["sub"]
 
     # Fail fast on Todoist auth issues before attempting any writes.
@@ -231,10 +256,31 @@ def commit(
             logger.exception("[import] rhythm create failed for %s", r.name)
             errors.append(CommitError(kind="rhythm", name=r.name, reason=str(exc)[:200]))
 
+    papyrus_calendar_id: str | None = None
+    calendar_scope_upgrade_required = False
+
+    creds, timezone_str = _load_user_credentials(user_id)
+    if creds is not None:
+        try:
+            papyrus_calendar_id = ensure_papyrus_calendar(
+                user_id=user_id,
+                supabase=supabase,
+                credentials=creds,
+                timezone_str=timezone_str or "UTC",
+            )
+        except PapyrusCalendarScopeError:
+            calendar_scope_upgrade_required = True
+        except Exception as exc:
+            logger.exception("[import] papyrus calendar ensure failed")
+            errors.append(
+                CommitError(kind="calendar", name="<papyrus>", reason=str(exc)[:200])
+            )
+
     return CommitResponse(
         tasks_created=tasks_created,
         rhythms_created=rhythms_created,
         errors=errors,
         todoist_reconnect_required=False,
-        papyrus_calendar_id=None,
+        papyrus_calendar_id=papyrus_calendar_id,
+        calendar_scope_upgrade_required=calendar_scope_upgrade_required,
     )
