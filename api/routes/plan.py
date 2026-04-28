@@ -21,7 +21,11 @@ from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from api.services import planner
-from api.services.todoist_token import TodoistTokenError, get_valid_todoist_token
+from api.services.todoist_token import (
+    TodoistTokenError,
+    get_valid_todoist_token,
+    surface_todoist_auth_failure,
+)
 from src.calendar_client import build_gcal_service_from_credentials
 
 router = APIRouter(prefix="/api")
@@ -135,19 +139,8 @@ def _resolve_date(label: str) -> date:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 
-def _surface_todoist_auth_failure(exc: RuntimeError) -> None:
-    """If a downstream Todoist call hit a 401 (token revoked between our
-    refresh-check and the actual API call — a race we can't prevent), raise
-    a structured 400 so the frontend renders the reconnect surface."""
-    if "Todoist API auth failed" in str(exc):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "todoist_reconnect_required",
-                "message": "Todoist connection lost — please reconnect",
-            },
-        )
-    raise exc
+# surface_todoist_auth_failure lives in api.services.todoist_token so /api/plan
+# and /api/replan share one implementation — see import above.
 
 
 @router.post("/plan", response_model=PlanResponse)
@@ -158,7 +151,7 @@ def plan(body: PlanRequest, user: dict = Depends(require_beta_access)) -> PlanRe
     try:
         result = planner.plan(user_ctx, target_date, body.context_note or "")
     except RuntimeError as exc:
-        _surface_todoist_auth_failure(exc)
+        surface_todoist_auth_failure(exc)
     return PlanResponse(
         scheduled=result.get("scheduled", []),
         pushed=result.get("pushed", []),
@@ -184,7 +177,7 @@ def refine(body: RefineRequest, user: dict = Depends(require_beta_access)) -> Pl
             original_context_note=body.original_context_note or "",
         )
     except RuntimeError as exc:
-        _surface_todoist_auth_failure(exc)
+        surface_todoist_auth_failure(exc)
     return PlanResponse(
         scheduled=result.get("scheduled", []),
         pushed=result.get("pushed", []),
@@ -206,5 +199,5 @@ def confirm(body: ConfirmRequest, user: dict = Depends(require_beta_access)) -> 
     except planner.AlreadyConfirmedError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:
-        _surface_todoist_auth_failure(exc)
+        surface_todoist_auth_failure(exc)
     return ConfirmResponse(**result)

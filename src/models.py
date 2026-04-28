@@ -28,6 +28,9 @@ class TodoistTask:
     # Rhythm metadata — set when injecting rhythms into schedule_day
     session_max_minutes: Optional[int] = None
     sessions_per_week: Optional[int] = None
+    # Internal-only placement hint (e.g. "mornings only"). Goes to the LLM
+    # prompt but is scrubbed from response/GCal — see _inject_synthetic_rhythms.
+    rhythm_hint: Optional[str] = None
 
 
 @dataclass

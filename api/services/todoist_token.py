@@ -28,6 +28,7 @@ import logging
 import time
 
 import requests
+from fastapi import HTTPException
 
 from api.config import settings
 
@@ -141,3 +142,22 @@ def get_valid_todoist_token(supabase, user_id: str) -> str:
         {"todoist_oauth_token": new_blob}
     ).eq("id", user_id).execute()
     return new_access
+
+
+def surface_todoist_auth_failure(exc: Exception) -> None:
+    """Translate a downstream Todoist 401 (token revoked between our refresh-
+    check and the actual API call — a race we can't prevent) into the
+    structured 400 the frontend already handles. If the exception isn't a
+    Todoist auth failure, re-raise it unchanged.
+
+    Shared between /api/plan, /api/refine, /api/replan etc. so the response
+    shape stays identical no matter which route surfaced the auth race."""
+    if "Todoist API auth failed" in str(exc):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "todoist_reconnect_required",
+                "message": "Todoist connection lost — please reconnect",
+            },
+        )
+    raise exc

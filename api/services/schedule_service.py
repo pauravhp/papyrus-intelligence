@@ -113,7 +113,10 @@ def _build_prompt(
         if t.is_rhythm and t.session_max_minutes:
             dur_str = f"{t.duration_minutes}-{t.session_max_minutes}min"
             cadence = f" [{t.sessions_per_week}x/week]" if t.sessions_per_week else ""
-            lines.append(f"{t.id} {t.content[:50]} p{t.priority} {dur_str}{cadence} [rhythm]")
+            # The hint is structured (not embedded in content) so it survives
+            # truncation and never leaks into user-facing task_name.
+            hint = f" [hint: {t.rhythm_hint}]" if t.rhythm_hint else ""
+            lines.append(f"{t.id} {t.content[:50]} p{t.priority} {dur_str}{cadence}{hint} [rhythm]")
         else:
             lines.append(
                 f"{t.id} {t.content[:50]} p{t.priority} {t.duration_minutes}m"
@@ -180,7 +183,7 @@ def _build_prompt(
 
     return f"""Schedule tasks for {target_date} (timezone {tz}, UTC{tz_offset}).{(' ' + note) if note else ''}
 
-TASKS (id name priority duration):
+TASKS (id name priority duration [deadline]):
 {tasks_text}
 
 SUGGESTED WINDOWS (LOCAL, UTC{tz_offset}): {windows_text}
@@ -208,6 +211,7 @@ DATETIME FORMAT FOR YOUR OUTPUT (do not deviate):
 GUIDANCE
 - Prefer scheduling within the suggested windows.
 - Leave at least {min_gap} minutes between consecutive deep_work tasks.
+- If a task has a deadline within 48 hours of {target_date}, treat it as effectively P1 even if its Todoist priority says P2 or P3 — urgency overrides nominal priority.
 - {_overflow_rule(config)}"""
 
 

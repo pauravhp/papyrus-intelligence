@@ -17,7 +17,11 @@ from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
 from api.services.planner import _is_within_idempotency_window
-from api.services.todoist_token import TodoistTokenError, get_valid_todoist_token
+from api.services.todoist_token import (
+    TodoistTokenError,
+    get_valid_todoist_token,
+    surface_todoist_auth_failure,
+)
 from src.calendar_client import build_gcal_service_from_credentials, create_event, delete_event, get_events
 from src.todoist_client import TodoistClient
 
@@ -88,18 +92,8 @@ def _load_user_context(user_id: str) -> dict:
     }
 
 
-def _surface_todoist_auth_failure(exc: RuntimeError) -> None:
-    """If a Todoist call hit a 401 between our refresh-check and the actual
-    API call, surface the same structured 400 the frontend already handles."""
-    if "Todoist API auth failed" in str(exc):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "todoist_reconnect_required",
-                "message": "Todoist connection lost — please reconnect",
-            },
-        )
-    raise exc
+# surface_todoist_auth_failure is imported from api.services.todoist_token —
+# Lane A had to keep this local during parallel work; lifted in Lane E.
 
 
 def _load_today_schedule(user_id: str) -> dict | None:
@@ -249,7 +243,7 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
             previous_proposal=body.previous_proposal,
         )
     except RuntimeError as exc:
-        _surface_todoist_auth_failure(exc)
+        surface_todoist_auth_failure(exc)
 
     return proposed
 
