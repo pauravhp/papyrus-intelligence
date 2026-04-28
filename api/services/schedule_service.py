@@ -220,17 +220,21 @@ GUIDANCE
 # whole summary is dropped (replaced with ""), since stripping the offending
 # phrase usually leaves a sentence fragment that reads worse than nothing.
 #
-# Anchored on the recurring leak in the bug report — numeric durations like
-# "the 220-minute window". Also catches priority codes and the JSON label
-# values. Verbal time references ("by an hour", "this morning") stay intact.
+# POLICY (2026-04-28): only ONE pattern, the digit+time-unit anchor. This is
+# the real bug being defended against — Haiku sometimes leaks "the 220-minute
+# window" or "stacked 135m of work" into the coach voice, which is internal
+# scheduler arithmetic users shouldn't see.
+#
+# Earlier revisions also matched priority codes (p1/P2) and the underscore
+# JSON token (deep_work). Both were too aggressive: "p1" and "p2" routinely
+# appear in legitimate coach copy ("front-loaded your p1 task") and dropping
+# the entire summary on that match left users staring at an empty panel.
+# DO NOT re-add those patterns without a regression-passing test that proves
+# the new pattern does not eat phrasings like the ones in
+# `test_sanitize_reasoning_summary_passes_clean_coach_text`.
 _REASONING_LEAK_PATTERNS = [
     # digit + optional sep + time-unit suffix
     re.compile(r"\b\d+(?:\.\d+)?\s*[-]?\s*(?:m|min|mins|minute|minutes|h|hr|hrs|hour|hours)\b", re.IGNORECASE),
-    # priority codes: p1 / P2 / etc.
-    re.compile(r"\bp[1-4]\b", re.IGNORECASE),
-    # JSON category-label tokens (the underscore form is the giveaway —
-    # "deep work" without underscore is acceptable coach-speak)
-    re.compile(r"\bdeep_work\b", re.IGNORECASE),
 ]
 
 

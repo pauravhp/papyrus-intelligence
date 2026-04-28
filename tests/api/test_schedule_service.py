@@ -212,14 +212,12 @@ def test_schedule_day_filters_no_duration_and_surfaces_them_in_pushed():
     "Your 3 hours of focus work goes first.",
     "Placed it in the 45 minute slot.",
     "Used the 2hr afternoon stretch for deep work.",
-    "Scheduled 6gJjJ7M3 (60m, p2) in the morning.",
-    "Front-loaded deep_work this morning.",
+    "Scheduled 6gJjJ7M3 (60m) in the morning.",  # task-id + duration — duration is the leak
 ])
 def test_sanitize_reasoning_summary_drops_leaked_phrasings(leak):
-    """Numeric durations, priority codes, and the literal `deep_work` token
-    must never appear in the coach-voice summary. The Python sanitizer is the
-    final defence — Haiku occasionally slips past the prompt's forbidden list
-    (e.g. \"the 220-minute window\")."""
+    """Numeric durations like \"the 220-minute window\" or \"adding to 135m\"
+    are internal scheduler arithmetic — Haiku occasionally leaks them into
+    coach voice. The Python sanitizer is the final defence."""
     from api.services.schedule_service import _sanitize_reasoning_summary
     assert _sanitize_reasoning_summary(leak) == ""
 
@@ -229,11 +227,24 @@ def test_sanitize_reasoning_summary_drops_leaked_phrasings(leak):
     "Front-loaded the deep work this morning so admin tasks fall into the afternoon.",
     "Shifted things by an hour to clear the morning.",
     "",
+    # Regression cases — these used to be wrongly dropped by over-aggressive
+    # patterns (priority-code and underscore-token). They MUST round-trip.
+    # Real reasoning_summary from a 2026-04-28 plan call: matched on `p1`
+    # and was silently nuked, leaving the user staring at an empty panel.
+    "I front-loaded your p1 task in the early window, stacked admin work "
+    "into the afternoon slots around your lunch and dinner blocks, and "
+    "pushed the deep-work crypto task into your late-night window where "
+    "you have the most uninterrupted time. The rhythm tasks and remaining "
+    "admin items didn't fit within your cutoff, so they're queued for "
+    "another day.",
+    "Slotted your P2 admin tasks around the gym block.",
+    "Front-loaded the deep-work block this morning.",  # kebab-case, fine
 ])
 def test_sanitize_reasoning_summary_passes_clean_coach_text(clean):
-    """Clean coach voice — no numeric durations, no JSON-shaped category
-    labels, no priority codes — must round-trip unchanged. Verbal time
-    references like \"by an hour\" are acceptable."""
+    """Clean coach voice round-trips unchanged. Specifically: priority codes
+    (p1/P2/etc), kebab-case category names (\"deep-work\"), and verbal time
+    references (\"by an hour\") are all legitimate coach copy and must NOT
+    be filtered. Only the digit+time-unit pattern is policy."""
     from api.services.schedule_service import _sanitize_reasoning_summary
     assert _sanitize_reasoning_summary(clean) == clean
 
