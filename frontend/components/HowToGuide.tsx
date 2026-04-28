@@ -129,16 +129,21 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
       return (
         <div>
           <div style={EYEBROW}>Step 2 of {TOTAL_STEPS}</div>
-          <div style={HEADING}>Take Papyrus with you</div>
+          <div style={HEADING}>Bring a Papyrus coach with you</div>
           <div style={BODY}>
-            Paste this into any AI — Claude, ChatGPT, Gemini — to get personalised help setting
-            up your Todoist, writing better context notes, or understanding why something was
-            scheduled a certain way. Works for replans too: ask it how to phrase a context note
-            when your afternoon slips.
+            Paste this into Claude, ChatGPT, or Gemini and it becomes a Papyrus
+            coach you can ask anything: how to set up your Todoist labels, why a
+            task didn't get scheduled, how to phrase a context note when your
+            afternoon slips, what to type for a replan. It explains the reasoning
+            behind Papyrus's choices — not just the mechanics.
+            <br /><br />
+            It won't try to <em>be</em> Papyrus or design a UI for you — it's
+            there to answer questions, like a patient friend who already knows
+            the app.
             <br /><br />
             <em style={{ color: "var(--text-faint)" }}>
-              This is a shortcut for people who learn by asking. The next five slides walk
-              through everything in detail — don't feel you have to copy the prompt to use Papyrus.
+              Optional. The next five slides walk through everything in detail —
+              skip this if you'd rather just learn by clicking.
             </em>
           </div>
           <div>
@@ -194,7 +199,7 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
                 { chip: ACTIVE_CHIP, label: "@quick", desc: "Under 15 min. Batched into transition gaps between larger blocks." },
                 { chip: MUTED_CHIP, label: "@waiting", desc: "Blocked on someone. Never auto-scheduled — surfaces in weekly review." },
                 { chip: MUTED_CHIP, label: "@in-progress", desc: "Partially done. Treated as higher urgency than unstarted tasks." },
-                { chip: MUTED_CHIP, label: "@recurring-review", desc: "Weekly review task. Not in daily plan unless explicitly requested." },
+                { chip: MUTED_CHIP, label: "@recurring-review", desc: "For tasks like “review goals weekly” — surfaces in your weekly review only, never in daily plans." },
               ].map(({ chip, label, desc }) => (
                 <div key={label} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                   <span style={chip}>{label}</span>
@@ -251,7 +256,7 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
           </div>
           <div style={CARD}>
             <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6, marginBottom: 14 }}>
-              {["@15min", "@30min", "@60min", "@90min", "@2h", "@3h"].map(t => (
+              {["@10min", "@15min", "@30min", "@45min", "@60min", "@75min", "@90min", "@2h", "@3h"].map(t => (
                 <span key={t} style={TIME_CHIP}>{t}</span>
               ))}
             </div>
@@ -296,11 +301,12 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
           <div style={CARD}>
             <div style={{
               alignSelf: "flex-end", marginLeft: "auto",
-              background: "var(--accent)", color: "#fff9f0",
+              background: "var(--accent-hover)", color: "#fff9f0",
               borderRadius: "16px 16px 4px 16px",
               padding: "8px 13px", fontSize: 12, lineHeight: 1.4,
               maxWidth: "80%", marginBottom: 10, fontStyle: "italic" as const,
               display: "inline-block",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
             }}>
               "plan light today, low energy — skip anything physical"
             </div>
@@ -448,7 +454,8 @@ export default function HowToGuide({ open, onClose }: HowToGuideProps) {
               right: 0,
               top: 0,
               bottom: 0,
-              width: 420,
+              width: "min(420px, 100vw)",
+              maxWidth: "100vw",
               background: "var(--bg)",
               borderLeft: "1px solid var(--border)",
               zIndex: 60,
@@ -471,8 +478,16 @@ export default function HowToGuide({ open, onClose }: HowToGuideProps) {
               <X size={13} />
             </button>
 
-            {/* Step content (animated) */}
-            <div style={{ flex: 1, padding: "28px 26px 16px", overflow: "hidden" }}>
+            {/* Step content (animated) — overflowX hidden to clip the slide
+                animation; overflowY auto so step 0's longer copy can scroll on
+                short / mobile viewports instead of getting visually cut off. */}
+            <div style={{
+              flex: 1,
+              padding: "28px 26px 16px",
+              overflowX: "hidden",
+              overflowY: "auto",
+              WebkitOverflowScrolling: "touch",
+            }}>
               <AnimatePresence mode="wait" custom={direction}>
                 <motion.div
                   key={stepIndex}
@@ -494,17 +509,19 @@ export default function HowToGuide({ open, onClose }: HowToGuideProps) {
               display: "flex",
               alignItems: "center",
             }}>
-              {/* Back */}
+              {/* Back — 44×44 tap target on mobile, visually unchanged */}
               <button
                 onClick={() => goTo(stepIndex - 1)}
                 aria-label="Previous step"
                 style={{
-                  width: 30, height: 30,
+                  width: 44, height: 44,
+                  minWidth: 44, minHeight: 44,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "var(--text-muted)", fontSize: 18, background: "none", border: "none",
+                  color: "var(--text-muted)", fontSize: 22, background: "none", border: "none",
                   cursor: "pointer", flexShrink: 0,
                   opacity: stepIndex === 0 ? 0 : 1,
                   pointerEvents: stepIndex === 0 ? "none" : "auto",
+                  marginLeft: -10,
                 }}
               >
                 ‹
