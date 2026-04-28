@@ -12,6 +12,7 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 WRITE_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.app.created",
 ]
 TOKEN_PATH = Path(__file__).parent.parent / "token.json"
 CREDS_PATH = Path(__file__).parent.parent / "credentials.json"
