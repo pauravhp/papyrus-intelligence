@@ -129,16 +129,21 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
       return (
         <div>
           <div style={EYEBROW}>Step 2 of {TOTAL_STEPS}</div>
-          <div style={HEADING}>Take Papyrus with you</div>
+          <div style={HEADING}>Bring a Papyrus coach with you</div>
           <div style={BODY}>
-            Paste this into any AI — Claude, ChatGPT, Gemini — to get personalised help setting
-            up your Todoist, writing better context notes, or understanding why something was
-            scheduled a certain way. Works for replans too: ask it how to phrase a context note
-            when your afternoon slips.
+            Paste this into Claude, ChatGPT, or Gemini and it becomes a Papyrus
+            coach you can ask anything: how to set up your Todoist labels, why a
+            task didn't get scheduled, how to phrase a context note when your
+            afternoon slips, what to type for a replan. It explains the reasoning
+            behind Papyrus's choices — not just the mechanics.
+            <br /><br />
+            It won't try to <em>be</em> Papyrus or design a UI for you — it's
+            there to answer questions, like a patient friend who already knows
+            the app.
             <br /><br />
             <em style={{ color: "var(--text-faint)" }}>
-              This is a shortcut for people who learn by asking. The next five slides walk
-              through everything in detail — don't feel you have to copy the prompt to use Papyrus.
+              Optional. The next five slides walk through everything in detail —
+              skip this if you'd rather just learn by clicking.
             </em>
           </div>
           <div>
