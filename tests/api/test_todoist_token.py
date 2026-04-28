@@ -166,7 +166,9 @@ def test_get_valid_token_raises_when_no_refresh_token_and_expired():
 
 
 def test_get_valid_token_handles_network_error():
-    """requests.post raises → TodoistTokenError."""
+    """Two consecutive requests.post failures → TodoistTokenError. Asserts the
+    helper actually retries once (mock_post called twice) rather than bailing on
+    the first transient network blip."""
     blob = {
         "access_token": "stale",
         "refresh_token": "rt-1",
@@ -174,12 +176,45 @@ def test_get_valid_token_handles_network_error():
     }
     sb = _mock_supabase_with_blob(blob)
 
-    with patch("api.services.todoist_token.requests.post") as mock_post:
+    with patch("api.services.todoist_token.requests.post") as mock_post, \
+         patch("api.services.todoist_token.time.sleep"):
         mock_post.side_effect = requests.ConnectionError("boom")
         with pytest.raises(TodoistTokenError):
             get_valid_todoist_token(sb, "user-1")
+        assert mock_post.call_count == 2
 
     sb.from_.return_value.update.assert_not_called()
+
+
+def test_get_valid_token_retries_once_on_transient_network_error():
+    """First requests.post raises a connection error, second succeeds. Helper
+    should swallow the first failure, return the new access_token from the
+    retry, and persist the rotated blob — no banner shown to the user for a
+    one-off network blip."""
+    blob = {
+        "access_token": "stale",
+        "refresh_token": "rt-1",
+        "expires_at": int(time.time()) - 10,
+    }
+    sb = _mock_supabase_with_blob(blob)
+
+    successful_response = MagicMock(status_code=200)
+    successful_response.json.return_value = {
+        "access_token": "new-access",
+        "refresh_token": "rt-2",
+        "expires_in": 3600,
+        "token_type": "Bearer",
+    }
+
+    with patch("api.services.todoist_token.requests.post") as mock_post, \
+         patch("api.services.todoist_token.time.sleep") as mock_sleep:
+        mock_post.side_effect = [requests.ConnectionError("blip"), successful_response]
+        result = get_valid_todoist_token(sb, "user-1")
+
+    assert result == "new-access"
+    assert mock_post.call_count == 2
+    mock_sleep.assert_called_once_with(1)
+    sb.from_.return_value.update.assert_called_once()
 
 
 def test_get_valid_token_raises_when_no_token_stored():

@@ -82,20 +82,33 @@ def get_valid_todoist_token(supabase, user_id: str) -> str:
             "Todoist token expired and no refresh_token available — user must reconnect"
         )
 
-    try:
-        resp = requests.post(
-            _TODOIST_TOKEN_URL,
-            data={
-                "client_id": settings.TODOIST_CLIENT_ID,
-                "client_secret": settings.TODOIST_CLIENT_SECRET,
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-            },
-            timeout=10,
-        )
-    except requests.RequestException as exc:
-        logger.warning("[todoist_token] refresh network error: %s", exc)
-        raise TodoistTokenError(f"Refresh network error: {exc}") from exc
+    # Retry once on transient network failure (connection drop, timeout) before
+    # surfacing the reconnect banner. A 400/401 from Todoist is NOT retried —
+    # that's a definitive rejection, retrying just delays the inevitable.
+    request_kwargs = dict(
+        data={
+            "client_id": settings.TODOIST_CLIENT_ID,
+            "client_secret": settings.TODOIST_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        },
+        timeout=10,
+    )
+    resp = None
+    last_exc: requests.RequestException | None = None
+    for attempt in range(2):
+        try:
+            resp = requests.post(_TODOIST_TOKEN_URL, **request_kwargs)
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            logger.warning(
+                "[todoist_token] refresh network error (attempt %d): %s", attempt + 1, exc
+            )
+            if attempt == 0:
+                time.sleep(1)
+    if resp is None:
+        raise TodoistTokenError(f"Refresh network error: {last_exc}") from last_exc
 
     if resp.status_code != 200:
         # 400 / 401 = refresh_token rejected (revoked, rotated by another req, etc.)
