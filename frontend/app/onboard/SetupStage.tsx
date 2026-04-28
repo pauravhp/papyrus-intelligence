@@ -29,6 +29,16 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
   // OR after they clicked Re-check at least once. Used to surface the "Google
   // takes ~60s to update" hint only when it's actionable.
   const [syncRecheckedAtLeastOnce, setSyncRecheckedAtLeastOnce] = useState(false);
+  // Pre-OAuth interstitial: surfaces the "you'll need a free Todoist account"
+  // notice before kicking off OAuth. Persisted in sessionStorage so we don't
+  // re-show it after the OAuth redirect round-trip remounts this component.
+  const [todoistAck, setTodoistAck] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.sessionStorage.getItem("papyrus.todoist.ack") === "1") {
+      setTodoistAck(true);
+    }
+  }, []);
 
   useEffect(() => {
     supabase
@@ -87,6 +97,14 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
     if (!token) return;
     const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
     window.location.href = `${apiUrl}/auth/todoist?token=${token}`;
+  };
+
+  const handleAckAndConnectTodoist = async () => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("papyrus.todoist.ack", "1");
+    }
+    setTodoistAck(true);
+    await handleConnectTodoist();
   };
 
   const canContinue = gcalConnected && todoistConnected;
@@ -215,6 +233,60 @@ export default function SetupStage({ onAdvance }: SetupStageProps) {
                 ) : todoistConnected ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--accent)", fontSize: 12 }}>
                     <CheckCircle2 size={13} /> Connected
+                  </div>
+                ) : !todoistAck ? (
+                  <div
+                    style={{
+                      background: "var(--surface-raised)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 10,
+                      padding: 12,
+                    }}
+                  >
+                    <p style={{ color: "var(--text-muted)", fontSize: 12, lineHeight: 1.55, marginBottom: 10 }}>
+                      Papyrus needs your Todoist tasks. You&apos;ll need a free Todoist account
+                      — Todoist&apos;s sign-in flow doesn&apos;t offer signup mid-OAuth, so create one
+                      first if you don&apos;t have one yet.
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <motion.button
+                        onClick={handleAckAndConnectTodoist}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        style={{
+                          background: "var(--accent)",
+                          color: "var(--bg)",
+                          border: "none",
+                          borderRadius: 8,
+                          padding: "10px 16px",
+                          minHeight: 40,
+                          fontSize: 13,
+                          fontWeight: 500,
+                          cursor: "pointer",
+                        }}
+                      >
+                        I have one — continue
+                      </motion.button>
+                      <a
+                        href="https://todoist.com/users/showregister"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          background: "transparent",
+                          color: "var(--text-muted)",
+                          border: "1px solid var(--border-strong)",
+                          borderRadius: 8,
+                          padding: "10px 16px",
+                          minHeight: 40,
+                          fontSize: 13,
+                          textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        Sign up at Todoist ↗
+                      </a>
+                    </div>
                   </div>
                 ) : (
                   <motion.button
