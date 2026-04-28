@@ -39,6 +39,7 @@ export interface ScheduledItem {
 export interface PushedItem {
   task_id: string;
   reason: string;
+  task_name?: string;
 }
 
 export interface GCalEvent {
@@ -93,6 +94,10 @@ export default function TodayPage() {
   const [planningTarget, setPlanningTarget] = useState<"today" | "tomorrow">("today");
   const [planningStatus, setPlanningStatus] = useState<"idle" | "working" | "proposal">("idle");
   const [proposedSchedule, setProposedSchedule] = useState<ScheduledItem[] | null>(null);
+  // Pushed entries from the most recent proposal — the LLM's own pushes plus
+  // anything the backend validator rejected. Without surfacing this in the
+  // today column, users can't see WHY a task didn't make the schedule.
+  const [proposedPushed, setProposedPushed] = useState<PushedItem[] | null>(null);
   // True when the planner short-circuited because we're past today's effective
   // cutoff. Drives the "Plan tomorrow" CTA banner above the day columns.
   const [autoShiftToTomorrowSuggested, setAutoShiftToTomorrowSuggested] = useState(false);
@@ -153,6 +158,10 @@ export default function TodayPage() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
 
+  // While in proposal state, surface BOTH the proposed schedule AND the
+  // proposal's pushed[] list in the today/tomorrow column. Without merging
+  // pushed, users could never see the LLM's reasons for skipping a task or
+  // the validator's silent rejections (truncations, GCal conflicts).
   const todayColumnData: DayData | null =
     planningStatus === "proposal" && proposedSchedule && planningTarget === "today"
       ? {
@@ -164,6 +173,7 @@ export default function TodayPage() {
             all_day_events: data?.today?.all_day_events ?? [],
           }),
           scheduled: proposedSchedule,
+          pushed: proposedPushed ?? [],
         }
       : data?.today ?? null;
 
@@ -178,6 +188,7 @@ export default function TodayPage() {
             all_day_events: data?.tomorrow?.all_day_events ?? [],
           }),
           scheduled: proposedSchedule,
+          pushed: proposedPushed ?? [],
         }
       : data?.tomorrow ?? null;
 
@@ -199,6 +210,7 @@ export default function TodayPage() {
     setPlanningOpen(true);
     setPlanningStatus("working");
     setProposedSchedule(null);
+    setProposedPushed(null);
     setAutoShiftToTomorrowSuggested(false);
   };
 
@@ -222,8 +234,9 @@ export default function TodayPage() {
     load();
   };
 
-  const handleScheduleProposed = (schedule: ScheduledItem[], autoShift: boolean) => {
+  const handleScheduleProposed = (schedule: ScheduledItem[], autoShift: boolean, pushed: PushedItem[]) => {
     setProposedSchedule(schedule);
+    setProposedPushed(pushed);
     setAutoShiftToTomorrowSuggested(autoShift);
     setPlanningStatus("proposal");
   };

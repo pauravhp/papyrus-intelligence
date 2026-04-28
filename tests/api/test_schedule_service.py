@@ -672,6 +672,32 @@ def test_build_prompt_includes_48_hour_deadline_rule():
     assert "P1" in prompt
 
 
+def test_build_prompt_includes_strict_priority_order_rule():
+    """The prompt must explicitly tell the LLM to process tasks in priority
+    order — P1 first, then P2, P3, P4 — and not to push a P1 that could fit
+    in any window. Without this rule the LLM uses its own heuristics and
+    schedules P3/P4 admin tasks before P1 deep-work."""
+    from api.services.schedule_service import _build_prompt
+    prompt = _build_prompt(_make_tasks(), _make_windows(), _make_config(), "", "2026-04-12")
+    # Anchor on the rule's distinctive phrasing
+    assert "PRIORITY ORDER IS HARD" in prompt
+    assert "P1 first" in prompt
+    # The "never push a P1 that could fit" instruction
+    assert "Never push a P1" in prompt or "never push a P1" in prompt.lower()
+
+
+def test_build_prompt_includes_no_truncation_rule():
+    """The prompt must tell the LLM not to shorten a task's stated duration
+    to make it fit a window. Truncation gets rejected by the validator and
+    the task disappears from the schedule entirely."""
+    from api.services.schedule_service import _build_prompt
+    prompt = _build_prompt(_make_tasks(), _make_windows(), _make_config(), "", "2026-04-12")
+    assert "DURATIONS ARE FIXED" in prompt
+    # The "push, don't shorten" instruction
+    assert "NEVER shorten" in prompt
+    assert "push it" in prompt or "push the task" in prompt
+
+
 def test_build_prompt_renders_todoist_priority_in_standard_P1_to_P4_form():
     """Regression: Todoist's API stores priority as 4=P1 (most urgent), 1=P4
     (least). Earlier prompt rendered tasks as `p{priority}` directly, which
