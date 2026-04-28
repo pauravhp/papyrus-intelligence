@@ -155,8 +155,7 @@ def test_submit_writes_task_history_rows(client, monkeypatch):
         "rhythms": [],
     }
 
-    with patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", return_value="Great work today."):
+    with patch("api.routes.review.supabase", mock_sb):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -178,8 +177,7 @@ def test_submit_writes_rhythm_completions(client, monkeypatch):
         ],
     }
 
-    with patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", return_value="Solid effort."):
+    with patch("api.routes.review.supabase", mock_sb):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -208,42 +206,12 @@ def test_submit_is_idempotent_on_resubmit(client, monkeypatch):
         "rhythms": [],
     }
 
-    with patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", return_value="Good day."):
+    with patch("api.routes.review.supabase", mock_sb):
         resp1 = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
         resp2 = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp1.status_code == 200
     assert resp2.status_code == 200
-
-
-def test_submit_summary_line_fallback_on_llm_failure(client, monkeypatch):
-    """summary_line falls back to static template if LLM call fails."""
-    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
-    mock_sb = MagicMock()
-    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
-
-    payload = {
-        "tasks": [
-            {
-                "task_id": "t1",
-                "task_name": "Deep work",
-                "completed": True,
-                "actual_duration_mins": 90,
-                "estimated_duration_mins": 90,
-                "scheduled_at": "2026-04-15T09:00:00+05:30",
-                "incomplete_reason": None,
-            }
-        ],
-        "rhythms": [],
-    }
-
-    with patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", side_effect=Exception("LLM error")):
-        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
-
-    assert resp.status_code == 200
-    assert "1 of 1" in resp.json()["summary_line"]  # static fallback
 
 
 def test_review_submit_fires_analytics(client, monkeypatch):
@@ -259,8 +227,7 @@ def test_review_submit_fires_analytics(client, monkeypatch):
         "rhythms": [{"rhythm_id": 1, "completed": True}],
     }
     with patch("api.routes.review.capture") as mock_capture, \
-         patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", return_value="Solid day."):
+         patch("api.routes.review.supabase", mock_sb):
         resp = client.post("/api/review/submit", json=body, headers={"Authorization": "Bearer fake-jwt"})
     assert resp.status_code == 200
     mock_capture.assert_called_once()
@@ -287,8 +254,7 @@ def test_submit_uses_schedule_date_from_body(client, monkeypatch):
         }],
         "rhythms": [],
     }
-    with patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", return_value="Good day."):
+    with patch("api.routes.review.supabase", mock_sb):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -309,8 +275,7 @@ def test_submit_sets_reviewed_at_on_schedule_log_row(client, monkeypatch):
         "schedule_date": "2026-04-27",
         "tasks": [], "rhythms": [],
     }
-    with patch("api.routes.review.supabase", mock_sb), \
-         patch("api.routes.review._generate_summary_line", return_value="Good day."):
+    with patch("api.routes.review.supabase", mock_sb):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -335,6 +300,18 @@ def test_submit_rejects_date_older_than_7_days(client, monkeypatch):
     with patch("api.routes.review.supabase", MagicMock()):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
     assert resp.status_code == 400
+
+
+def test_submit_response_no_longer_includes_summary_line(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+    payload = {"tasks": [], "rhythms": []}
+    with patch("api.routes.review.supabase", mock_sb):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+    assert resp.status_code == 200
+    assert "summary_line" not in resp.json()
+    assert resp.json() == {"saved": True}
 
 
 def test_preflight_accepts_date_param(client, monkeypatch):

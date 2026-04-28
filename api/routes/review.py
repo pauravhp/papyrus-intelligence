@@ -4,12 +4,10 @@ import json
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-import anthropic
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from api.auth import get_current_user, require_beta_access
-from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
 from src.todoist_client import TodoistClient
@@ -147,47 +145,10 @@ def review_preflight(
     }
 
 
-def _generate_summary_line(tasks: list[ReviewSubmitTask], rhythms: list[ReviewSubmitRhythm]) -> str:
-    """Single LLM call to generate a one-line contextual observation."""
-    completed = [t for t in tasks if t.completed]
-    incomplete = [t for t in tasks if not t.completed]
-    rhythms_done = [r for r in rhythms if r.completed]
-
-    summary_input = {
-        "tasks_completed": [t.task_name for t in completed],
-        "tasks_incomplete": [
-            {"name": t.task_name, "reason": t.incomplete_reason}
-            for t in incomplete
-        ],
-        "rhythms_kept": len(rhythms_done),
-        "rhythms_total": len(rhythms),
-    }
-
-    prompt = (
-        "You are a calm, honest scheduling coach. "
-        "Given this end-of-day summary, write a single sentence (max 15 words) "
-        "that is warm, forward-looking, and specific to what actually happened. "
-        "Never use hollow praise. Never use the word 'great'. "
-        f"Summary: {json.dumps(summary_input)}"
-    )
-
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=60,
-        temperature=0.4,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response.content[0].text.strip()
-
-
 @router.post("/review/submit")
 def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, user: dict = Depends(require_beta_access)) -> dict:
     user_id = user["sub"]
     target_date = _validate_review_date(body.schedule_date)
-
-    completed_count = sum(1 for t in body.tasks if t.completed)
-    total_count = len(body.tasks)
 
     # 1. Upsert task_history rows
     task_rows = [
@@ -234,13 +195,6 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
         "reviewed_at": datetime.now(timezone.utc).isoformat()
     }).eq("user_id", user_id).eq("schedule_date", target_date).eq("confirmed", 1).is_("reviewed_at", "null").execute()
 
-    # 4. Generate summary line (graceful fallback)
-    try:
-        summary_line = _generate_summary_line(body.tasks, body.rhythms)
-    except Exception:
-        logger.warning("LLM summary generation failed, using fallback")
-        summary_line = f"{completed_count} of {total_count} tasks done."
-
     background_tasks.add_task(
         capture,
         user_id,
@@ -253,5 +207,5 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
         },
     )
 
-    return {"saved": True, "summary_line": summary_line}
+    return {"saved": True}
 
