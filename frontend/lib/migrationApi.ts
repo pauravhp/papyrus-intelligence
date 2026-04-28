@@ -69,6 +69,35 @@ export type CommitResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// /api/plan and /api/plan/confirm
+// ---------------------------------------------------------------------------
+
+export type PlanScheduledItem = {
+  task_id: string | null;
+  task_name: string;
+  start_time: string; // ISO datetime
+  end_time: string;   // ISO datetime
+  duration_minutes: number;
+  reasoning?: string;
+};
+
+export type PlanPushedItem = {
+  task_id: string | null;
+  task_name: string;
+  reason: string;
+};
+
+export type PlanResponse = {
+  scheduled: PlanScheduledItem[];
+  pushed: PlanPushedItem[];
+  reasoning_summary: string;
+  free_windows_used: Array<{ start: string; end: string; duration_minutes: number }>;
+  blocks?: Array<{ start_iso: string; end_iso: string; source?: string }>;
+  cutoff_override?: string | null;
+  auto_shift_to_tomorrow_suggested?: boolean;
+};
+
+// ---------------------------------------------------------------------------
 // Wrappers
 // ---------------------------------------------------------------------------
 
@@ -103,4 +132,33 @@ export async function commitMigration(
   token: string,
 ): Promise<CommitResponse> {
   return apiPost<CommitResponse>("/api/import/commit", { tasks, rhythms }, token);
+}
+
+/**
+ * POST /api/plan
+ *
+ * Generates a proposed schedule for today. One LLM call, no external writes.
+ * Used by the migration assistant demo to auto-plan after import.
+ */
+export async function runPlanForToday(token: string): Promise<PlanResponse> {
+  return apiPost<PlanResponse>("/api/plan", { target_date: "today" }, token);
+}
+
+/**
+ * POST /api/plan/confirm
+ *
+ * Writes the proposed schedule to GCal (targeting papyrusCalendarId) and
+ * sets due_datetimes in Todoist. The demo calls this with the Papyrus calendar
+ * created during import so the events land in the right calendar.
+ */
+export async function confirmPapyrusSchedule(
+  schedule: { scheduled: PlanScheduledItem[]; pushed: PlanPushedItem[] },
+  papyrusCalendarId: string,
+  token: string,
+): Promise<{ confirmed: boolean; gcal_events_created: number }> {
+  return apiPost("/api/plan/confirm", {
+    target_date: "today",
+    schedule,
+    target_calendar_id: papyrusCalendarId,
+  }, token);
 }

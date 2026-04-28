@@ -6,15 +6,19 @@ import { ApiError } from "@/utils/api";
 import {
   convertMigration,
   commitMigration,
+  runPlanForToday,
+  confirmPapyrusSchedule,
 } from "@/lib/migrationApi";
 import type {
   ConvertResponse,
   CommitResponse,
   TaskProposal,
   RhythmProposal,
+  PlanResponse,
 } from "@/lib/migrationApi";
 import MigrationPreview from "@/components/MigrationPreview";
 import DemoTour from "@/components/DemoTour";
+import PapyrusCalendarConfirm from "@/components/PapyrusCalendarConfirm";
 
 // ---------------------------------------------------------------------------
 // Variant type — keep all three for forward-compatibility
@@ -41,6 +45,13 @@ type Phase =
   | { tag: "post_commit"; result: CommitResponse }
   | { tag: "post_commit_reconnect" }
   | { tag: "post_commit_error"; tasks: TaskProposal[]; rhythms: RhythmProposal[] }
+  | { tag: "auto_planning"; result: CommitResponse }
+  | { tag: "auto_plan_failed"; result: CommitResponse; message: string }
+  | { tag: "schedule_walkthrough"; result: CommitResponse; plan: PlanResponse }
+  | { tag: "settings_nudge"; result: CommitResponse; plan: PlanResponse }
+  | { tag: "gcal_confirm"; result: CommitResponse; plan: PlanResponse }
+  | { tag: "gcal_confirming"; result: CommitResponse; plan: PlanResponse }
+  | { tag: "gcal_done"; result: CommitResponse; plan: PlanResponse }
   | { tag: "exited" };
 
 type State = {
@@ -59,6 +70,14 @@ type Action =
   | { type: "COMMIT_RECONNECT_REQUIRED" }
   | { type: "COMMIT_ERROR"; tasks: TaskProposal[]; rhythms: RhythmProposal[] }
   | { type: "RETRY_FROM_REVEAL"; tasks: TaskProposal[]; rhythms: RhythmProposal[] }
+  | { type: "AUTO_PLAN_START"; result: CommitResponse }
+  | { type: "AUTO_PLAN_OK"; result: CommitResponse; plan: PlanResponse }
+  | { type: "AUTO_PLAN_FAIL"; result: CommitResponse; message: string }
+  | { type: "NUDGE_SKIP" }
+  | { type: "TO_GCAL_CONFIRM" }
+  | { type: "GCAL_CONFIRM_START" }
+  | { type: "GCAL_CONFIRM_OK" }
+  | { type: "RE_OAUTH" }
   | { type: "EXIT" };
 
 function reducer(state: State, action: Action): State {
@@ -114,6 +133,50 @@ function reducer(state: State, action: Action): State {
           unmatched: [],
         },
       };
+
+    case "AUTO_PLAN_START":
+      return { ...state, phase: { tag: "auto_planning", result: action.result } };
+
+    case "AUTO_PLAN_OK":
+      return { ...state, phase: { tag: "schedule_walkthrough", result: action.result, plan: action.plan } };
+
+    case "AUTO_PLAN_FAIL":
+      return { ...state, phase: { tag: "auto_plan_failed", result: action.result, message: action.message } };
+
+    case "TO_GCAL_CONFIRM": {
+      const p = state.phase;
+      if (p.tag === "schedule_walkthrough" || p.tag === "settings_nudge") {
+        return { ...state, phase: { tag: "gcal_confirm", result: p.result, plan: p.plan } };
+      }
+      return state;
+    }
+
+    case "NUDGE_SKIP": {
+      const p = state.phase;
+      if (p.tag === "settings_nudge") {
+        return { ...state, phase: { tag: "gcal_confirm", result: p.result, plan: p.plan } };
+      }
+      return state;
+    }
+
+    case "GCAL_CONFIRM_START": {
+      const p = state.phase;
+      if (p.tag === "gcal_confirm") {
+        return { ...state, phase: { tag: "gcal_confirming", result: p.result, plan: p.plan } };
+      }
+      return state;
+    }
+
+    case "GCAL_CONFIRM_OK": {
+      const p = state.phase;
+      if (p.tag === "gcal_confirming") {
+        return { ...state, phase: { tag: "gcal_done", result: p.result, plan: p.plan } };
+      }
+      return state;
+    }
+
+    case "RE_OAUTH":
+      return state; // side-effect handled in handler, state unchanged
 
     case "EXIT":
       return { ...state, phase: { tag: "exited" } };
@@ -237,16 +300,23 @@ const NOTE: React.CSSProperties = {
 };
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 type Props = {
   variant: Variant;
   onComplete: () => void;
-  onContinueToDemoSteps: (result: CommitResponse) => void;
 };
 
-export default function ImportStage({ variant, onComplete, onContinueToDemoSteps }: Props) {
+export default function ImportStage({ variant, onComplete }: Props) {
   const supabaseRef = useRef(createClient());
   const supabase = supabaseRef.current;
 
@@ -287,12 +357,7 @@ export default function ImportStage({ variant, onComplete, onContinueToDemoSteps
       try {
         const token = await getToken();
         const result = await commitMigration(tasks, rhythms, token);
-        if (result.calendar_scope_upgrade_required) {
-          // Surface as a note but still advance — Task 13 handles scope upgrade
-          dispatch({ type: "COMMIT_SUCCESS", result });
-        } else {
-          dispatch({ type: "COMMIT_SUCCESS", result });
-        }
+        dispatch({ type: "COMMIT_SUCCESS", result });
       } catch (err) {
         if (err instanceof ApiError && err.code === "todoist_reconnect_required") {
           dispatch({ type: "COMMIT_RECONNECT_REQUIRED" });
@@ -309,6 +374,73 @@ export default function ImportStage({ variant, onComplete, onContinueToDemoSteps
     dispatch({ type: "EXIT" });
     onComplete();
   }, [onComplete]);
+
+  // ---------------------------------------------------------------------------
+  // Auto-plan: triggered when phase transitions to post_commit
+  // ---------------------------------------------------------------------------
+
+  const autoPlanFiredRef = useRef(false);
+
+  useEffect(() => {
+    const p = state.phase;
+    if (p.tag !== "post_commit") return;
+    if (autoPlanFiredRef.current) return;
+    autoPlanFiredRef.current = true;
+    const result = p.result;
+    dispatch({ type: "AUTO_PLAN_START", result });
+    (async () => {
+      try {
+        const token = await getToken();
+        const plan = await runPlanForToday(token);
+        dispatch({ type: "AUTO_PLAN_OK", result, plan });
+      } catch {
+        dispatch({ type: "AUTO_PLAN_FAIL", result, message: "Couldn't generate a plan." });
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase]);
+
+  // ---------------------------------------------------------------------------
+  // GCal confirm handler
+  // ---------------------------------------------------------------------------
+
+  const handleGcalConfirm = useCallback(async () => {
+    dispatch({ type: "GCAL_CONFIRM_START" });
+    // Read the current phase AFTER dispatch — but we dispatch first and then
+    // read from the current state snapshot to get result/plan.
+    // Since useReducer state is captured at call time, we use a closure trick:
+    // The state variable here is the snapshot from the last render.
+    const p = state.phase;
+    if (p.tag !== "gcal_confirm") return;
+    const { result, plan } = p;
+    try {
+      const token = await getToken();
+      if (result.papyrus_calendar_id) {
+        await confirmPapyrusSchedule(
+          { scheduled: plan.scheduled, pushed: plan.pushed },
+          result.papyrus_calendar_id,
+          token,
+        );
+      }
+      dispatch({ type: "GCAL_CONFIRM_OK" });
+    } catch {
+      // On failure, silently advance to done — the schedule is already in memory
+      dispatch({ type: "GCAL_CONFIRM_OK" });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.phase]);
+
+  // ---------------------------------------------------------------------------
+  // ReOAuth handler — new-tab + try-again approach (v1 simplest)
+  // ---------------------------------------------------------------------------
+
+  const handleReOAuth = useCallback(() => {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+    // Open OAuth in a new tab so the user can grant calendar.app.created scope
+    // without losing in-memory state. After granting, they close the tab and
+    // click "Try again" which re-runs confirmPapyrusSchedule.
+    window.open(`${API_BASE}/auth/google?prompt=consent`, "_blank");
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Variant: skip_entirely — defensive guard (should never reach here in v1)
@@ -416,30 +548,185 @@ export default function ImportStage({ variant, onComplete, onContinueToDemoSteps
     );
   }
 
-  // Post-commit: success
+  // Post-commit: success — auto-plan fires immediately via useEffect, show spinner
   if (phase.tag === "post_commit") {
     const { result } = phase;
     return (
       <div style={CARD}>
-        {result.calendar_scope_upgrade_required && (
+        <DemoTour step="post_commit" anchor={null} onSkip={handleSkipOut} />
+        <div style={SPINNER_WRAP}>
+          <div style={SPINNER} />
+          <p style={{ ...NOTE, marginTop: 0 }}>
+            Imported {result.tasks_created} task{result.tasks_created !== 1 ? "s" : ""}
+            {result.rhythms_created > 0
+              ? ` and ${result.rhythms_created} rhythm${result.rhythms_created !== 1 ? "s" : ""}`
+              : ""}
+            . Generating today&apos;s schedule…
+          </p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Auto-planning spinner
+  if (phase.tag === "auto_planning") {
+    return (
+      <div style={CARD}>
+        <DemoTour step="auto_plan" anchor={null} onSkip={handleSkipOut} />
+        <div style={SPINNER_WRAP}>
+          <div style={SPINNER} />
+          <p style={{ ...NOTE, marginTop: 0 }}>Generating today&apos;s schedule from what you just imported…</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  // Auto-plan failed
+  if (phase.tag === "auto_plan_failed") {
+    return (
+      <div style={CARD}>
+        <DemoTour step="schedule_walkthrough_failed" anchor={null} onSkip={handleSkipOut} />
+        <div style={{ marginTop: 16 }}>
+          <button style={BTN_PRIMARY} onClick={handleSkipOut}>
+            Take me to dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Schedule walkthrough — read-only list + DemoTour bubble
+  if (phase.tag === "schedule_walkthrough") {
+    const { plan } = phase;
+    return (
+      <div style={CARD}>
+        <DemoTour
+          step="schedule_walkthrough"
+          anchor={null}
+          variables={{ summary: plan.reasoning_summary }}
+          onSkip={handleSkipOut}
+        />
+        <p style={HEADING}>Today&apos;s schedule</p>
+        {plan.scheduled.length === 0 ? (
+          <p style={{ ...NOTE }}>No tasks could be scheduled for today.</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {plan.scheduled.map((item, i) => (
+              <li
+                key={i}
+                style={{
+                  background: "var(--surface-raised)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  fontFamily: "var(--font-literata)",
+                }}
+              >
+                <span style={{ fontWeight: 600, color: "var(--text)", fontSize: 13 }}>
+                  {item.task_name}
+                </span>
+                <span style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: 8 }}>
+                  {fmtTime(item.start_time)}–{fmtTime(item.end_time)} ({item.duration_minutes}m)
+                </span>
+                {item.reasoning && (
+                  <em style={{ display: "block", color: "var(--text-faint)", fontSize: 12, marginTop: 2, fontStyle: "italic" }}>
+                    {item.reasoning}
+                  </em>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {plan.pushed.length > 0 && (
           <p style={{ ...NOTE, marginBottom: 16 }}>
-            We&apos;ll ask permission to create your Papyrus calendar at the next step.
+            {plan.pushed.length} task{plan.pushed.length !== 1 ? "s" : ""} pushed to tomorrow.
           </p>
         )}
-        <p style={HEADING}>
-          Imported {result.tasks_created} task{result.tasks_created !== 1 ? "s" : ""}
-          {result.rhythms_created > 0
-            ? ` and ${result.rhythms_created} rhythm${result.rhythms_created !== 1 ? "s" : ""}`
-            : ""}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            style={BTN_PRIMARY}
+            onClick={() => dispatch({ type: "TO_GCAL_CONFIRM" })}
+          >
+            Continue
+          </button>
+          <button style={BTN_SECONDARY} onClick={handleSkipOut}>
+            I&apos;ll explore on my own
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Settings nudge
+  if (phase.tag === "settings_nudge") {
+    return (
+      <div style={CARD}>
+        <DemoTour step="settings_nudge" anchor={null} onSkip={handleSkipOut} />
+        <p style={HEADING}>Quick settings check</p>
+        <p style={{ ...NOTE, marginBottom: 16 }}>
+          I used some defaults — meal times, end-of-day cutoff. Want to fine-tune?
         </p>
-        {result.errors.length > 0 && (
-          <p style={NOTE}>
-            {result.errors.length} item
-            {result.errors.length !== 1 ? "s" : ""} couldn&apos;t be saved.
-          </p>
-        )}
-        <button style={BTN_PRIMARY} onClick={() => onContinueToDemoSteps(result)}>
-          Continue
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            style={BTN_PRIMARY}
+            onClick={() => dispatch({ type: "NUDGE_SKIP" })}
+          >
+            Skip — looks good
+          </button>
+          <button
+            style={BTN_SECONDARY}
+            onClick={() => window.open("/dashboard/settings", "_blank")}
+          >
+            Open settings
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // GCal confirm
+  if (phase.tag === "gcal_confirm") {
+    const { result } = phase;
+    return (
+      <PapyrusCalendarConfirm
+        calendarId={result.papyrus_calendar_id}
+        scopeUpgradeRequired={result.calendar_scope_upgrade_required}
+        onConfirm={handleGcalConfirm}
+        onSkip={handleSkipOut}
+        onReOAuth={handleReOAuth}
+        loading={false}
+      />
+    );
+  }
+
+  // GCal confirming (loading)
+  if (phase.tag === "gcal_confirming") {
+    const { result } = phase;
+    return (
+      <PapyrusCalendarConfirm
+        calendarId={result.papyrus_calendar_id}
+        scopeUpgradeRequired={result.calendar_scope_upgrade_required}
+        onConfirm={handleGcalConfirm}
+        onSkip={handleSkipOut}
+        onReOAuth={handleReOAuth}
+        loading={true}
+      />
+    );
+  }
+
+  // GCal done — terminal
+  if (phase.tag === "gcal_done") {
+    return (
+      <div style={CARD}>
+        <DemoTour step="done" anchor={null} onSkip={handleSkipOut} />
+        <p style={HEADING}>You&apos;re all set</p>
+        <p style={{ ...NOTE, marginBottom: 16 }}>
+          Tomorrow morning, come back and hit Plan today.
+        </p>
+        <button style={BTN_PRIMARY} onClick={onComplete}>
+          Go to dashboard
         </button>
       </div>
     );

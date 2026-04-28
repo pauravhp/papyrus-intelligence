@@ -7,7 +7,6 @@ import SetupStage from "./SetupStage";
 import DiscoverStage from "./DiscoverStage";
 import ImportStage from "./ImportStage";
 import type { Variant } from "./ImportStage";
-import type { CommitResponse } from "@/lib/migrationApi";
 
 type Step = "setup" | "discover" | "import";
 
@@ -34,11 +33,6 @@ export default function OnboardPage() {
     setStep("import");
   };
 
-  // Task 13 will replace this with the demo-steps flow.
-  const handleImportContinue = (_result: CommitResponse) => {
-    router.push("/today");
-  };
-
   if (step === "setup") {
     return <SetupStage onAdvance={handleSetupComplete} />;
   }
@@ -57,7 +51,6 @@ export default function OnboardPage() {
     <ImportStage
       variant={importVariant}
       onComplete={() => router.push("/today")}
-      onContinueToDemoSteps={handleImportContinue}
     />
   );
 }
