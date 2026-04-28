@@ -33,16 +33,12 @@ from src.calendar_client import create_event, get_events
 from src.models import CalendarEvent, TodoistTask
 from src.scheduler import compute_free_windows
 from src.todoist_client import TodoistClient
+from api.services.defaults import with_meal_defaults
 from api.services.extractor import Block, ExtractionResult, extract_constraints
 from api.services.rhythm_service import get_active_rhythms
 from api.services.schedule_service import schedule_day
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_MEAL_BLOCKS = [
-    {"name": "Lunch",  "start": "12:30", "end": "13:30", "days": "all", "movable": False, "buffer_before_minutes": 0, "buffer_after_minutes": 0},
-    {"name": "Dinner", "start": "19:00", "end": "20:00", "days": "all", "movable": False, "buffer_before_minutes": 0, "buffer_after_minutes": 0},
-]
 
 # Truncation tolerance — accept a duration up to this fraction below the
 # original. Below this, we treat it as silent shortening and reject. Tuned to
@@ -96,9 +92,7 @@ def _is_within_idempotency_window(confirmed_at_iso) -> bool:
 
 
 def _ensure_meal_blocks(config: dict) -> dict:
-    if config.get("daily_blocks"):
-        return config
-    return {**config, "daily_blocks": _DEFAULT_MEAL_BLOCKS}
+    return with_meal_defaults(config)
 
 
 def _resolve_calendar_ids(config: dict) -> list[str]:
@@ -262,14 +256,15 @@ def _inject_synthetic_rhythms(
         remaining = max(0, per_week - done)
         if remaining == 0:
             continue
-        name = (
-            f"{rhythm['rhythm_name']}: {rhythm['description']}"
-            if rhythm.get("description")
-            else rhythm["rhythm_name"]
-        )
+        # The hint (rhythm.description) is internal LLM-coaching context — NOT
+        # user-facing copy. Keep `content` as the bare rhythm_name (this becomes
+        # the displayed task_name in responses + the GCal event title) and
+        # plumb the hint through `rhythm_hint` so the prompt builder can render
+        # it inline without leaking to the frontend.
+        rhythm_name = rhythm["rhythm_name"]
         synthetic.append(TodoistTask(
             id=f"proj_{rhythm['id']}",
-            content=name,
+            content=rhythm_name,
             project_id="rhythm",
             priority=_rhythm_priority(remaining, target_date),
             due_datetime=None,
@@ -280,8 +275,9 @@ def _inject_synthetic_rhythms(
             is_rhythm=True,
             session_max_minutes=int(rhythm["session_max_minutes"]),
             sessions_per_week=per_week,
+            rhythm_hint=rhythm.get("description") or None,
         ))
-        task_names[f"proj_{rhythm['id']}"] = name
+        task_names[f"proj_{rhythm['id']}"] = rhythm_name
 
     return synthetic + base_tasks
 
