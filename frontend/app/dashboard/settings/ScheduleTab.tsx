@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { apiPost } from "@/utils/api";
+import NumberField from "@/components/NumberField";
 
 interface ScheduleTabProps {
   config: Record<string, unknown>;
@@ -163,12 +164,17 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
           style={{ maxWidth: 160 }}
         />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field
-            label="Morning buffer (min)"
-            type="number"
-            value={sleep.morning_buffer_minutes}
-            onChange={(v) => setSleep("morning_buffer_minutes", parseInt(v, 10) || 0)}
-          />
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL}>Morning buffer (min)</label>
+            <NumberField
+              value={sleep.morning_buffer_minutes}
+              onChange={(n) => setSleep("morning_buffer_minutes", n)}
+              min={0}
+              fallback={0}
+              ariaLabel="Morning buffer (min)"
+              style={INPUT}
+            />
+          </div>
           <Field
             label="First task not before"
             type="time"
@@ -240,18 +246,28 @@ export default function ScheduleTab({ config, getToken }: ScheduleTabProps) {
       <div style={{ marginBottom: 32 }}>
         <p style={GROUP_LABEL}>Day limits</p>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <Field
-            label="Min gap between tasks (min)"
-            type="number"
-            value={scheduling.min_gap_between_tasks_minutes}
-            onChange={(v) => setScheduling("min_gap_between_tasks_minutes", parseInt(v, 10) || 0)}
-          />
-          <Field
-            label="Max tasks / day"
-            type="number"
-            value={scheduling.max_tasks_per_day}
-            onChange={(v) => setScheduling("max_tasks_per_day", parseInt(v, 10) || 1)}
-          />
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL}>Min gap between tasks (min)</label>
+            <NumberField
+              value={scheduling.min_gap_between_tasks_minutes}
+              onChange={(n) => setScheduling("min_gap_between_tasks_minutes", n)}
+              min={0}
+              fallback={0}
+              ariaLabel="Min gap between tasks (min)"
+              style={INPUT}
+            />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL}>Max tasks / day</label>
+            <NumberField
+              value={scheduling.max_tasks_per_day}
+              onChange={(n) => setScheduling("max_tasks_per_day", n)}
+              min={1}
+              fallback={1}
+              ariaLabel="Max tasks / day"
+              style={INPUT}
+            />
+          </div>
         </div>
       </div>
 

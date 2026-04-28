@@ -7,6 +7,7 @@ import { createClient } from "@/utils/supabase/client";
 import { apiPost } from "@/utils/api";
 import ColorRuleCard from "@/components/ColorRuleCard";
 import FieldTooltip from "@/components/FieldTooltip";
+import NumberField from "@/components/NumberField";
 import {
   ColorRule,
   DEFAULT_CATEGORIES,
@@ -272,15 +273,23 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
                     <label style={{ ...LABEL, marginBottom: 0 }}>{label}</label>
                     {tooltip && <FieldTooltip content={tooltip} />}
                   </div>
-                  <input
-                    type={type}
-                    value={(sleep[key] as string | number) ?? ""}
-                    onChange={e => setSleep(s => ({
-                      ...s,
-                      [key]: type === "number" ? parseInt(e.target.value, 10) || 0 : e.target.value,
-                    }))}
-                    style={INPUT}
-                  />
+                  {type === "number" ? (
+                    <NumberField
+                      value={(sleep[key] as number) ?? ""}
+                      onChange={(n) => setSleep((s) => ({ ...s, [key]: n }))}
+                      min={0}
+                      fallback={0}
+                      ariaLabel={label}
+                      style={INPUT}
+                    />
+                  ) : (
+                    <input
+                      type={type}
+                      value={(sleep[key] as string) ?? ""}
+                      onChange={(e) => setSleep((s) => ({ ...s, [key]: e.target.value }))}
+                      style={INPUT}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -326,28 +335,25 @@ export default function DiscoverStage({ timezone, calendarIds, onComplete }: Dis
                 {
                   label: "Min gap (min)",
                   key: "min_gap_between_tasks_minutes",
-                  type: "number",
                   tooltip: "Breathing room between tasks. Time to transition, think, or just exist between blocks.",
                 },
                 {
                   label: "Max tasks / day",
                   key: "max_tasks_per_day",
-                  type: "number",
                   tooltip: "The most tasks Papyrus will schedule in one day. Keeps your plan realistic, not aspirational.",
                 },
-              ].map(({ label, key, type, tooltip }) => (
+              ].map(({ label, key, tooltip }) => (
                 <div key={key} style={{ marginBottom: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 5 }}>
                     <label style={{ ...LABEL, marginBottom: 0 }}>{label}</label>
                     {tooltip && <FieldTooltip content={tooltip} />}
                   </div>
-                  <input
-                    type={type}
+                  <NumberField
                     value={(scheduling[key] as number) ?? ""}
-                    onChange={e => setScheduling(s => ({
-                      ...s,
-                      [key]: parseInt(e.target.value, 10) || 0,
-                    }))}
+                    onChange={(n) => setScheduling((s) => ({ ...s, [key]: n }))}
+                    min={0}
+                    fallback={key === "max_tasks_per_day" ? 1 : 0}
+                    ariaLabel={label}
                     style={INPUT}
                   />
                 </div>
