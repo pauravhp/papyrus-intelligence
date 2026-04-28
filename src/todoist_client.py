@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime
 from typing import Optional
 
@@ -10,15 +11,73 @@ TODOIST_BASE = "https://api.todoist.com/api/v1"
 # Duration is communicated via task labels, not Todoist's native duration field.
 # The matched label is stripped from the labels list before the task reaches the LLM.
 # Todoist stores labels WITHOUT the @ prefix in API responses.
-# "@30min" in the UI → "30min" in the API. Keys here must match the raw stored value.
+# "@30min" in the UI → "30min" in the API.
+#
+# DURATION_LABEL_MAP retained as the canonical "blessed" set surfaced to users in
+# HowToGuide. parse_duration_label() is the actual parser — it accepts any of these
+# plus flexible variants (@1h ≡ @60min, @45min, @1.5h, @75min, @<n> hours, etc.).
 DURATION_LABEL_MAP: dict[str, int] = {
+    "10min": 10,
     "15min": 15,
     "30min": 30,
+    "45min": 45,
     "60min": 60,
+    "75min": 75,
     "90min": 90,
     "2h": 120,
     "3h": 180,
 }
+
+_MIN_MINUTES = 10
+_MAX_MINUTES = 240
+
+# Match a duration label after Todoist has stripped the leading "@". Allow an
+# optional space between the number and the unit, decimals on hour values, and
+# common unit aliases. Anchored to ^/$ so labels with extra characters (e.g.
+# "10mins-prep") don't accidentally parse.
+_DURATION_PATTERN = re.compile(
+    r"^(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>min|mins|m|hour|hours|hrs|hr|h)$",
+    re.IGNORECASE,
+)
+
+
+def parse_duration_label(label: str) -> Optional[int]:
+    """Parse a Todoist duration label into minutes.
+
+    Accepts (case-insensitive, optional space between number and unit):
+      - @<n>min, @<n>mins, @<n>m         → n minutes
+      - @<n>h, @<n>hr, @<n>hrs           → n × 60 minutes
+      - @<n> hour, @<n> hours            → n × 60 minutes
+      - decimals on hour values: @1.5h, @2.5h, @0.5h
+      - decimals on minutes are accepted but rounded the same way
+
+    Output is rounded to the nearest 5 minutes and clamped to [10, 240].
+    Returns None for malformed input or values that round to 0 / are otherwise
+    unusable (e.g. @0min, @abc, "deep-work").
+    """
+    if not label:
+        return None
+    match = _DURATION_PATTERN.match(label.strip())
+    if not match:
+        return None
+    try:
+        n = float(match.group("n"))
+    except ValueError:
+        return None
+    unit = match.group("unit").lower()
+    if unit in ("h", "hr", "hrs", "hour", "hours"):
+        minutes = n * 60
+    else:
+        minutes = n
+    # Round to nearest 5 min, then clamp.
+    rounded = int(round(minutes / 5.0)) * 5
+    if rounded <= 0:
+        return None
+    if rounded < _MIN_MINUTES:
+        return _MIN_MINUTES
+    if rounded > _MAX_MINUTES:
+        return _MAX_MINUTES
+    return rounded
 
 
 class TodoistClient:
@@ -62,15 +121,19 @@ class TodoistClient:
             deadline = dl.get("date")
 
         # Duration comes from labels, not from Todoist's native duration field.
-        # Strip the matched duration label so it doesn't appear as a scheduling tag.
+        # Strip the first matched duration label so it doesn't appear as a
+        # scheduling tag. Subsequent duration-like labels (rare) are kept on the
+        # task so the LLM can see the user wrote something unusual.
         raw_labels: list[str] = list(item.get("labels", []))
         duration_minutes: Optional[int] = None
         clean_labels: list[str] = []
         for label in raw_labels:
-            if label in DURATION_LABEL_MAP:
-                duration_minutes = DURATION_LABEL_MAP[label]
-            else:
-                clean_labels.append(label)
+            if duration_minutes is None:
+                parsed = parse_duration_label(label)
+                if parsed is not None:
+                    duration_minutes = parsed
+                    continue
+            clean_labels.append(label)
 
         return TodoistTask(
             id=item["id"],
