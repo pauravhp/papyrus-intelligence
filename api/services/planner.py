@@ -239,6 +239,25 @@ def _rhythm_priority(sessions_remaining: int, target_date: date) -> int:
     return 2
 
 
+# Map Python's weekday() (0=Mon..6=Sun) to the lowercase ISO names stored in
+# rhythms.days_of_week. Single source of truth so any future filter agrees.
+_WEEKDAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _rhythm_applies_today(rhythm: dict, target_date: date) -> bool:
+    """True if the rhythm should be considered for placement on target_date.
+
+    A rhythm with `days_of_week` NULL or empty applies every day (legacy
+    backward-compat: existing rhythms predate the column). A rhythm with a
+    populated list applies only on those weekdays.
+    """
+    days = rhythm.get("days_of_week")
+    if not days:
+        return True
+    today_name = _WEEKDAY_NAMES[target_date.weekday()]
+    return today_name in days
+
+
 def _inject_synthetic_rhythms(
     supabase,
     user_id: str,
@@ -251,6 +270,8 @@ def _inject_synthetic_rhythms(
 
     synthetic: list[TodoistTask] = []
     for rhythm in active:
+        if not _rhythm_applies_today(rhythm, target_date):
+            continue
         per_week = int(rhythm["sessions_per_week"])
         done = sessions_done.get(f"proj_{rhythm['id']}", 0)
         remaining = max(0, per_week - done)

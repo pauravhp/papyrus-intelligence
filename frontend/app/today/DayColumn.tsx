@@ -392,7 +392,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
           </p>
           {pushed.map((p) => (
             <p
-              key={p.task_id}
+              key={`${p.task_id}__${p.reason}`}
               style={{
                 fontSize: 12,
                 color: "var(--text-faint)",
@@ -400,7 +400,14 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
                 lineHeight: 1.5,
               }}
             >
-              {p.reason}
+              {p.task_name ? (
+                <>
+                  <span style={{ color: "var(--text-muted)" }}>{p.task_name}</span>
+                  <span> — {p.reason}</span>
+                </>
+              ) : (
+                p.reason
+              )}
             </p>
           ))}
         </div>

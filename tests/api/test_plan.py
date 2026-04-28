@@ -1117,3 +1117,39 @@ def test_plan_today_late_night_returned_tasks_stay_on_target_date(client, monkey
     for item in data["scheduled"]:
         end = datetime.fromisoformat(item["end_time"])
         assert end <= cap, f"Scheduled item ends past day_end cap: {item}"
+
+
+# ── Day-of-week filter on rhythm injection (2026-04-28) ──────────────────────
+
+def test_rhythm_applies_today_excludes_off_days():
+    """A rhythm with days_of_week set must only apply on listed weekdays.
+    User reported the picker was effectively cosmetic — the column was stored
+    but never filtered on. Without this filter, a Mon/Wed/Fri rhythm injects
+    as a candidate every day."""
+    from datetime import date
+    from api.services.planner import _rhythm_applies_today
+
+    tuesday = date(2026, 4, 28)  # weekday=1
+    wednesday = date(2026, 4, 29)  # weekday=2
+
+    rhythm_mwf = {"days_of_week": ["monday", "wednesday", "friday"]}
+    assert not _rhythm_applies_today(rhythm_mwf, tuesday)
+    assert _rhythm_applies_today(rhythm_mwf, wednesday)
+
+
+def test_rhythm_applies_today_legacy_null_days_applies_every_day():
+    """Backward compat: rhythms predating the days_of_week column have NULL or
+    missing days, and must continue to apply every day. Empty list also
+    means 'no restriction' — the form-default fallback Lane D documented."""
+    from datetime import date
+    from api.services.planner import _rhythm_applies_today
+
+    monday = date(2026, 4, 27)
+    saturday = date(2026, 5, 2)
+    for empty in [None, []]:
+        rhythm = {"days_of_week": empty}
+        assert _rhythm_applies_today(rhythm, monday)
+        assert _rhythm_applies_today(rhythm, saturday)
+    # Missing key entirely — same as None
+    rhythm_missing = {}
+    assert _rhythm_applies_today(rhythm_missing, monday)
