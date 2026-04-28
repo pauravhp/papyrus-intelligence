@@ -6,12 +6,28 @@ import { motion, AnimatePresence } from "framer-motion";
 import { type ScheduledItem } from "./TodayPage";
 import TaskTriageBlock, { type TriageState } from "./TaskTriageBlock";
 import ProposedCalendar from "./ProposedCalendar";
+import { createClient } from "@/utils/supabase/client";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
 const MAX_WORDS = 40;
 function countWords(s: string): number {
   return s.trim() === "" ? 0 : s.trim().split(/\s+/).length;
+}
+
+// Mirrors PlanningPanel.tsx — surfaces FastAPI's structured 400 detail.code
+// (e.g. "todoist_reconnect_required") so the modal can render the dedicated
+// reconnect surface instead of a generic error toast.
+async function parseErrorCode(res: Response): Promise<string | null> {
+  try {
+    const json = await res.clone().json();
+    if (json?.detail && typeof json.detail === "object" && typeof json.detail.code === "string") {
+      return json.detail.code;
+    }
+  } catch {
+    /* non-JSON body */
+  }
+  return null;
 }
 
 interface ReplanModalProps {
@@ -107,6 +123,14 @@ export default function ReplanModal({
   const [proposed, setProposed] = useState<ProposedResult | null>(null);
   const [isRefining, setIsRefining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsTodoistReconnect, setNeedsTodoistReconnect] = useState(false);
+
+  async function handleTodoistReconnect() {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const sessionToken = data.session?.access_token ?? token;
+    window.location.href = `${API_BASE}/auth/todoist?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
+  }
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const noteWordCount = countWords(contextNote);
@@ -172,8 +196,13 @@ export default function ReplanModal({
         }),
       });
       if (!res.ok) {
+        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+          setNeedsTodoistReconnect(true);
+          setPhase("triage");
+          return;
+        }
         const detail = (await res.json().catch(() => ({}))).detail ?? "Replan failed.";
-        throw new Error(detail);
+        throw new Error(typeof detail === "string" ? detail : "Replan failed.");
       }
       const result = await res.json() as ProposedResult;
       setProposed(result);
@@ -206,8 +235,13 @@ export default function ReplanModal({
         }),
       });
       if (!res.ok) {
+        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+          setNeedsTodoistReconnect(true);
+          setPhase("proposed");
+          return;
+        }
         const detail = (await res.json().catch(() => ({}))).detail ?? "Refinement failed.";
-        throw new Error(detail);
+        throw new Error(typeof detail === "string" ? detail : "Refinement failed.");
       }
       const result = await res.json() as ProposedResult;
       setProposed(result);
@@ -234,8 +268,13 @@ export default function ReplanModal({
         body: JSON.stringify({ schedule: proposed, tomorrow_task_ids: tomorrowIds }),
       });
       if (!res.ok) {
+        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+          setNeedsTodoistReconnect(true);
+          setPhase("proposed");
+          return;
+        }
         const detail = (await res.json().catch(() => ({}))).detail ?? "Confirm failed.";
-        throw new Error(detail);
+        throw new Error(typeof detail === "string" ? detail : "Confirm failed.");
       }
       onConfirm();
     } catch (err) {
@@ -302,10 +341,37 @@ export default function ReplanModal({
           </button>
         </div>
 
-        {error && (
+        {error && !needsTodoistReconnect && (
           <p style={{ color: "var(--accent-danger, #ef4444)", fontSize: 13, marginBottom: 16, fontFamily: "var(--font-literata)" }}>
             {error}
           </p>
+        )}
+
+        {needsTodoistReconnect && (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 12, fontFamily: "var(--font-literata)" }}>
+              Your Todoist connection has expired.<br />
+              <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+                Reconnect to continue replanning — your triage choices stay intact.
+              </span>
+            </p>
+            <button
+              onClick={handleTodoistReconnect}
+              style={{
+                padding: "7px 14px",
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--accent)",
+                borderRadius: 8,
+                fontFamily: "var(--font-literata)",
+                fontSize: 12,
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              Reconnect Todoist
+            </button>
+          </div>
         )}
 
         {/* Phase content */}
