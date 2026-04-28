@@ -1,9 +1,11 @@
 """
 PATCH /api/settings/nudges     — toggle coaching nudge flags
 PATCH /api/settings/calendars  — update source/write calendar IDs and calendar rules
+PATCH /api/settings/timezone   — update users.config.user.timezone
 """
 
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -88,3 +90,41 @@ def patch_calendars(
         "write_calendar_id": config.get("write_calendar_id"),
         "calendar_rules": config.get("calendar_rules"),
     }
+
+
+# ── Timezone ──────────────────────────────────────────────────────────────────
+
+class TimezonePayload(BaseModel):
+    timezone: str
+
+
+@router.patch("/api/settings/timezone")
+def patch_timezone(
+    payload: TimezonePayload,
+    user: dict = Depends(require_beta_access),
+) -> dict:
+    user_id: str = user["sub"]
+
+    tz = payload.timezone.strip()
+    try:
+        ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{tz}' is not a valid IANA timezone identifier",
+        )
+
+    row = (
+        supabase.from_("users")
+        .select("config")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    config: dict = dict((row.data or {}).get("config") or {})
+    user_block: dict = dict(config.get("user") or {})
+    user_block["timezone"] = tz
+    config["user"] = user_block
+
+    supabase.from_("users").update({"config": config}).eq("id", user_id).execute()
+    return {"timezone": tz}
