@@ -3,6 +3,8 @@ PRE-RELEASE.md
 TEST_BACKLOG.md
 LINKEDIN.md
 FEATURES.md
+feat-*-progress.md
+MERGE-PROGRESS.md
 venv/
 .env
 credentials.json
