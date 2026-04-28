@@ -78,6 +78,9 @@ export default function PlanningPanel({
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [needsTodoistReconnect, setNeedsTodoistReconnect] = useState(false);
+  // True between Confirm-click and confirmed state. Drives the button's
+  // disabled + "Confirming…" label so users can't double-fire the write.
+  const [isConfirming, setIsConfirming] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
   const refinementRef = useRef<HTMLTextAreaElement>(null);
   const hasFired = useRef(false);
@@ -170,6 +173,7 @@ export default function PlanningPanel({
   async function handleConfirm() {
     if (isConfirmingRef.current || !proposal) return;
     isConfirmingRef.current = true;
+    setIsConfirming(true);
     try {
       const res = await fetch(`${API_BASE}/api/plan/confirm`, {
         method: "POST",
@@ -184,15 +188,19 @@ export default function PlanningPanel({
           setNeedsTodoistReconnect(true);
           setStatus("proposal");
           isConfirmingRef.current = false;
+          setIsConfirming(false);
           return;
         }
         throw new Error(`API error: ${res.status}`);
       }
       setStatus("confirmed");
       setTimeout(() => onConfirm(), 1200);
+      // Note: leaving isConfirming=true through the success-state transition
+      // so the button never reverts to active before the panel unmounts.
     } catch (err) {
       console.error("Confirm failed:", err);
       isConfirmingRef.current = false;
+      setIsConfirming(false);
       setReasoning("Confirm failed — please try again.");
     }
   }
@@ -350,20 +358,43 @@ export default function PlanningPanel({
           {!planError && !needsTodoistReconnect && (
             <button
               onClick={handleConfirm}
+              disabled={isConfirming}
+              aria-busy={isConfirming}
               style={{
                 width: "100%",
                 padding: "10px 0",
-                background: "var(--accent)",
-                color: "var(--bg)",
+                background: isConfirming ? "var(--accent-tint)" : "var(--accent)",
+                color: isConfirming ? "var(--accent)" : "var(--bg)",
                 border: "none",
                 borderRadius: 9,
                 fontFamily: "var(--font-literata)",
                 fontSize: 13,
-                cursor: "pointer",
+                cursor: isConfirming ? "default" : "pointer",
                 letterSpacing: "0.01em",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                opacity: isConfirming ? 0.85 : 1,
+                transition: "background 0.15s, opacity 0.15s",
               }}
             >
-              Confirm schedule
+              {isConfirming && (
+                <motion.span
+                  aria-hidden="true"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+                  style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: "50%",
+                    border: "1.5px solid currentColor",
+                    borderTopColor: "transparent",
+                    display: "inline-block",
+                  }}
+                />
+              )}
+              {isConfirming ? "Confirming…" : "Confirm schedule"}
             </button>
           )}
 
