@@ -672,6 +672,22 @@ def test_build_prompt_includes_48_hour_deadline_rule():
     assert "P1" in prompt
 
 
+def test_build_prompt_includes_rhythm_precedence_rule():
+    """The prompt must explicitly tell the LLM that rhythms outrank P3/P4
+    one-off tasks competing for the same window. Without this rule, the LLM
+    treats rhythms as just-another-task ranked by their numeric priority
+    encoding, and admin work routinely displaces them — which was the
+    2026-04-28 user-reported failure mode (three rhythms pushed even though
+    a 240-min late-night window was free)."""
+    from api.services.schedule_service import _build_prompt
+    prompt = _build_prompt(_make_tasks(), _make_windows(), _make_config(), "", "2026-04-12")
+    # The rule references rhythms specifically + the priority decision
+    assert "[rhythm]" in prompt
+    assert "PLACE THE RHYTHM" in prompt
+    # And the displacement carve-out (P1/P2 can still bump a rhythm)
+    assert "P1/P2" in prompt or "P1 or P2" in prompt
+
+
 # ── Item 6: surface_todoist_auth_failure shared module ───────────────────────
 
 

@@ -212,6 +212,7 @@ GUIDANCE
 - Prefer scheduling within the suggested windows.
 - Leave at least {min_gap} minutes between consecutive deep_work tasks.
 - If a task has a deadline within 48 hours of {target_date}, treat it as effectively P1 even if its Todoist priority says P2 or P3 — urgency overrides nominal priority.
+- Rhythms (marked [rhythm]) are recurring commitments the user has explicitly opted into. When a rhythm and a P3 or P4 one-off task compete for the same window, PLACE THE RHYTHM. Only displace a rhythm with a P1/P2 task that has no other workable window. If a rhythm fits in any free window today, it should be placed before P3/P4 tasks fill that window.
 - {_overflow_rule(config)}"""
 
 
