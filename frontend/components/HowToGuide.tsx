@@ -11,7 +11,7 @@ interface HowToGuideProps {
   onClose: () => void;
 }
 
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 8;
 
 // ── shared style constants ─────────────────────────────────────────────────
 
@@ -366,6 +366,37 @@ function renderStepContent(stepIndex: number, copied: boolean, onCopy: () => voi
                   ))}
                 </div>
                 <div style={{ fontSize: 10, color: "var(--text-faint)", lineHeight: 1.45 }}>Triage what happened, tell Papyrus how you feel, get a calmer afternoon. The morning's plan doesn't fail — it gets updated.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+
+    // ── Step 7: Closing the day ──
+    case 7:
+      return (
+        <div>
+          <div style={EYEBROW}>Step 8 of {TOTAL_STEPS}</div>
+          <div style={HEADING}>Closing the day</div>
+          <div style={BODY}>
+            When the day winds down, a small <strong>Review →</strong> pill appears in the
+            today header. It opens a stepper covering every day from the last week that
+            never got reviewed — usually just today, but if you skipped yesterday it&rsquo;ll
+            be there too. Mark each task done or incomplete (with a reason if you want),
+            and Papyrus closes the loop with one warm summary line at the end.
+          </div>
+          <div style={CARD}>
+            <div style={{ background: "var(--surface-raised)", border: "1px solid var(--border)", borderRadius: 10, padding: 12 }}>
+              <div style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "var(--text-faint)", marginBottom: 10 }}>End of day</div>
+              <div style={{ display: "inline-flex", alignItems: "center", padding: "6px 12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12, color: "var(--text)", marginBottom: 10 }}>
+                Review →
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-secondary)" }}>
+                <span>Mon · Apr 27</span>
+                <span>4/5 tasks · 1/2 rhythms</span>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--text-faint)", lineHeight: 1.45, marginTop: 8 }}>
+                Whole-day-or-nothing. Save &amp; exit any time; the queue picks up where you left off.
               </div>
             </div>
           </div>
