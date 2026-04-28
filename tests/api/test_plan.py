@@ -910,3 +910,156 @@ def test_refine_handles_malformed_gcal_event_ids(client, monkeypatch):
     assert resp.status_code == 200, resp.text
     # Nothing was filtered (we couldn't decode the IDs), external event stays
     assert {e.id for e in captured["events"]} == {"external-evt"}
+
+
+# ── Late-night planning (Lane B) ──────────────────────────────────────────────
+# Coverage for the "Plan today at 23:30 returned a schedule dated tomorrow"
+# correctness bug. Empty-state contract:
+#   scheduled == [] && pushed == [] && free_windows_used == []
+#   reasoning_summary mentions "no meaningful time" (or similar empty-state copy)
+# Frontend detects this triple-zero shape and renders a "Plan tomorrow" CTA
+# instead of an empty schedule grid. Lane A and other consumers should rely on
+# this same shape rather than a new top-level flag — keeps the PlanResponse
+# pydantic model untouched.
+
+
+def test_plan_today_at_late_night_returns_empty_with_suggestion(client, monkeypatch):
+    """At 23:30 with default cutoff 23:00, Plan today must NOT call schedule_day
+    and must return the empty-with-suggestion shape so the frontend can render
+    the 'Plan tomorrow' CTA. The schedule_day mock is asserted UNCALLED to lock
+    in the short-circuit (no LLM tokens spent past the extractor)."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    schedule_calls = {"n": 0}
+    def fake_schedule_day(**_kwargs):
+        schedule_calls["n"] += 1
+        return {"scheduled": [], "pushed": [], "reasoning_summary": "should-not-run"}
+
+    # Empty free windows simulates "past today's cutoff" — the post-fix
+    # compute_free_windows returns [] when now >= day_end with an evening
+    # cutoff hour (>= AUTO_ROLL_MORNING_HOUR), so we mirror that here.
+    stack, _, _ = _patch_pipeline(
+        sb=mock_sb,
+        todoist_tasks=[_stub_task("t1", "Some task", 60)],
+        schedule_day_fn=fake_schedule_day,
+        free_windows=[],
+    )
+
+    with stack:
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["scheduled"] == []
+    assert data["pushed"] == []
+    assert data["free_windows_used"] == []
+    assert "no meaningful time" in data["reasoning_summary"].lower()
+    assert schedule_calls["n"] == 0, "schedule_day must not be invoked when there is no schedulable time"
+
+
+def test_plan_tomorrow_at_late_night_does_not_short_circuit(client, monkeypatch):
+    """Plan tomorrow at 23:30 must NOT trigger the late-night short-circuit —
+    tomorrow has a full day of windows. Asserts the empty-state path is gated
+    on target_date == today, not on the wall-clock time."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    schedule_calls = {"n": 0}
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+
+    def fake_schedule_day(**_kwargs):
+        schedule_calls["n"] += 1
+        return {
+            "scheduled": [{
+                "task_id": "t1", "task_name": "Tomorrow task",
+                "start_time": f"{tomorrow}T14:00:00-07:00",
+                "end_time": f"{tomorrow}T15:00:00-07:00",
+                "duration_minutes": 60, "category": "deep_work",
+            }],
+            "pushed": [],
+            "reasoning_summary": "Scheduled into your afternoon window.",
+        }
+
+    stack, _, _ = _patch_pipeline(
+        sb=mock_sb,
+        todoist_tasks=[_stub_task("t1", "Tomorrow task", 60)],
+        schedule_day_fn=fake_schedule_day,
+    )
+
+    with stack:
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "tomorrow", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert schedule_calls["n"] == 1
+    assert len(data["scheduled"]) == 1
+
+
+def test_plan_today_late_night_returned_tasks_stay_on_target_date(client, monkeypatch):
+    """When schedule_day DOES run (e.g. cutoff was a legit '01:00' next-day
+    auto-roll giving a 90-min window), every returned scheduled item's
+    start_time must fall on either target_date or — when the cutoff legitimately
+    crossed midnight — within the auto-rolled window. Items must never run
+    past day_end into tomorrow's pre-cutoff space."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    tz = ZoneInfo("America/Vancouver")
+
+    # Simulate the "01:00 next-day cutoff at 23:30" scenario: a single 90-min
+    # window 23:30 → tomorrow 01:00.
+    free_window = FreeWindow(
+        start=datetime(today.year, today.month, today.day, 23, 30, tzinfo=tz),
+        end=datetime(tomorrow.year, tomorrow.month, tomorrow.day, 1, 0, tzinfo=tz),
+        duration_minutes=90,
+        block_type="late night",
+    )
+
+    def fake_schedule_day(**_kwargs):
+        return {
+            "scheduled": [{
+                "task_id": "t1", "task_name": "Late session",
+                "start_time": f"{today.isoformat()}T23:30:00-07:00",
+                "end_time": f"{tomorrow.isoformat()}T00:30:00-07:00",
+                "duration_minutes": 60, "category": "deep_work",
+            }],
+            "pushed": [],
+            "reasoning_summary": "Late-night session.",
+        }
+
+    stack, _, _ = _patch_pipeline(
+        sb=mock_sb,
+        todoist_tasks=[_stub_task("t1", "Late session", 60)],
+        schedule_day_fn=fake_schedule_day,
+        free_windows=[free_window],
+    )
+
+    with stack:
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # Every placed item must end on or before the auto-rolled day_end
+    # (tomorrow 01:00 in this scenario); none may run into tomorrow's daytime.
+    cap = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 1, 0, tzinfo=tz)
+    for item in data["scheduled"]:
+        end = datetime.fromisoformat(item["end_time"])
+        assert end <= cap, f"Scheduled item ends past day_end cap: {item}"
