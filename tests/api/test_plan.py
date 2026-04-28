@@ -968,11 +968,10 @@ def test_refine_handles_malformed_gcal_event_ids(client, monkeypatch):
 # Coverage for the "Plan today at 23:30 returned a schedule dated tomorrow"
 # correctness bug. Empty-state contract:
 #   scheduled == [] && pushed == [] && free_windows_used == []
-#   reasoning_summary mentions "no meaningful time" (or similar empty-state copy)
-# Frontend detects this triple-zero shape and renders a "Plan tomorrow" CTA
-# instead of an empty schedule grid. Lane A and other consumers should rely on
-# this same shape rather than a new top-level flag — keeps the PlanResponse
-# pydantic model untouched.
+#   reasoning_summary explains why
+#   auto_shift_to_tomorrow_suggested == True
+# Frontend pivots on auto_shift_to_tomorrow_suggested to render a "Plan
+# tomorrow" CTA instead of an empty schedule grid.
 
 
 def test_plan_today_at_late_night_returns_empty_with_suggestion(client, monkeypatch):
@@ -1011,6 +1010,7 @@ def test_plan_today_at_late_night_returns_empty_with_suggestion(client, monkeypa
     assert data["scheduled"] == []
     assert data["pushed"] == []
     assert data["free_windows_used"] == []
+    assert data["auto_shift_to_tomorrow_suggested"] is True
     assert "no meaningful time" in data["reasoning_summary"].lower()
     assert schedule_calls["n"] == 0, "schedule_day must not be invoked when there is no schedulable time"
 
@@ -1056,6 +1056,8 @@ def test_plan_tomorrow_at_late_night_does_not_short_circuit(client, monkeypatch)
     data = resp.json()
     assert schedule_calls["n"] == 1
     assert len(data["scheduled"]) == 1
+    # Tomorrow with windows must NOT trigger the late-night signal.
+    assert data["auto_shift_to_tomorrow_suggested"] is False
 
 
 def test_plan_today_late_night_returned_tasks_stay_on_target_date(client, monkeypatch):

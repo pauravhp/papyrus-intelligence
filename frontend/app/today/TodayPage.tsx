@@ -92,6 +92,9 @@ export default function TodayPage() {
   const [planningTarget, setPlanningTarget] = useState<"today" | "tomorrow">("today");
   const [planningStatus, setPlanningStatus] = useState<"idle" | "working" | "proposal">("idle");
   const [proposedSchedule, setProposedSchedule] = useState<ScheduledItem[] | null>(null);
+  // True when the planner short-circuited because we're past today's effective
+  // cutoff. Drives the "Plan tomorrow" CTA banner above the day columns.
+  const [autoShiftToTomorrowSuggested, setAutoShiftToTomorrowSuggested] = useState(false);
 
   const windowWidth = useWindowWidth();
 
@@ -184,6 +187,7 @@ export default function TodayPage() {
     setPlanningOpen(true);
     setPlanningStatus("working");
     setProposedSchedule(null);
+    setAutoShiftToTomorrowSuggested(false);
   };
 
   const handlePanelClose = () => {
@@ -192,6 +196,7 @@ export default function TodayPage() {
     setProposedSchedule(null);
     setPlanningContext(undefined);
     setPlanningTarget("today");
+    setAutoShiftToTomorrowSuggested(false);
   };
 
   const handlePanelConfirm = () => {
@@ -200,24 +205,25 @@ export default function TodayPage() {
     setProposedSchedule(null);
     setPlanningContext(undefined);
     setPlanningTarget("today");
+    setAutoShiftToTomorrowSuggested(false);
     setLoading(true);
     load();
   };
 
-  const handleScheduleProposed = (schedule: ScheduledItem[]) => {
+  const handleScheduleProposed = (schedule: ScheduledItem[], autoShift: boolean) => {
     setProposedSchedule(schedule);
+    setAutoShiftToTomorrowSuggested(autoShift);
     setPlanningStatus("proposal");
   };
 
-  // Empty-with-suggestion: backend returns scheduled=[] when "Plan today" is
-  // invoked past the user's effective cutoff (e.g. clicking Plan at 11:30 PM
+  // Backend signals the empty-state via auto_shift_to_tomorrow_suggested when
+  // "Plan today" is invoked past the user's effective cutoff (e.g. 11:30 PM
   // with a 23:00 cutoff). The reasoning_summary in the planning panel already
   // explains why; this surfaces a one-click "Plan tomorrow" CTA so the user
   // doesn't have to close the panel and re-pick the target date.
   const showPlanTomorrowCta =
     planningStatus === "proposal"
-    && proposedSchedule !== null
-    && proposedSchedule.length === 0
+    && autoShiftToTomorrowSuggested
     && planningTarget === "today";
 
   const handlePlanTomorrowFromCta = () => {

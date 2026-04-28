@@ -608,12 +608,11 @@ def run_schedule_pipeline(
     tasks = [t for t in tasks if t.id not in already_ids]
 
     # Late-night short-circuit. Plan today is meaningless once today's effective
-    # cutoff has passed (or only a sliver of time is left). Fixed-frontend
-    # contract: scheduled == [] && pushed == [] && free_windows_used == [] +
-    # populated reasoning_summary mentioning "no meaningful time" → frontend
-    # renders a "Plan tomorrow" CTA instead of an empty schedule grid. We
-    # short-circuit BEFORE the schedule_day LLM call to save tokens and to keep
-    # the response shape unambiguous (no rejected items leaking into pushed[]).
+    # cutoff has passed (or only a sliver of time is left). The frontend pivots
+    # on auto_shift_to_tomorrow_suggested=True to render a "Plan tomorrow" CTA
+    # instead of an empty schedule grid. We short-circuit BEFORE the schedule_day
+    # LLM call to save tokens and keep the response shape unambiguous (no
+    # rejected items leaking into pushed[]).
     total_free_minutes = sum(w.duration_minutes for w in free_windows)
     if target_date == date.today() and total_free_minutes < _LATE_NIGHT_MIN_MINUTES:
         tz = ZoneInfo(tz_str)
@@ -628,6 +627,7 @@ def run_schedule_pipeline(
             "blocks": [b.to_dict() for b in extracted.blocks],
             "cutoff_override": extracted.cutoff_override_iso,
             "free_windows_used": [],
+            "auto_shift_to_tomorrow_suggested": True,
         }
 
     original_durations = _build_original_durations(tasks)

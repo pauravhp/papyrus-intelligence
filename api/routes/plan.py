@@ -54,6 +54,10 @@ class PlanResponse(BaseModel):
     free_windows_used: list[dict]
     blocks: list[dict] = []  # carry-forward time-block constraints
     cutoff_override: str | None = None  # carry-forward end-of-day cutoff (ISO datetime)
+    # True when "Plan today" was invoked past the user's effective cutoff and
+    # the planner short-circuited with an empty schedule. Frontend pivots on
+    # this to render a "Plan tomorrow" CTA instead of an empty grid.
+    auto_shift_to_tomorrow_suggested: bool = False
 
 
 class ConfirmResponse(BaseModel):
@@ -162,6 +166,7 @@ def plan(body: PlanRequest, user: dict = Depends(require_beta_access)) -> PlanRe
         free_windows_used=result.get("free_windows_used", []),
         blocks=result.get("blocks", []),
         cutoff_override=result.get("cutoff_override"),
+        auto_shift_to_tomorrow_suggested=result.get("auto_shift_to_tomorrow_suggested", False),
     )
 
 
@@ -187,6 +192,7 @@ def refine(body: RefineRequest, user: dict = Depends(require_beta_access)) -> Pl
         free_windows_used=result.get("free_windows_used", []),
         blocks=result.get("blocks", []),
         cutoff_override=result.get("cutoff_override"),
+        auto_shift_to_tomorrow_suggested=result.get("auto_shift_to_tomorrow_suggested", False),
     )
 
 

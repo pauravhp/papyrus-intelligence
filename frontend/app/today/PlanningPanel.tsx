@@ -12,7 +12,7 @@ interface PlanningPanelProps {
   token: string;
   contextNote?: string;
   targetDate?: "today" | "tomorrow";
-  onScheduleProposed: (schedule: ScheduledItem[]) => void;
+  onScheduleProposed: (schedule: ScheduledItem[], autoShiftToTomorrowSuggested: boolean) => void;
   onConfirm: () => void;
   onClose: () => void;
 }
@@ -30,6 +30,7 @@ interface Proposal {
   free_windows_used: Array<{ start: string; end: string; duration_minutes: number }>;
   blocks?: Block[];
   cutoff_override?: string | null;
+  auto_shift_to_tomorrow_suggested?: boolean;
 }
 
 const PROGRESS_STEPS = [
@@ -114,7 +115,7 @@ export default function PlanningPanel({
       setProposal(data);
       setReasoning(data.reasoning_summary);
       setProgressStep(PROGRESS_STEPS.length - 1);
-      onScheduleProposed(data.scheduled ?? []);
+      onScheduleProposed(data.scheduled ?? [], data.auto_shift_to_tomorrow_suggested === true);
       posthog?.capture("schedule_proposed", {
         task_count: (data.scheduled ?? []).length,
       });
@@ -154,7 +155,7 @@ export default function PlanningPanel({
       const data: Proposal = await res.json();
       setProposal(data);
       setReasoning(data.reasoning_summary);
-      onScheduleProposed(data.scheduled ?? []);
+      onScheduleProposed(data.scheduled ?? [], data.auto_shift_to_tomorrow_suggested === true);
       setStatus("proposal");
     } catch (err) {
       setPlanError(`Refine failed: ${(err as Error).message}`);
