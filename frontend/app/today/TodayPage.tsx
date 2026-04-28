@@ -209,11 +209,74 @@ export default function TodayPage() {
     setPlanningStatus("proposal");
   };
 
+  // Empty-with-suggestion: backend returns scheduled=[] when "Plan today" is
+  // invoked past the user's effective cutoff (e.g. clicking Plan at 11:30 PM
+  // with a 23:00 cutoff). The reasoning_summary in the planning panel already
+  // explains why; this surfaces a one-click "Plan tomorrow" CTA so the user
+  // doesn't have to close the panel and re-pick the target date.
+  const showPlanTomorrowCta =
+    planningStatus === "proposal"
+    && proposedSchedule !== null
+    && proposedSchedule.length === 0
+    && planningTarget === "today";
+
+  const handlePlanTomorrowFromCta = () => {
+    handlePanelClose();
+    handlePlan(undefined, "tomorrow");
+  };
+
   return (
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       {/* Main today content */}
       <div className="app-main-pad" style={{ flex: 1, overflowY: "auto" }}>
         <NudgeBanner nudge={setupNudge} />
+        {showPlanTomorrowCta && (
+          <div
+            style={{
+              margin: "0 0 12px",
+              padding: "10px 14px",
+              borderRadius: 10,
+              background: "var(--accent-tint)",
+              border: "1px solid rgba(196,130,26,0.18)",
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+              justifyContent: "space-between",
+            }}
+            role="status"
+          >
+            <span
+              style={{
+                fontSize: 13,
+                color: "var(--text)",
+                fontFamily: "var(--font-literata)",
+                fontStyle: "italic",
+                lineHeight: 1.4,
+              }}
+            >
+              No meaningful time left to plan today. Plan tomorrow instead?
+            </span>
+            <button
+              type="button"
+              onClick={handlePlanTomorrowFromCta}
+              style={{
+                padding: "6px 12px",
+                background: "var(--accent)",
+                color: "var(--bg)",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 12,
+                fontFamily: "var(--font-literata)",
+                cursor: "pointer",
+                letterSpacing: "0.01em",
+                minHeight: 32,
+              }}
+            >
+              Plan tomorrow →
+            </button>
+          </div>
+        )}
         {/* Header */}
         <motion.div
           initial="hidden" animate="show" custom={0} variants={FADE}
