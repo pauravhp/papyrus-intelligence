@@ -34,6 +34,7 @@ export interface ScheduledItem {
   end_time: string;
   duration_minutes: number;
   category: "deep_work" | "admin" | null;
+  kind: "task" | "rhythm";
 }
 
 export interface PushedItem {
