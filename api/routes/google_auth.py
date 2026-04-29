@@ -36,6 +36,9 @@ _REDIRECT_URI = f"{settings.BACKEND_URL}/auth/google/callback"
 _SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/calendar.readonly",
+    # Lets us create the user's "Papyrus" calendar without granting access
+    # to any calendars we didn't create. Required by /api/import/commit.
+    "https://www.googleapis.com/auth/calendar.app.created",
 ]
 _STATE_MAX_AGE = 600  # seconds — consent screen should complete in <10 min
 

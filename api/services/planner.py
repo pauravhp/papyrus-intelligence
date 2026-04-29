@@ -846,6 +846,7 @@ def confirm(
     user_ctx: dict,
     schedule: dict,
     target_date: date,
+    target_calendar_id: str | None = None,
 ) -> dict:
     """
     Write the proposed schedule: GCal events + Todoist due_datetimes +
@@ -886,7 +887,7 @@ def confirm(
 
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
-    write_cal_id = config.get("write_calendar_id", "primary")
+    write_cal_id = (target_calendar_id if target_calendar_id else None) or config.get("write_calendar_id", "primary")
     todoist = TodoistClient(user_ctx["todoist_api_key"])
 
     gcal_event_ids: list[str] = []

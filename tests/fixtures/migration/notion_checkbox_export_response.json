@@ -1,0 +1,131 @@
+{
+  "tasks": [
+    {
+      "content": "Draft launch announcement post",
+      "priority": 3,
+      "duration_minutes": 60,
+      "category_label": "@deep-work",
+      "deadline": "2026-05-02",
+      "reasoning": "Writing task with explicit deadline 4 days out; needs focused time."
+    },
+    {
+      "content": "Review Q2 OKRs with team",
+      "priority": 3,
+      "duration_minutes": 45,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Team meeting/review, no explicit deadline; default to P2 and 45 min."
+    },
+    {
+      "content": "Email Sarah re: vendor contract renewal",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Email task; quick admin work."
+    },
+    {
+      "content": "Reply to investor follow-up emails",
+      "priority": 3,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": null,
+      "reasoning": "Email replies; admin category."
+    },
+    {
+      "content": "Build prototype for the auth flow change",
+      "priority": 3,
+      "duration_minutes": 90,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Building/coding task requires deep focus; 90 min for prototype work."
+    },
+    {
+      "content": "Renew car registration before end of month",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@admin",
+      "deadline": "2026-04-30",
+      "reasoning": "Admin task with deadline 2 days away (end of month)."
+    },
+    {
+      "content": "Schedule dentist appointment",
+      "priority": 2,
+      "duration_minutes": 15,
+      "category_label": "@quick",
+      "deadline": null,
+      "reasoning": "Quick admin task; no urgency indicated."
+    },
+    {
+      "content": "Look into that side project idea",
+      "priority": 1,
+      "duration_minutes": 30,
+      "category_label": null,
+      "deadline": null,
+      "reasoning": "Marked 'Maybe'; low priority, someday work."
+    },
+    {
+      "content": "Refactor the legacy export script",
+      "priority": 1,
+      "duration_minutes": 90,
+      "category_label": "@deep-work",
+      "deadline": null,
+      "reasoning": "Marked 'Maybe'; coding work but low priority."
+    }
+  ],
+  "rhythms": [
+    {
+      "name": "Weekly review",
+      "scheduling_hint": "Every Friday afternoon",
+      "sessions_per_week": 1,
+      "session_min_minutes": 30,
+      "session_max_minutes": 60,
+      "days_of_week": [
+        "fri"
+      ],
+      "reasoning": "Explicit recurrence every Friday; structured review rhythm."
+    },
+    {
+      "name": "Workout",
+      "scheduling_hint": "Monday, Wednesday, Friday mornings",
+      "sessions_per_week": 3,
+      "session_min_minutes": 45,
+      "session_max_minutes": 60,
+      "days_of_week": [
+        "mon",
+        "wed",
+        "fri"
+      ],
+      "reasoning": "Three-day-per-week recurring exercise habit."
+    },
+    {
+      "name": "Read before bed",
+      "scheduling_hint": "Every night",
+      "sessions_per_week": 7,
+      "session_min_minutes": 30,
+      "session_max_minutes": 30,
+      "days_of_week": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ],
+      "reasoning": "Daily evening routine; consistent 30-minute reading habit."
+    },
+    {
+      "name": "Call mom",
+      "scheduling_hint": "Every Sunday",
+      "sessions_per_week": 1,
+      "session_min_minutes": 30,
+      "session_max_minutes": 45,
+      "days_of_week": [
+        "sun"
+      ],
+      "reasoning": "Weekly recurring personal commitment on Sundays."
+    }
+  ],
+  "unmatched": []
+}

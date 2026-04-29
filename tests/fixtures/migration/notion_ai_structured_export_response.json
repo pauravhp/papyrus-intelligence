@@ -1,0 +1,78 @@
+{
+  "tasks": [
+    {
+      "content": "Draft launch announcement",
+      "priority": 4,
+      "duration_minutes": 120,
+      "category_label": "@deep-work",
+      "deadline": "2026-05-02",
+      "reasoning": "High priority with explicit Friday deadline; 2h estimate maps to 120 min."
+    },
+    {
+      "content": "Review pull requests for the auth refactor",
+      "priority": 3,
+      "duration_minutes": 45,
+      "category_label": "@deep-work",
+      "deadline": "2026-04-29",
+      "reasoning": "Medium priority due tomorrow; code review is deep work; 45m estimate is blessed."
+    },
+    {
+      "content": "Email Sarah about Q2 budget",
+      "priority": 4,
+      "duration_minutes": 15,
+      "category_label": "@admin",
+      "deadline": "2026-04-28",
+      "reasoning": "Due today (urgent); email is admin; 15m estimate is blessed."
+    },
+    {
+      "content": "Write design doc for the export pipeline",
+      "priority": 4,
+      "duration_minutes": 90,
+      "category_label": "@deep-work",
+      "deadline": "2026-05-07",
+      "reasoning": "High priority with next Wednesday deadline; design doc is deep work; 90m estimate is blessed."
+    },
+    {
+      "content": "1:1 with manager",
+      "priority": 2,
+      "duration_minutes": 30,
+      "category_label": null,
+      "deadline": "2026-05-01",
+      "reasoning": "Low priority meeting on Thursday; 30m estimate is blessed."
+    },
+    {
+      "content": "Update onboarding docs after the API change",
+      "priority": 3,
+      "duration_minutes": 60,
+      "category_label": "@deep-work",
+      "deadline": "2026-05-02",
+      "reasoning": "Medium priority due end of week (Friday); documentation writing is deep work; 1h estimate maps to 60 min."
+    },
+    {
+      "content": "Fix flaky integration test in payments module",
+      "priority": 3,
+      "duration_minutes": 30,
+      "category_label": "@deep-work",
+      "deadline": "2026-05-02",
+      "reasoning": "Medium priority due this week; debugging/fixing code is deep work; 30m estimate is blessed."
+    }
+  ],
+  "rhythms": [
+    {
+      "name": "Daily standup",
+      "scheduling_hint": "every weekday morning",
+      "sessions_per_week": 5,
+      "session_min_minutes": 15,
+      "session_max_minutes": 15,
+      "days_of_week": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri"
+      ],
+      "reasoning": "Explicit 'every weekday morning' recurrence; 15m estimate; this is a recurring meeting, not a one-off task."
+    }
+  ],
+  "unmatched": []
+}

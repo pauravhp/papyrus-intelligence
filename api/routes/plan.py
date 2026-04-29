@@ -49,6 +49,7 @@ class RefineRequest(BaseModel):
 class ConfirmRequest(BaseModel):
     target_date: Literal["today", "tomorrow"] = "today"
     schedule: dict
+    target_calendar_id: str | None = None
 
 
 class PlanResponse(BaseModel):
@@ -195,7 +196,7 @@ def confirm(body: ConfirmRequest, user: dict = Depends(require_beta_access)) -> 
     user_ctx = _load_user_ctx(user["sub"])
     target_date = _resolve_date(body.target_date)
     try:
-        result = planner.confirm(user_ctx, body.schedule, target_date)
+        result = planner.confirm(user_ctx, body.schedule, target_date, target_calendar_id=body.target_calendar_id)
     except planner.AlreadyConfirmedError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except RuntimeError as exc:

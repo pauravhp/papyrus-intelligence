@@ -208,3 +208,20 @@ Three issues found and fixed together:
 1. **Positional arg mismatch** (`agent_tools.py`): `compute_free_windows(..., scheduled_tasks)` passed the list as `late_night_prior`. Fix: keyword arg `scheduled_tasks=scheduled_tasks`.
 2. **No post-LLM validation**: LLM-proposed times were never checked against free windows — a hallucinated slot inside a blocked interval would get confirmed on top of a GCal event. Fix: filter `scheduled` items outside all free windows into `pushed` after `schedule_day` returns.
 3. **LLM had no event context**: prompt only showed opaque window strings. Fix: pass `events` to `_build_prompt`; add `CALENDAR EVENTS (already blocked)` section so the LLM reasons around actual meetings.
+
+---
+
+## 2026-04-28 — Driver.js spike for migration assistant DemoTour
+
+**Verdict:** TENTATIVE GO (pending manual browser verification by the user).
+
+**Why:** Driver.js v1.x compiles cleanly against the project's Next.js setup and offers the three behaviours we need: anchored highlight + popover, centered popover (no anchor), and explicit close-button handling. The wrapper at `frontend/components/DemoTour.tsx` exposes a 4-prop surface (`step`, `anchor`, `variables`, `onSkip`) which is the minimum needed for Tasks 12-13. Bundle size is ~6 KB gzipped — acceptable.
+
+**Manual smoke still owed before Task 12 ships:**
+1. Bubble renders centered (no anchor).
+2. Bubble anchors over a target element via CSS selector.
+3. "I'll explore on my own" close button fires `onSkip`.
+4. Variable substitution works (`{tasksN}` → "12").
+5. Step transitions cleanly (changing prop `step` destroys old bubble, mounts new without orphan).
+
+**If any fail** during Task 12 integration: replace `DemoTour.tsx` with a custom portal-rendered component (~half-day extra) and update this entry.

@@ -1298,3 +1298,78 @@ def test_no_truncation_means_no_retry(client, monkeypatch):
 
     assert resp.status_code == 200
     assert call_count["n"] == 1, "no retry should happen when first attempt is clean"
+
+
+# ── target_calendar_id override (Task 13) ─────────────────────────────────────
+
+
+def test_confirm_routes_to_target_calendar_id_when_provided(client, monkeypatch):
+    """When target_calendar_id is provided, confirm must write GCal events to
+    that calendar rather than the user's config write_calendar_id."""
+    from api.services import planner as planner_module
+
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)  # config has write_calendar_id absent → defaults to "primary"
+
+    # Idempotency-guard SELECT returns no existing confirmed row
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = []
+
+    (
+        mock_sb.from_.return_value
+        .insert.return_value
+        .execute.return_value
+    ).data = [{"id": 55}]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    schedule = {
+        "scheduled": [
+            {
+                "task_id": "t1",
+                "task_name": "Demo task",
+                "start_time": f"{_today()}T14:00:00-07:00",
+                "end_time": f"{_today()}T15:00:00-07:00",
+                "duration_minutes": 60,
+            }
+        ],
+        "pushed": [],
+    }
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.create_event", return_value="evt-papyrus-1") as mock_create:
+
+        resp = client.post(
+            "/api/plan/confirm",
+            json={
+                "target_date": "today",
+                "schedule": schedule,
+                "target_calendar_id": "papyrus-cal-id-123",
+            },
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["confirmed"] is True
+    assert data["gcal_events_created"] == 1
+
+    # Verify create_event was called with calendar_id="papyrus-cal-id-123"
+    assert mock_create.call_count == 1
+    _, kwargs = mock_create.call_args
+    assert kwargs.get("calendar_id") == "papyrus-cal-id-123", (
+        f"Expected calendar_id='papyrus-cal-id-123', got {kwargs.get('calendar_id')!r}"
+    )

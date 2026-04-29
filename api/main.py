@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.auth import access_router
 from api.config import settings as config_settings
-from api.routes import calendars, google_auth, health, nudge, onboard, plan, replan, review, rhythms, settings, todoist_auth, today
+from api.routes import calendars, google_auth, health, import_tasks, nudge, onboard, plan, replan, review, rhythms, settings, todoist_auth, today
 
 
 @asynccontextmanager
@@ -46,5 +46,6 @@ app.include_router(today.router)
 app.include_router(replan.router)
 app.include_router(review.router)
 app.include_router(settings.router)
+app.include_router(import_tasks.router)
 app.include_router(nudge.router)
 app.include_router(access_router)

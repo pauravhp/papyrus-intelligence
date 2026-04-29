@@ -1,0 +1,8 @@
+Task: Draft launch announcement | Priority: high | Due: this Friday | Estimate: 2h
+Task: Review pull requests for the auth refactor | Priority: medium | Due: tomorrow | Estimate: 45m
+Task: Email Sarah about Q2 budget | Priority: medium | Due: today | Estimate: 15m
+Task: Write design doc for the export pipeline | Priority: high | Due: next Wednesday | Estimate: 90m
+Task: 1:1 with manager | Priority: low | Due: Thursday | Estimate: 30m
+Task: Update onboarding docs after the API change | Priority: medium | Due: end of week | Estimate: 1h
+Task: Fix flaky integration test in payments module | Priority: medium | Due: this week | Estimate: 30m
+Task: Daily standup | Priority: low | Recurring: every weekday morning | Estimate: 15m

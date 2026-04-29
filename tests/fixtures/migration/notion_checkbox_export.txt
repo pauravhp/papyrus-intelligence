@@ -1,0 +1,21 @@
+## This Week
+
+- [ ] Draft launch announcement post (due: 2026-05-02)
+- [ ] Review Q2 OKRs with team
+- [ ] Email Sarah re: vendor contract renewal
+- [ ] Weekly review every Friday afternoon
+- [ ] Reply to investor follow-up emails
+- [ ] Build prototype for the auth flow change
+
+## Personal
+
+- [ ] Workout Mon/Wed/Fri mornings
+- [ ] Read 30 minutes before bed every night
+- [ ] Call mom on Sunday
+- [ ] Renew car registration before end of month
+- [ ] Schedule dentist appointment
+
+## Maybe
+
+- [ ] Look into that side project idea
+- [ ] Refactor the legacy export script

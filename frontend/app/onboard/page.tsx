@@ -5,14 +5,22 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import SetupStage from "./SetupStage";
 import DiscoverStage from "./DiscoverStage";
+import ImportStage from "./ImportStage";
+import type { Variant } from "./ImportStage";
 
-type Step = "setup" | "discover";
+type Step = "setup" | "discover" | "import";
+
+// TODO: v2 threshold gate — see brief §4 for labels_only_card and skip_entirely variants.
+function determineImportVariant(): Variant {
+  return "paste";
+}
 
 export default function OnboardPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("setup");
   const [timezone, setTimezone] = useState("UTC");
   const [calendarIds, setCalendarIds] = useState<string[]>([]);
+  const [importVariant, setImportVariant] = useState<Variant>("paste");
 
   const handleSetupComplete = (tz: string, calIds: string[]) => {
     setTimezone(tz);
@@ -20,19 +28,29 @@ export default function OnboardPage() {
     setStep("discover");
   };
 
-  const handleOnboardComplete = () => {
-    router.push("/today");
+  const handleDiscoverComplete = () => {
+    setImportVariant(determineImportVariant());
+    setStep("import");
   };
 
   if (step === "setup") {
     return <SetupStage onAdvance={handleSetupComplete} />;
   }
 
+  if (step === "discover") {
+    return (
+      <DiscoverStage
+        timezone={timezone}
+        calendarIds={calendarIds}
+        onComplete={handleDiscoverComplete}
+      />
+    );
+  }
+
   return (
-    <DiscoverStage
-      timezone={timezone}
-      calendarIds={calendarIds}
-      onComplete={handleOnboardComplete}
+    <ImportStage
+      variant={importVariant}
+      onComplete={() => router.push("/today")}
     />
   );
 }
