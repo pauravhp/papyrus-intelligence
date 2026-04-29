@@ -140,6 +140,76 @@ def _fetch_gcal_for_date(
     return timed, all_day
 
 
+def _tag_kind(scheduled: list[dict]) -> list[dict]:
+    """Mark each scheduled item as 'task' or 'rhythm'.
+
+    Synthetic rhythm tasks are prefixed with 'proj_' upstream by
+    api/services/planner.py:266 (the synthetic TodoistTask id is
+    f"proj_{rhythm['id']}"). Detect by prefix — no DB lookup needed.
+    """
+    out: list[dict] = []
+    for item in scheduled:
+        kind = "rhythm" if str(item.get("task_id", "")).startswith("proj_") else "task"
+        out.append({**item, "kind": kind})
+    return out
+
+
+def get_user_calendars(user_id: str) -> tuple:
+    """Fetch GCal service, calendar IDs, and timezone for a user.
+    Returns (gcal_service, cal_ids, tz_str).
+    """
+    gcal_service = None
+    cal_ids = ["primary"]
+    tz_str = "UTC"
+    todoist_connected = False
+    try:
+        user_row = (
+            supabase.from_("users")
+            .select("config, google_credentials, todoist_oauth_token")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        if user_row.data:
+            config = user_row.data.get("config") or {}
+            todoist_connected = bool(
+                (user_row.data.get("todoist_oauth_token") or {}).get("access_token")
+            )
+            tz_str = config.get("user", {}).get("timezone", "UTC")
+            cal_ids = (
+                config.get("source_calendar_ids")
+                or config.get("calendar_ids")
+                or ["primary"]
+            )
+            gcal_creds = user_row.data.get("google_credentials")
+            if gcal_creds:
+                try:
+                    svc, refreshed = build_gcal_service_from_credentials(
+                        gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+                    )
+                    gcal_service = svc
+                    if refreshed:
+                        supabase.from_("users").update(
+                            {"google_credentials": refreshed}
+                        ).eq("id", user_id).execute()
+                except Exception as e:
+                    logger.warning("Failed to build GCal service for user %s: %s", user_id, e)
+    except Exception:
+        pass
+    return gcal_service, cal_ids, tz_str, todoist_connected
+
+
+def _fetch_day_gcal_events(
+    target_date: date,
+    gcal_service,
+    cal_ids: list,
+    tz_str: str,
+    papyrus_event_ids: set[str],
+) -> tuple[list[dict], list[str]]:
+    """Thin wrapper around _fetch_gcal_for_date; patchable in tests."""
+    return _fetch_gcal_for_date(target_date, tz_str, cal_ids, gcal_service, papyrus_event_ids)
+
+
 def _parse_day(
     row: dict | None,
     target_date: str,
@@ -160,7 +230,7 @@ def _parse_day(
         parsed = {}
     return {
         "schedule_date": target_date,
-        "scheduled": parsed.get("scheduled", []),
+        "scheduled": _tag_kind(parsed.get("scheduled", [])),
         "pushed": parsed.get("pushed", []),
         "confirmed_at": (row or {}).get("confirmed_at"),
         "gcal_events": gcal_events,
@@ -200,36 +270,21 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         if d not in by_date:
             by_date[d] = row
 
-    # Fetch user config + google credentials
+    # Fetch user config + google credentials via patchable helper
+    gcal_service, cal_ids, tz_str, todoist_connected = get_user_calendars(user_id)
+
+    # Derive config for nudge/cutoff; re-read only the config portion
     config: dict = {}
-    gcal_service = None
-    todoist_connected = False
     try:
-        user_row = (
+        cfg_row = (
             supabase.from_("users")
-            .select("config, google_credentials, todoist_oauth_token")
+            .select("config")
             .eq("id", user_id)
             .single()
             .execute()
         )
-        if user_row.data:
-            config = user_row.data.get("config") or {}
-            todoist_connected = bool(
-                (user_row.data.get("todoist_oauth_token") or {}).get("access_token")
-            )
-            gcal_creds = user_row.data.get("google_credentials")
-            if gcal_creds:
-                try:
-                    svc, refreshed = build_gcal_service_from_credentials(
-                        gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
-                    )
-                    gcal_service = svc
-                    if refreshed:
-                        supabase.from_("users").update(
-                            {"google_credentials": refreshed}
-                        ).eq("id", user_id).execute()
-                except Exception as e:
-                    logger.warning("Failed to build GCal service for user %s: %s", user_id, e)
+        if cfg_row.data:
+            config = cfg_row.data.get("config") or {}
     except Exception:
         pass  # review_available defaults to False on error
 
@@ -247,13 +302,6 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     )
     has_confirmed_schedule = bool(schedule_check.data)
 
-    # Fetch GCal events for each day
-    tz_str = config.get("user", {}).get("timezone", "UTC")
-    cal_ids = (
-        config.get("source_calendar_ids")
-        or config.get("calendar_ids")
-        or ["primary"]
-    )
     needs_calendar = not config.get("source_calendar_ids")
     needs_todoist = not todoist_connected
     dismissed = bool((config.get("nudges") or {}).get("calendar_dismissed"))
@@ -268,7 +316,7 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     for d_obj, d_str in zip(date_objs, dates):
         papyrus_event_ids = _papyrus_ids(by_date.get(d_str))
         gcal_results.append(
-            _fetch_gcal_for_date(d_obj, tz_str, cal_ids, gcal_service, papyrus_event_ids)
+            _fetch_day_gcal_events(d_obj, gcal_service, cal_ids, tz_str, papyrus_event_ids)
         )
 
     cutoff = _cutoff_passed(config)
