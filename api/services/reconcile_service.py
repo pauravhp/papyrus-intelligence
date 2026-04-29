@@ -112,3 +112,25 @@ def classify_gcal(gcal_by_id: dict, event_id: str, item: dict) -> GcalState:
         new_title=event.get("summary") if title_changed else None,
         new_duration_minutes=new_dur if duration_changed else None,
     )
+
+
+from enum import Enum
+
+
+class TodoistState(Enum):
+    NA = "na"               # task_id starts with proj_ — no Todoist mirror
+    PENDING = "pending"     # in active_ids
+    COMPLETED = "completed" # in completed_ids
+    DELETED = "deleted"     # in neither (collapses with due_cleared in v1)
+
+
+def classify_todoist(active_ids: set[str], completed_ids: set[str], item: dict) -> TodoistState:
+    """Classify the Todoist-side state of a scheduled item."""
+    task_id = item.get("task_id") or ""
+    if task_id.startswith("proj_"):
+        return TodoistState.NA
+    if task_id in completed_ids:
+        return TodoistState.COMPLETED
+    if task_id in active_ids:
+        return TodoistState.PENDING
+    return TodoistState.DELETED

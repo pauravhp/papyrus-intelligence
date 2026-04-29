@@ -126,3 +126,37 @@ def test_classify_gcal_empty_event_id_is_missing():
     item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
     state = classify_gcal({"evt1": _gcal_event("evt1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00")}, "", item)
     assert state.kind == "missing"
+
+
+from api.services.reconcile_service import TodoistState, classify_todoist
+
+
+def test_classify_todoist_na_for_proj_task_id():
+    item = {"task_id": "proj_42", "task_name": "Finish project"}
+    state = classify_todoist(active_ids=set(), completed_ids=set(), item=item)
+    assert state == TodoistState.NA
+
+
+def test_classify_todoist_pending_when_in_active_set():
+    item = {"task_id": "12345", "task_name": "X"}
+    state = classify_todoist(active_ids={"12345"}, completed_ids=set(), item=item)
+    assert state == TodoistState.PENDING
+
+
+def test_classify_todoist_completed_when_in_completed_set():
+    item = {"task_id": "12345", "task_name": "X"}
+    state = classify_todoist(active_ids=set(), completed_ids={"12345"}, item=item)
+    assert state == TodoistState.COMPLETED
+
+
+def test_classify_todoist_completed_takes_precedence_over_active():
+    """Edge case: race condition where Todoist reports task in both lists."""
+    item = {"task_id": "12345"}
+    state = classify_todoist(active_ids={"12345"}, completed_ids={"12345"}, item=item)
+    assert state == TodoistState.COMPLETED
+
+
+def test_classify_todoist_deleted_when_in_neither_set():
+    item = {"task_id": "12345", "task_name": "X"}
+    state = classify_todoist(active_ids=set(), completed_ids=set(), item=item)
+    assert state == TodoistState.DELETED
