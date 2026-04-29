@@ -296,3 +296,122 @@ def test_apply_rule_proj_moved_mutates():
     _apply_rule(item, gcal_state, TodoistState.NA, delta)
     assert item["start_time"] == "2026-04-29T16:00:00+00:00"
     assert len(delta.moved) == 1
+
+
+import json as _json
+from datetime import date as _date
+from unittest.mock import MagicMock
+
+from api.services.reconcile_service import reconcile_today
+
+
+def _mock_supabase_with_row(row: dict | None) -> MagicMock:
+    """Build a Supabase mock whose schedule_log read returns `row`."""
+    sb = MagicMock()
+    chain = sb.from_.return_value
+    chain.select.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = (
+        [row] if row else []
+    )
+    # Update path mock — return whatever .execute() yields without error
+    update_chain = sb.from_.return_value.update.return_value.eq.return_value
+    update_chain.execute.return_value = MagicMock()
+    return sb
+
+
+def _row(scheduled: list[dict], gcal_event_ids: list[str], reviewed: bool = False) -> dict:
+    return {
+        "id": 1,
+        "schedule_date": "2026-04-29",
+        "proposed_json": _json.dumps({"scheduled": scheduled}),
+        "gcal_event_ids": _json.dumps(gcal_event_ids),
+        "gcal_write_calendar_id": "primary",
+        "reviewed_at": "2026-04-29T22:00:00Z" if reviewed else None,
+    }
+
+
+def test_reconcile_today_no_row_returns_empty_delta():
+    user_ctx = {
+        "supabase": _mock_supabase_with_row(None),
+        "user_id": "u1",
+        "gcal_events": [],
+        "todoist_active_ids": set(),
+        "todoist_completed_ids": set(),
+    }
+    delta = reconcile_today(user_ctx, _date(2026, 4, 29))
+    assert delta.has_writes() is False
+    assert delta.skipped_reviewed is False
+
+
+def test_reconcile_today_skips_when_reviewed():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    sb = _mock_supabase_with_row(_row([item], ["evt1"], reviewed=True))
+    user_ctx = {
+        "supabase": sb,
+        "user_id": "u1",
+        "gcal_events": [],
+        "todoist_active_ids": set(),
+        "todoist_completed_ids": set(),
+    }
+    delta = reconcile_today(user_ctx, _date(2026, 4, 29))
+    assert delta.skipped_reviewed is True
+    assert delta.has_writes() is False
+    sb.from_.return_value.update.assert_not_called()
+
+
+def test_reconcile_today_full_pass_persists_mutations():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    sb = _mock_supabase_with_row(_row([item], ["evt1"]))
+    user_ctx = {
+        "supabase": sb,
+        "user_id": "u1",
+        "gcal_events": [_gcal_event("evt1", "X", "2026-04-29T16:00:00+00:00", "2026-04-29T17:00:00+00:00")],
+        "todoist_active_ids": {"t1"},
+        "todoist_completed_ids": set(),
+    }
+    delta = reconcile_today(user_ctx, _date(2026, 4, 29))
+    assert len(delta.moved) == 1
+    assert delta.moved[0].new_start == "2026-04-29T16:00:00+00:00"
+    sb.from_.return_value.update.assert_called_once()
+    update_payload = sb.from_.return_value.update.call_args[0][0]
+    persisted = _json.loads(update_payload["proposed_json"])
+    assert persisted["scheduled"][0]["start_time"] == "2026-04-29T16:00:00+00:00"
+
+
+def test_reconcile_today_drop_removes_item_and_event_id_in_sync():
+    item_a = _scheduled_item("ta", "A", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    item_b = _scheduled_item("tb", "B", "2026-04-29T11:00:00+00:00", "2026-04-29T12:00:00+00:00", 60)
+    sb = _mock_supabase_with_row(_row([item_a, item_b], ["evt_a", "evt_b"]))
+    user_ctx = {
+        "supabase": sb,
+        "user_id": "u1",
+        "gcal_events": [
+            _gcal_event("evt_a", "A", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00"),
+            _gcal_event("evt_b", "B", "2026-04-29T11:00:00+00:00", "2026-04-29T12:00:00+00:00"),
+        ],
+        "todoist_active_ids": {"tb"},  # ta is "deleted" — drop
+        "todoist_completed_ids": set(),
+    }
+    delta = reconcile_today(user_ctx, _date(2026, 4, 29))
+    assert len(delta.dropped) == 1
+    assert delta.dropped[0].task_id == "ta"
+    update_payload = sb.from_.return_value.update.call_args[0][0]
+    persisted_scheduled = _json.loads(update_payload["proposed_json"])["scheduled"]
+    persisted_event_ids = _json.loads(update_payload["gcal_event_ids"])
+    assert len(persisted_scheduled) == 1
+    assert persisted_scheduled[0]["task_id"] == "tb"
+    assert persisted_event_ids == ["evt_b"]
+
+
+def test_reconcile_today_no_writes_when_no_changes():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    sb = _mock_supabase_with_row(_row([item], ["evt1"]))
+    user_ctx = {
+        "supabase": sb,
+        "user_id": "u1",
+        "gcal_events": [_gcal_event("evt1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00")],
+        "todoist_active_ids": {"t1"},
+        "todoist_completed_ids": set(),
+    }
+    delta = reconcile_today(user_ctx, _date(2026, 4, 29))
+    assert delta.has_writes() is False
+    sb.from_.return_value.update.assert_not_called()

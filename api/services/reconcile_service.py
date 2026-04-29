@@ -206,3 +206,93 @@ def _apply_rule(
         item["duration_minutes"] = int(gcal_state.new_duration_minutes or 0)
 
     return "KEEP"
+
+
+import json
+import logging
+from datetime import date
+
+logger = logging.getLogger(__name__)
+
+
+def reconcile_today(user_ctx: dict, target_date: date) -> ReconcileDelta:
+    """
+    Lazy reconcile of the latest confirmed schedule_log row for target_date.
+    Mutates proposed_json in place if external state diverges. Returns a
+    structured delta (also useful as PostHog payload).
+
+    Required user_ctx keys:
+      - supabase: Supabase client
+      - user_id: str
+      - gcal_events: list[dict] with id/summary/start_time/end_time
+      - todoist_active_ids: set[str]
+      - todoist_completed_ids: set[str]
+
+    No-op cases:
+      - No confirmed row for target_date.
+      - reviewed_at is set on the row (skipped_reviewed=True).
+      - No diffs detected.
+    """
+    supabase = user_ctx["supabase"]
+    user_id = user_ctx["user_id"]
+    delta = ReconcileDelta()
+
+    row_resp = (
+        supabase.from_("schedule_log")
+        .select("id, proposed_json, gcal_event_ids, gcal_write_calendar_id, reviewed_at")
+        .eq("user_id", user_id)
+        .eq("schedule_date", target_date.isoformat())
+        .eq("confirmed", 1)
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = row_resp.data or []
+    if not rows:
+        return delta
+    row = rows[0]
+
+    if row.get("reviewed_at"):
+        delta.skipped_reviewed = True
+        return delta
+
+    try:
+        proposed = json.loads(row.get("proposed_json") or "{}")
+        scheduled = list(proposed.get("scheduled") or [])
+        gcal_event_ids = list(json.loads(row.get("gcal_event_ids") or "[]"))
+    except (json.JSONDecodeError, TypeError) as exc:
+        logger.warning("[reconcile] malformed JSON for user=%s date=%s: %s", user_id, target_date, exc)
+        return delta
+
+    gcal_by_id = {e["id"]: e for e in user_ctx.get("gcal_events") or [] if e.get("id")}
+    active_ids = user_ctx.get("todoist_active_ids") or set()
+    completed_ids = user_ctx.get("todoist_completed_ids") or set()
+
+    new_scheduled: list[dict] = []
+    new_event_ids: list[str] = []
+
+    for idx, item in enumerate(scheduled):
+        event_id = gcal_event_ids[idx] if idx < len(gcal_event_ids) else ""
+        gcal_state = classify_gcal(gcal_by_id, event_id, item)
+        todoist_state = classify_todoist(active_ids, completed_ids, item)
+        action = _apply_rule(item, gcal_state, todoist_state, delta)
+        if action == "KEEP":
+            new_scheduled.append(item)
+            new_event_ids.append(event_id)
+
+    if not delta.has_writes():
+        return delta
+
+    proposed["scheduled"] = new_scheduled
+    try:
+        supabase.from_("schedule_log").update({
+            "proposed_json": json.dumps(proposed),
+            "gcal_event_ids": json.dumps(new_event_ids),
+        }).eq("id", row["id"]).execute()
+    except Exception as exc:
+        logger.warning(
+            "[reconcile] persist failed for user=%s date=%s delta=%s: %s",
+            user_id, target_date, delta, exc,
+        )
+
+    return delta
