@@ -1,4 +1,5 @@
 import os, json
+from datetime import date
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
 os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
@@ -341,3 +342,33 @@ def test_today_response_includes_unreviewed_dates_oldest_first(client, monkeypat
     assert q["dates"] == sorted([mon, wed])
     assert q["count"] == 2
     assert q["has_unreviewed"] is True
+
+
+def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
+    """Items whose task_id starts with 'proj_' are rhythms; others are tasks."""
+    rows = [{
+        "schedule_date": date.today().isoformat(),
+        "proposed_json": json.dumps({
+            "scheduled": [
+                {"task_id": "8675309", "task_name": "Write spec", "start_time": "2026-04-28T09:00:00-07:00", "end_time": "2026-04-28T10:30:00-07:00", "duration_minutes": 90, "category": "deep_work"},
+                {"task_id": "proj_e1234567-89ab-cdef-0123-456789abcdef", "task_name": "Gym", "start_time": "2026-04-28T07:00:00-07:00", "end_time": "2026-04-28T07:45:00-07:00", "duration_minutes": 45, "category": None},
+            ],
+            "pushed": [],
+        }),
+        "confirmed_at": "2026-04-28T08:30:00-07:00",
+        "gcal_event_ids": [],
+    }]
+    mock_sb = _build_today_mock_with_unreviewed_dates([])
+    _mock_schedule_log(mock_sb, rows)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u1"})
+    monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
+    monkeypatch.setattr("api.routes.today.get_user_calendars", lambda *a, **kw: (None, [], "UTC", False))
+
+    with patch("api.routes.today.supabase", mock_sb):
+        response = client.get("/api/today", headers={"Authorization": "Bearer fake"})
+    assert response.status_code == 200
+    today = response.json().get("today")
+    assert today is not None
+    by_id = {item["task_id"]: item for item in today["scheduled"]}
+    assert by_id["8675309"]["kind"] == "task"
+    assert by_id["proj_e1234567-89ab-cdef-0123-456789abcdef"]["kind"] == "rhythm"

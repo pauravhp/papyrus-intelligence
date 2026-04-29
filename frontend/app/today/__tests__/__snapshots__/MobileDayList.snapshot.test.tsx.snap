@@ -1,0 +1,204 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`MobileDayList — squeeze regression guard > renders a stable HTML snapshot for the busy afternoon day 1`] = `
+<div>
+  <div
+    style="display: flex; flex-direction: column; gap: 8px;"
+  >
+    <div
+      data-sticky="true"
+      data-testid="now-hero"
+      style="background: rgba(196, 130, 26, 0.1); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 8px; font-family: var(--font-literata); position: sticky; top: 0px; z-index: 6;"
+    >
+      <p
+        style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); font-weight: 700; margin: 0px;"
+      >
+        Now · 
+        1:30 PM
+      </p>
+      <p
+        style="font-size: 14px; color: var(--text); margin: 2px 0px 1px; line-height: 1.3;"
+      >
+        API refactor
+      </p>
+      <p
+        style="font-size: 11px; color: rgba(44, 26, 14, 0.55); margin: 0px;"
+      >
+        52
+        m left
+         · Next: 
+        PR review
+      </p>
+    </div>
+    <button
+      data-testid="earlier-disclosure"
+      style="background: transparent; border-bottom: 1px dashed rgba(44, 26, 14, 0.18); padding: 8px 0px 6px; text-align: left; font-family: var(--font-literata); font-size: 11px; color: rgba(44, 26, 14, 0.55); cursor: pointer; min-height: 36px;"
+      type="button"
+    >
+      ▸
+       Earlier today (
+      3
+      ) — 
+      Morning workout, Spec review, Email triage
+    </button>
+    <p
+      style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: rgba(44, 26, 14, 0.4); font-family: var(--font-literata); margin: 8px 0px 2px;"
+    >
+      Up next
+    </p>
+    <div
+      data-kind="task"
+      data-testid="row-root"
+      style="display: flex; align-items: stretch; gap: 10px; min-height: 52px; cursor: default; font-family: var(--font-literata);"
+    >
+      <span
+        data-testid="row-time"
+        style="font-variant-numeric: tabular-nums; color: rgba(44, 26, 14, 0.55); min-width: 56px; padding-top: 9px; font-size: 11px; text-align: right;"
+      >
+        1:30 PM
+      </span>
+      <span
+        data-category="deep_work"
+        data-kind="task"
+        data-testid="row-stripe"
+        style="width: 4px; border-radius: 2px; background: rgb(122, 98, 80); flex-shrink: 0;"
+      />
+      <span
+        style="flex: 1 1 0%; padding: 8px 0px; color: var(--text); font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; overflow: hidden; word-break: break-word;"
+      >
+        API refactor
+      </span>
+      <span
+        style="color: rgba(44, 26, 14, 0.45); font-size: 10px; padding-top: 11px; min-width: 36px; text-align: right;"
+      >
+        1h 30m
+      </span>
+    </div>
+    <div
+      data-kind="gcal"
+      data-testid="row-root"
+      style="display: flex; align-items: stretch; gap: 10px; min-height: 52px; padding: 0px 10px; margin: 0px -10px; border-radius: 6px; background: rgba(160, 144, 128, 0.12); font-family: var(--font-literata);"
+    >
+      <span
+        data-testid="row-time"
+        style="font-variant-numeric: tabular-nums; color: rgba(44, 26, 14, 0.55); min-width: 56px; padding-top: 9px; font-size: 11px; text-align: right;"
+      >
+        3:00 PM
+      </span>
+      <span
+        style="flex: 1 1 0%; padding: 8px 0px; color: rgba(44, 26, 14, 0.55); font-style: italic; font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; overflow: hidden;"
+      >
+        Standup
+      </span>
+      <span
+        style="align-self: center; background: rgba(44, 26, 14, 0.12); color: rgba(44, 26, 14, 0.55); padding: 2px 6px; border-radius: 3px; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; font-family: ui-sans-serif, system-ui, sans-serif;"
+      >
+        GCAL
+      </span>
+    </div>
+    <div
+      data-kind="task"
+      data-testid="row-root"
+      style="display: flex; align-items: stretch; gap: 10px; min-height: 52px; cursor: default; font-family: var(--font-literata);"
+    >
+      <span
+        data-testid="row-time"
+        style="font-variant-numeric: tabular-nums; color: rgba(44, 26, 14, 0.55); min-width: 56px; padding-top: 9px; font-size: 11px; text-align: right;"
+      >
+        3:30 PM
+      </span>
+      <span
+        data-category="admin"
+        data-kind="task"
+        data-testid="row-stripe"
+        style="width: 4px; border-radius: 2px; background: rgb(196, 130, 26); flex-shrink: 0;"
+      />
+      <span
+        style="flex: 1 1 0%; padding: 8px 0px; color: var(--text); font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; overflow: hidden; word-break: break-word;"
+      >
+        PR review
+      </span>
+      <span
+        style="color: rgba(44, 26, 14, 0.45); font-size: 10px; padding-top: 11px; min-width: 36px; text-align: right;"
+      >
+        30m
+      </span>
+    </div>
+    <div
+      data-kind="task"
+      data-testid="row-root"
+      style="display: flex; align-items: stretch; gap: 10px; min-height: 52px; cursor: default; font-family: var(--font-literata);"
+    >
+      <span
+        data-testid="row-time"
+        style="font-variant-numeric: tabular-nums; color: rgba(44, 26, 14, 0.55); min-width: 56px; padding-top: 9px; font-size: 11px; text-align: right;"
+      >
+        5:00 PM
+      </span>
+      <span
+        data-category="deep_work"
+        data-kind="task"
+        data-testid="row-stripe"
+        style="width: 4px; border-radius: 2px; background: rgb(122, 98, 80); flex-shrink: 0;"
+      />
+      <span
+        style="flex: 1 1 0%; padding: 8px 0px; color: var(--text); font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; overflow: hidden; word-break: break-word;"
+      >
+        Writing draft
+      </span>
+      <span
+        style="color: rgba(44, 26, 14, 0.45); font-size: 10px; padding-top: 11px; min-width: 36px; text-align: right;"
+      >
+        1h
+      </span>
+    </div>
+    <div
+      data-kind="rhythm"
+      data-testid="row-root"
+      style="display: flex; align-items: stretch; gap: 10px; min-height: 52px; cursor: default; font-family: var(--font-literata);"
+    >
+      <span
+        data-testid="row-time"
+        style="font-variant-numeric: tabular-nums; color: rgba(44, 26, 14, 0.55); min-width: 56px; padding-top: 9px; font-size: 11px; text-align: right;"
+      >
+        6:30 PM
+      </span>
+      <span
+        data-category="untagged"
+        data-kind="rhythm"
+        data-testid="row-stripe"
+        style="width: 4px; border-radius: 2px; background: rgb(106, 141, 111); flex-shrink: 0;"
+      />
+      <span
+        style="flex: 1 1 0%; padding: 8px 0px; color: var(--text); font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; overflow: hidden; word-break: break-word;"
+      >
+        Dinner
+      </span>
+      <span
+        style="align-self: center; background: rgba(106, 141, 111, 0.18); color: rgb(45, 106, 79); padding: 2px 6px; border-radius: 3px; font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; font-family: ui-sans-serif, system-ui, sans-serif;"
+      >
+        RHYTHM
+      </span>
+      <span
+        style="color: rgba(44, 26, 14, 0.45); font-size: 10px; padding-top: 11px; min-width: 36px; text-align: right;"
+      >
+        1h
+      </span>
+    </div>
+    <div
+      style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);"
+    >
+      <p
+        style="font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; font-family: var(--font-literata);"
+      >
+        Didn't make the cut
+      </p>
+      <p
+        style="font-size: 12px; color: var(--text-faint); font-family: var(--font-literata); line-height: 1.5; font-style: italic;"
+      >
+        Couldn't place — duration missing
+      </p>
+    </div>
+  </div>
+</div>
+`;
