@@ -124,12 +124,20 @@ export default function ReplanModal({
   const [isRefining, setIsRefining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsTodoistReconnect, setNeedsTodoistReconnect] = useState(false);
+  const [needsGcalReconnect, setNeedsGcalReconnect] = useState(false);
 
   async function handleTodoistReconnect() {
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
     const sessionToken = data.session?.access_token ?? token;
     window.location.href = `${API_BASE}/auth/todoist?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
+  }
+
+  async function handleGcalReconnect() {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const sessionToken = data.session?.access_token ?? token;
+    window.location.href = `${API_BASE}/auth/google?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
   }
 
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -196,8 +204,14 @@ export default function ReplanModal({
         }),
       });
       if (!res.ok) {
-        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+        const code = await parseErrorCode(res);
+        if (code === "todoist_reconnect_required") {
           setNeedsTodoistReconnect(true);
+          setPhase("triage");
+          return;
+        }
+        if (code === "gcal_reconnect_required") {
+          setNeedsGcalReconnect(true);
           setPhase("triage");
           return;
         }
@@ -235,8 +249,14 @@ export default function ReplanModal({
         }),
       });
       if (!res.ok) {
-        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+        const code = await parseErrorCode(res);
+        if (code === "todoist_reconnect_required") {
           setNeedsTodoistReconnect(true);
+          setPhase("proposed");
+          return;
+        }
+        if (code === "gcal_reconnect_required") {
+          setNeedsGcalReconnect(true);
           setPhase("proposed");
           return;
         }
@@ -268,8 +288,14 @@ export default function ReplanModal({
         body: JSON.stringify({ schedule: proposed, tomorrow_task_ids: tomorrowIds }),
       });
       if (!res.ok) {
-        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+        const code = await parseErrorCode(res);
+        if (code === "todoist_reconnect_required") {
           setNeedsTodoistReconnect(true);
+          setPhase("proposed");
+          return;
+        }
+        if (code === "gcal_reconnect_required") {
+          setNeedsGcalReconnect(true);
           setPhase("proposed");
           return;
         }
@@ -341,7 +367,7 @@ export default function ReplanModal({
           </button>
         </div>
 
-        {error && !needsTodoistReconnect && (
+        {error && !needsTodoistReconnect && !needsGcalReconnect && (
           <p style={{ color: "var(--accent-danger, #ef4444)", fontSize: 13, marginBottom: 16, fontFamily: "var(--font-literata)" }}>
             {error}
           </p>
@@ -370,6 +396,33 @@ export default function ReplanModal({
               }}
             >
               Reconnect Todoist
+            </button>
+          </div>
+        )}
+
+        {needsGcalReconnect && (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 12, fontFamily: "var(--font-literata)" }}>
+              Your Google Calendar connection needs reconnecting.<br />
+              <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+                We&apos;ve added a permission for the Papyrus calendar — your triage choices stay intact.
+              </span>
+            </p>
+            <button
+              onClick={handleGcalReconnect}
+              style={{
+                padding: "7px 14px",
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--accent)",
+                borderRadius: 8,
+                fontFamily: "var(--font-literata)",
+                fontSize: 12,
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              Reconnect Google Calendar
             </button>
           </div>
         )}

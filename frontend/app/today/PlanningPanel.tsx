@@ -78,6 +78,7 @@ export default function PlanningPanel({
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [needsTodoistReconnect, setNeedsTodoistReconnect] = useState(false);
+  const [needsGcalReconnect, setNeedsGcalReconnect] = useState(false);
   // True between Confirm-click and confirmed state. Drives the button's
   // disabled + "Confirming…" label so users can't double-fire the write.
   const [isConfirming, setIsConfirming] = useState(false);
@@ -111,8 +112,14 @@ export default function PlanningPanel({
         body: JSON.stringify({ target_date: targetDate, context_note: contextNote ?? null }),
       });
       if (!res.ok) {
-        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+        const code = await parseErrorCode(res);
+        if (code === "todoist_reconnect_required") {
           setNeedsTodoistReconnect(true);
+          setStatus("proposal");
+          return;
+        }
+        if (code === "gcal_reconnect_required") {
+          setNeedsGcalReconnect(true);
           setStatus("proposal");
           return;
         }
@@ -152,8 +159,14 @@ export default function PlanningPanel({
         }),
       });
       if (!res.ok) {
-        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+        const code = await parseErrorCode(res);
+        if (code === "todoist_reconnect_required") {
           setNeedsTodoistReconnect(true);
+          setStatus("proposal");
+          return;
+        }
+        if (code === "gcal_reconnect_required") {
+          setNeedsGcalReconnect(true);
           setStatus("proposal");
           return;
         }
@@ -184,8 +197,16 @@ export default function PlanningPanel({
         }),
       });
       if (!res.ok) {
-        if ((await parseErrorCode(res)) === "todoist_reconnect_required") {
+        const code = await parseErrorCode(res);
+        if (code === "todoist_reconnect_required") {
           setNeedsTodoistReconnect(true);
+          setStatus("proposal");
+          isConfirmingRef.current = false;
+          setIsConfirming(false);
+          return;
+        }
+        if (code === "gcal_reconnect_required") {
+          setNeedsGcalReconnect(true);
           setStatus("proposal");
           isConfirmingRef.current = false;
           setIsConfirming(false);
@@ -210,6 +231,13 @@ export default function PlanningPanel({
     const { data } = await supabase.auth.getSession();
     const sessionToken = data.session?.access_token ?? token;
     window.location.href = `${API_BASE}/auth/todoist?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
+  }
+
+  async function handleGcalReconnect() {
+    const supabase = createClient();
+    const { data } = await supabase.auth.getSession();
+    const sessionToken = data.session?.access_token ?? token;
+    window.location.href = `${API_BASE}/auth/google?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
   }
 
   async function handleRefinement() {
@@ -334,8 +362,36 @@ export default function PlanningPanel({
             </div>
           )}
 
+          {/* Google Calendar reconnect surface — same shape as the Todoist banner */}
+          {needsGcalReconnect && (
+            <div>
+              <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 12, fontFamily: "var(--font-literata)" }}>
+                Your Google Calendar connection needs reconnecting.<br />
+                <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+                  We&apos;ve added a permission for the Papyrus calendar — your settings stay intact.
+                </span>
+              </p>
+              <button
+                onClick={handleGcalReconnect}
+                style={{
+                  padding: "7px 14px",
+                  background: "transparent",
+                  color: "var(--accent)",
+                  border: "1px solid var(--accent)",
+                  borderRadius: 8,
+                  fontFamily: "var(--font-literata)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+              >
+                Reconnect Google Calendar
+              </button>
+            </div>
+          )}
+
           {/* Agent reasoning — prose, not bubbles */}
-          {!needsTodoistReconnect && (planError ? (
+          {!needsTodoistReconnect && !needsGcalReconnect && (planError ? (
             <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-literata)", fontStyle: "italic" }}>
               {planError} — close the panel and try again.
             </p>
@@ -355,7 +411,7 @@ export default function PlanningPanel({
 
         {/* Footer */}
         <div style={{ padding: "12px 16px 18px", borderTop: "1px solid var(--border)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-          {!planError && !needsTodoistReconnect && (
+          {!planError && !needsTodoistReconnect && !needsGcalReconnect && (
             <button
               onClick={handleConfirm}
               disabled={isConfirming}

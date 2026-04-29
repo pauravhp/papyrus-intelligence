@@ -76,6 +76,7 @@ interface TodayResponse {
   review_available: boolean;
   review_queue: { has_unreviewed: boolean; count: number; dates: string[] };
   setup_nudge: SetupNudge | null;
+  gcal_reconnect_required?: boolean;
 }
 
 const FADE = {
@@ -98,6 +99,7 @@ export default function TodayPage() {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [replanOpen, setReplanOpen] = useState(false);
   const [setupNudge, setSetupNudge] = useState<SetupNudge | null>(null);
+  const [gcalReconnectRequired, setGcalReconnectRequired] = useState(false);
 
   const [planningOpen, setPlanningOpen] = useState(false);
   const [planningContext, setPlanningContext] = useState<string | undefined>();
@@ -134,6 +136,7 @@ export default function TodayPage() {
       const result = await apiFetch<TodayResponse>("/api/today", tok);
       setData(result);
       setSetupNudge(result.setup_nudge ?? null);
+      setGcalReconnectRequired(result.gcal_reconnect_required === true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load schedule");
     } finally {
@@ -142,6 +145,13 @@ export default function TodayPage() {
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
+
+  async function handleGcalReconnect() {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+    const { data } = await supabaseRef.current.auth.getSession();
+    const sessionToken = data.session?.access_token ?? token;
+    window.location.href = `${apiBase}/auth/google?token=${sessionToken}&redirect_after=${encodeURIComponent("/today")}`;
+  }
 
   if (loading) return <TodaySkeleton />;
   if (error) return (
@@ -271,6 +281,41 @@ export default function TodayPage() {
     <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       {/* Main today content */}
       <div className="app-main-pad" style={{ flex: 1, overflowY: "auto" }}>
+        {gcalReconnectRequired && (
+          <div
+            role="alert"
+            style={{
+              margin: "0 0 12px",
+              padding: "10px 14px",
+              borderRadius: 10,
+              background: "var(--accent-tint)",
+              border: "1px solid rgba(196,130,26,0.18)",
+              fontFamily: "var(--font-literata)",
+            }}
+          >
+            <p style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5, marginBottom: 8 }}>
+              Your Google Calendar connection needs reconnecting.{" "}
+              <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+                We&apos;ve added a permission for the Papyrus calendar — your settings stay intact.
+              </span>
+            </p>
+            <button
+              onClick={handleGcalReconnect}
+              style={{
+                padding: "6px 12px",
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--accent)",
+                borderRadius: 8,
+                fontFamily: "var(--font-literata)",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Reconnect Google Calendar
+            </button>
+          </div>
+        )}
         <NudgeBanner nudge={setupNudge} />
         {showPlanTomorrowCta && (
           <div
