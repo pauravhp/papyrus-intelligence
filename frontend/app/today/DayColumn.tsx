@@ -346,7 +346,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
 
             {/* GCal event blocks (read-only, behind confirmed task blocks) */}
             {(dayData?.gcal_events ?? []).map((event) => (
-              <GcalEventBlock key={event.id} event={event} gridStart={gridStart} />
+              <GcalEventBlock key={event.id} event={event} gridStart={gridStart} columnDate={columnDate} />
             ))}
 
             {/* Now indicator (today column only) */}

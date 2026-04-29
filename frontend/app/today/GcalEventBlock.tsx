@@ -6,12 +6,25 @@ const PX_PER_HOUR = 72;
 interface Props {
   event: GCalEvent;
   gridStart: number;
+  columnDate: string;  // YYYY-MM-DD — date the column represents (LOCAL)
 }
 
-export default function GcalEventBlock({ event, gridStart }: Props) {
+/**
+ * Hours past the column's local midnight. Mirrors the helper in DayColumn
+ * and TaskBlock — uses the column's date as the reference, not the event's
+ * own getHours(). Without this, a Tue 22:30 event leaks into Wed's column
+ * because getHours() returns 22 regardless of whose day it is.
+ */
+function hoursPastColumnMidnight(iso: string, columnDateIso: string): number {
+  const t = new Date(iso);
+  const colMid = new Date(columnDateIso + "T00:00:00");
+  return (t.getTime() - colMid.getTime()) / 3_600_000;
+}
+
+export default function GcalEventBlock({ event, gridStart, columnDate }: Props) {
   const start = new Date(event.start_time);
   const end = new Date(event.end_time);
-  const startHour = start.getHours() + start.getMinutes() / 60;
+  const startHour = hoursPastColumnMidnight(event.start_time, columnDate);
   const durationMin = (end.getTime() - start.getTime()) / 60000;
 
   const top = (startHour - gridStart) * PX_PER_HOUR;

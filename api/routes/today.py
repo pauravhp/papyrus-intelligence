@@ -316,11 +316,19 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     }
     date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
 
+    # Union papyrus_event_ids across ALL three days. A cross-midnight Papyrus
+    # event written for yesterday's row also satisfies GCal's "events on
+    # today" query (its end_time is in today's window), and would otherwise
+    # double-render in today's column as a generic GCal block. Filtering by
+    # the union ensures every column hides every Papyrus-written event.
+    all_papyrus_ids: set[str] = set()
+    for d_str in dates:
+        all_papyrus_ids |= _papyrus_ids(by_date.get(d_str))
+
     gcal_results: list[tuple[list, list]] = []
     for d_obj, d_str in zip(date_objs, dates):
-        papyrus_event_ids = _papyrus_ids(by_date.get(d_str))
         gcal_results.append(
-            _fetch_day_gcal_events(d_obj, gcal_service, cal_ids, tz_str, papyrus_event_ids)
+            _fetch_day_gcal_events(d_obj, gcal_service, cal_ids, tz_str, all_papyrus_ids)
         )
 
     cutoff = _cutoff_passed(config)
