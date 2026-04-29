@@ -70,7 +70,10 @@ def test_get_today_returns_three_days(client, monkeypatch):
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
          patch("api.routes.today.get_events", return_value=[]), \
-         patch("api.routes.today.supabase", mock_sb):
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.reconcile_today"), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(mock_svc, ["primary"], "UTC", False)):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -96,7 +99,10 @@ def test_get_today_handles_no_schedule(client, monkeypatch):
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
          patch("api.routes.today.get_events", return_value=[]), \
-         patch("api.routes.today.supabase", mock_sb):
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.reconcile_today"), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(mock_svc, ["primary"], "UTC", False)):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -275,7 +281,10 @@ def test_today_degrades_gracefully_without_gcal_credentials(client, monkeypatch)
 
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    with patch("api.routes.today.supabase", mock_sb):
+    with patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.reconcile_today"), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(None, [], "UTC", False)):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -363,6 +372,7 @@ def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u1"})
     monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
     monkeypatch.setattr("api.routes.today.get_user_calendars", lambda *a, **kw: (None, [], "UTC", False))
+    monkeypatch.setattr("api.routes.today.reconcile_today", lambda *a, **kw: None)
 
     with patch("api.routes.today.supabase", mock_sb):
         response = client.get("/api/today", headers={"Authorization": "Bearer fake"})
@@ -372,3 +382,66 @@ def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
     by_id = {item["task_id"]: item for item in today["scheduled"]}
     assert by_id["8675309"]["kind"] == "task"
     assert by_id["proj_e1234567-89ab-cdef-0123-456789abcdef"]["kind"] == "rhythm"
+
+
+def test_today_calls_reconcile_and_hides_gcal_deleted(client, monkeypatch):
+    """GET /api/today calls reconcile_today, surfaces todoist_completed_ids,
+    and hides gcal_deleted items from response.today.scheduled."""
+    today_str = date.today().isoformat()
+    schedule = {
+        "scheduled": [
+            {"task_id": "t_keep",   "task_name": "Keep",   "start_time": f"{today_str}T09:00:00+00:00",
+             "end_time": f"{today_str}T10:00:00+00:00", "duration_minutes": 60},
+            {"task_id": "t_hidden", "task_name": "Hidden", "start_time": f"{today_str}T11:00:00+00:00",
+             "end_time": f"{today_str}T12:00:00+00:00", "duration_minutes": 60, "gcal_deleted": True},
+        ]
+    }
+    rows = [{
+        "schedule_date": today_str,
+        "proposed_json": json.dumps(schedule),
+        "confirmed_at": f"{today_str}T08:00:00Z",
+        "gcal_event_ids": json.dumps(["evt_keep", "evt_hidden"]),
+    }]
+
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, rows)
+    # Wire the refreshed row re-read after reconcile (single-row chain with .eq().eq().eq().order().limit().execute())
+    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = rows
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u1"})
+
+    from api.services.reconcile_service import ReconcileDelta
+    fake_recon = MagicMock(return_value=ReconcileDelta())
+
+    fake_tc = MagicMock()
+    fake_tc.get_tasks.return_value = [MagicMock(id="t_keep")]
+    fake_tc.get_completed_task_ids_for_date.return_value = {"t_done"}
+
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(MagicMock(), ["primary"], "UTC", True)), \
+         patch("api.routes.today.reconcile_today", fake_recon), \
+         patch("api.routes.today.TodoistClient", return_value=fake_tc), \
+         patch("api.routes.today.get_valid_todoist_token", return_value="tok"):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # reconcile_today was called with route="today" and the right Todoist sets
+    assert fake_recon.called
+    user_ctx = fake_recon.call_args[0][0]
+    assert user_ctx["route"] == "today"
+    assert user_ctx["todoist_active_ids"] == {"t_keep"}
+    assert user_ctx["todoist_completed_ids"] == {"t_done"}
+
+    # Today response excludes gcal_deleted items
+    today_block = body["today"]
+    task_ids = [s["task_id"] for s in today_block["scheduled"]]
+    assert "t_keep" in task_ids
+    assert "t_hidden" not in task_ids
+
+    # Response surfaces completed IDs to frontend
+    assert body["todoist_completed_ids"] == ["t_done"]

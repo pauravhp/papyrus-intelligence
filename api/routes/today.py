@@ -16,6 +16,9 @@ from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
 from src.calendar_client import build_gcal_service_from_credentials, get_events
+from src.todoist_client import TodoistClient
+from api.services.reconcile_service import reconcile_today
+from api.services.todoist_token import get_valid_todoist_token, TodoistTokenError
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +233,7 @@ def _parse_day(
         parsed = {}
     return {
         "schedule_date": target_date,
-        "scheduled": _tag_kind(parsed.get("scheduled", [])),
+        "scheduled": _tag_kind([s for s in (parsed.get("scheduled") or []) if not s.get("gcal_deleted")]),
         "pushed": parsed.get("pushed", []),
         "confirmed_at": (row or {}).get("confirmed_at"),
         "gcal_events": gcal_events,
@@ -319,6 +322,67 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
             _fetch_day_gcal_events(d_obj, gcal_service, cal_ids, tz_str, papyrus_event_ids)
         )
 
+    # ── Reconcile today (#6 sync-back) ───────────────────────────────────────
+    today_obj = today
+    todoist_active_ids: set[str] = set()
+    todoist_completed_ids: set[str] = set()
+    if todoist_connected:
+        try:
+            tod_token = get_valid_todoist_token(supabase, user_id)
+            tc = TodoistClient(tod_token)
+            todoist_active_ids = {str(t.id) for t in tc.get_tasks(filter_str="today")}
+            todoist_completed_ids = tc.get_completed_task_ids_for_date(today_obj)
+        except TodoistTokenError:
+            logger.warning("[today] Todoist token invalid — skipping reconcile fetch")
+        except Exception:
+            logger.warning("[today] Todoist fetch for reconcile failed", exc_info=True)
+
+    # Fetch today's full GCal event list (no papyrus filter) for reconcile
+    today_gcal_dicts: list[dict] = []
+    if gcal_service:
+        try:
+            today_events_full = get_events(
+                target_date=today_obj,
+                timezone_str=tz_str,
+                calendar_ids=cal_ids,
+                service=gcal_service,
+            )
+            today_gcal_dicts = [
+                {"id": e.id, "summary": e.summary,
+                 "start_time": e.start.isoformat(), "end_time": e.end.isoformat()}
+                for e in today_events_full if not e.is_all_day
+            ]
+        except Exception:
+            logger.warning("[today] GCal fetch for reconcile failed", exc_info=True)
+
+    try:
+        reconcile_today(
+            {
+                "supabase": supabase,
+                "user_id": user_id,
+                "route": "today",
+                "gcal_events": today_gcal_dicts,
+                "todoist_active_ids": todoist_active_ids,
+                "todoist_completed_ids": todoist_completed_ids,
+            },
+            today_obj,
+        )
+        # Re-read today's row so the response reflects any reconcile mutations
+        refreshed = (
+            supabase.from_("schedule_log")
+            .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
+            .eq("user_id", user_id)
+            .eq("schedule_date", today_str)
+            .eq("confirmed", 1)
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if isinstance(refreshed.data, list) and refreshed.data and refreshed.data[0].get("proposed_json"):
+            by_date[today_str] = refreshed.data[0]
+    except Exception:
+        logger.warning("[today] reconcile_today failed — serving pre-reconcile state", exc_info=True)
+
     cutoff = _cutoff_passed(config)
     review_queue = _compute_review_queue(user_id, today, cutoff)
 
@@ -329,4 +393,5 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         "review_available": has_confirmed_schedule and cutoff,
         "setup_nudge": setup_nudge,
         "review_queue": review_queue,
+        "todoist_completed_ids": sorted(todoist_completed_ids),
     }
