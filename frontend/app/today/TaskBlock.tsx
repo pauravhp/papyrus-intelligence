@@ -61,17 +61,22 @@ const CATEGORY_STYLES: Record<
   },
 };
 
+const EMPTY_COMPLETED_SET: Set<string> = new Set();
+
 interface TaskBlockProps {
   item: ScheduledItem;
   columnDate: string;  // YYYY-MM-DD; the date this column represents
   gridStart: number;   // grid's first hour — DayColumn extends this earlier when needed
   isProposed?: boolean;
+  todoistCompletedIds?: Set<string>;
 }
 
-export default function TaskBlock({ item, columnDate, gridStart, isProposed = false }: TaskBlockProps) {
+export default function TaskBlock({ item, columnDate, gridStart, isProposed = false, todoistCompletedIds = EMPTY_COMPLETED_SET }: TaskBlockProps) {
   const blockRef = useRef<HTMLDivElement>(null);
   const [cardOpen, setCardOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+
+  const isDone = todoistCompletedIds.has(item.task_id);
 
   const top = blockTop(item.start_time, columnDate, gridStart);
   const height = blockHeight(item.duration_minutes);
@@ -132,9 +137,10 @@ export default function TaskBlock({ item, columnDate, gridStart, isProposed = fa
             overflow: "hidden",
             textOverflow: "ellipsis",
             lineHeight: 1.4,
+            ...(isDone && { textDecoration: "line-through", opacity: 0.6 }),
           }}
         >
-          {item.task_name}
+          {isDone && "✓ "}{item.task_name}
         </span>
         {showTimeLabel && (
           <span

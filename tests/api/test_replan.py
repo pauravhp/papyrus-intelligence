@@ -701,3 +701,60 @@ def test_replan_confirm_idempotent_when_recently_confirmed(client, monkeypatch):
     mock_delete.assert_not_called()
     MockTodoist.return_value.schedule_task.assert_not_called()
     mock_sb.from_.return_value.insert.assert_not_called()
+
+
+def test_replan_calls_reconcile_today_with_route_replan(client, monkeypatch):
+    """/api/replan invokes reconcile_today before the planner runs."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb, gcal_creds={"token": "gcal-tok"})
+    row, _ = _mock_schedule_log_today(mock_sb)
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .order.return_value
+        .limit.return_value
+        .execute.return_value
+    ).data = [row]
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    today = date.today()
+    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
+
+    from api.services.reconcile_service import ReconcileDelta
+    fake_recon = MagicMock(return_value=ReconcileDelta())
+
+    with patch("api.routes.replan.supabase", mock_sb), \
+         patch("api.routes.replan.TodoistClient") as MockTodoist, \
+         patch("api.routes.replan.build_gcal_service_from_credentials", return_value=(MagicMock(), False)), \
+         patch("api.routes.replan._get_now", return_value=mock_now), \
+         patch("api.routes.replan.reconcile_today", fake_recon), \
+         patch("api.routes.replan.get_events", return_value=[]), \
+         patch("api.services.planner.TodoistClient") as MockPlannerTodoist, \
+         patch("api.services.planner.get_events", return_value=[]), \
+         patch("api.services.planner.compute_free_windows", return_value=[]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints", return_value=_empty_extraction()), \
+         patch("api.services.planner.schedule_day", return_value={"scheduled": [], "pushed": [], "reasoning_summary": "ok"}):
+        MockTodoist.return_value.is_task_completed.return_value = False
+        MockTodoist.return_value.get_tasks.return_value = []
+        MockTodoist.return_value.get_completed_task_ids_for_date.return_value = {"completed_id"}
+        MockPlannerTodoist.return_value.get_tasks.return_value = []
+        MockPlannerTodoist.return_value.get_todays_scheduled_tasks.return_value = []
+
+        resp = client.post(
+            "/api/replan",
+            json={"task_states": {"t1": "keep"}, "context_note": None, "refinement_message": None},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    assert fake_recon.called
+    user_ctx_arg = fake_recon.call_args[0][0]
+    target_date_arg = fake_recon.call_args[0][1]
+    assert user_ctx_arg["route"] == "replan"
+    assert user_ctx_arg["user_id"] == "user-uuid-123"
+    assert user_ctx_arg["todoist_completed_ids"] == {"completed_id"}
+    assert target_date_arg == today

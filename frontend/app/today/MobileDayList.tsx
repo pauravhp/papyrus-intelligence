@@ -6,11 +6,14 @@ import MobileTimelineRow from "./MobileTimelineRow";
 import MobileNowNextHero from "./MobileNowNextHero";
 import { computeNowNext } from "./useNowNext";
 
+const EMPTY_COMPLETED_SET: Set<string> = new Set();
+
 interface Props {
   dayData: DayData | null;
   isToday: boolean;
   now: Date;
   planningStatus: "idle" | "working" | "proposal";
+  todoistCompletedIds?: Set<string>;
 }
 
 interface TimelineEntry {
@@ -43,7 +46,7 @@ function buildEntries(dayData: DayData | null): TimelineEntry[] {
   return entries;
 }
 
-export default function MobileDayList({ dayData, isToday, now, planningStatus }: Props) {
+export default function MobileDayList({ dayData, isToday, now, planningStatus, todoistCompletedIds = EMPTY_COMPLETED_SET }: Props) {
   const [earlierExpanded, setEarlierExpanded] = useState(false);
 
   const entries = buildEntries(dayData);
@@ -109,7 +112,7 @@ export default function MobileDayList({ dayData, isToday, now, planningStatus }:
       )}
 
       {earlierExpanded && past.map((e) => (
-        <MobileTimelineRow key={`past-${e.startMs}`} {...rowProps(e)} />
+        <MobileTimelineRow key={`past-${e.startMs}`} {...rowProps(e, todoistCompletedIds)} />
       ))}
 
       {upcoming.length > 0 && (
@@ -118,7 +121,7 @@ export default function MobileDayList({ dayData, isToday, now, planningStatus }:
         </p>
       )}
       {upcoming.map((e) => (
-        <MobileTimelineRow key={`up-${e.startMs}`} {...rowProps(e)} />
+        <MobileTimelineRow key={`up-${e.startMs}`} {...rowProps(e, todoistCompletedIds)} />
       ))}
 
       {pushed.length > 0 && (
@@ -137,9 +140,10 @@ export default function MobileDayList({ dayData, isToday, now, planningStatus }:
   );
 }
 
-function rowProps(e: TimelineEntry): React.ComponentProps<typeof MobileTimelineRow> {
+function rowProps(e: TimelineEntry, todoistCompletedIds: Set<string>): React.ComponentProps<typeof MobileTimelineRow> {
   if (e.kind === "gcal") {
     return { kind: "gcal", item: e.ref as GCalEvent };
   }
-  return { kind: e.kind, item: e.ref as ScheduledItem };
+  const item = e.ref as ScheduledItem;
+  return { kind: e.kind, item, isDone: todoistCompletedIds.has(item.task_id) };
 }

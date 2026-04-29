@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/utils/supabase/client";
 import { apiFetch } from "@/utils/api";
@@ -77,6 +77,7 @@ interface TodayResponse {
   review_queue: { has_unreviewed: boolean; count: number; dates: string[] };
   setup_nudge: SetupNudge | null;
   gcal_reconnect_required?: boolean;
+  todoist_completed_ids?: string[];
 }
 
 const FADE = {
@@ -113,6 +114,13 @@ export default function TodayPage() {
   // True when the planner short-circuited because we're past today's effective
   // cutoff. Drives the "Plan tomorrow" CTA banner above the day columns.
   const [autoShiftToTomorrowSuggested, setAutoShiftToTomorrowSuggested] = useState(false);
+
+  // Set of Todoist task IDs that have been completed since this schedule was
+  // confirmed. Used to render strikethrough + ✓ on completed task blocks.
+  const todoistCompletedSet = useMemo(
+    () => new Set(data?.todoist_completed_ids ?? []),
+    [data?.todoist_completed_ids]
+  );
 
   const windowWidth = useWindowWidth();
   const isMobile = useIsMobile();
@@ -412,7 +420,7 @@ export default function TodayPage() {
                 transition={{ type: "spring", stiffness: 260, damping: 26 }}
                 style={{ width: 220, flexShrink: 0 }}
               >
-                <DayColumn label="Yesterday" dayData={data?.yesterday ?? null} isToday={false} />
+                <DayColumn label="Yesterday" dayData={data?.yesterday ?? null} isToday={false} todoistCompletedIds={todoistCompletedSet} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -431,7 +439,7 @@ export default function TodayPage() {
                 transition={{ duration: 0.18 }}
                 style={{ flex: 1 }}
               >
-                <DayColumn label="Today" dayData={todayColumnData} isToday={true} planningStatus={planningStatus} />
+                <DayColumn label="Today" dayData={todayColumnData} isToday={true} planningStatus={planningStatus} todoistCompletedIds={todoistCompletedSet} />
               </motion.div>
             ) : (
               <motion.div
@@ -443,7 +451,7 @@ export default function TodayPage() {
                 transition={{ duration: 0.18 }}
                 style={{ flex: 1 }}
               >
-                <DayColumn label="Tomorrow" dayData={tomorrowColumnData} isToday={false} planningStatus={planningStatus} />
+                <DayColumn label="Tomorrow" dayData={tomorrowColumnData} isToday={false} planningStatus={planningStatus} todoistCompletedIds={todoistCompletedSet} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -459,7 +467,7 @@ export default function TodayPage() {
                 transition={{ type: "spring", stiffness: 260, damping: 26 }}
                 style={{ width: planningOpen ? 172 : 220, flexShrink: 0 }}
               >
-                <DayColumn label="Tomorrow" dayData={tomorrowColumnData} isToday={false} planningStatus={planningTarget === "tomorrow" ? planningStatus : undefined} />
+                <DayColumn label="Tomorrow" dayData={tomorrowColumnData} isToday={false} planningStatus={planningTarget === "tomorrow" ? planningStatus : undefined} todoistCompletedIds={todoistCompletedSet} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -488,6 +496,7 @@ export default function TodayPage() {
                   ? planningStatus
                   : "idle"
               }
+              todoistCompletedIds={todoistCompletedSet}
             />
           </div>
         </div>

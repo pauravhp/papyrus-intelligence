@@ -72,7 +72,7 @@ export default function ReviewModal({ token, dates, onClose }: ReviewModalProps)
         setTasks(data.tasks);
         setTaskStates(Object.fromEntries(
           data.tasks.map(t => [t.task_id, {
-            completed: true,
+            completed: t.already_completed_in_todoist,
             actual_duration_mins: t.estimated_duration_mins,
             incomplete_reason: null as IncompleteReason,
           }])

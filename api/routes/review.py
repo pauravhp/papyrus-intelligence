@@ -17,6 +17,10 @@ from api.services.review_aggregate_service import (
     generate_aggregate_narrative,
 )
 from src.todoist_client import TodoistClient
+from src.calendar_client import build_gcal_service_from_credentials, get_events
+from api.config import settings
+from api.services.reconcile_service import reconcile_today
+from api.services.todoist_token import get_valid_todoist_token, TodoistTokenError
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +290,108 @@ def review_aggregate(
         raise HTTPException(status_code=400, detail="schedule_dates length must be <= 7")
     for d in body.schedule_dates:
         _validate_review_date(d)
+
+    # ── Reconcile each requested day before aggregating (#6 sync-back) ──────
+    todoist_active_ids: set[str] = set()
+    todoist_completed_for: dict[str, set[str]] = {}
+    gcal_dicts_for: dict[str, list[dict]] = {}
+    today_iso = date.today().isoformat()
+
+    user_data: dict = {}
+    try:
+        user_row = (
+            supabase.from_("users")
+            .select("config, todoist_oauth_token, google_credentials")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        user_data = user_row.data or {}
+    except Exception:
+        logger.warning("[review.aggregate] user fetch failed", exc_info=True)
+
+    user_config = user_data.get("config") or {}
+    cal_ids = (
+        user_config.get("source_calendar_ids")
+        or user_config.get("calendar_ids")
+        or ["primary"]
+    )
+    tz_str = user_config.get("user", {}).get("timezone", "UTC")
+
+    todoist_token: str | None = None
+    if (user_data.get("todoist_oauth_token") or {}).get("access_token"):
+        try:
+            todoist_token = get_valid_todoist_token(supabase, user_id)
+        except TodoistTokenError:
+            logger.warning("[review.aggregate] Todoist token invalid")
+        except Exception:
+            logger.warning("[review.aggregate] Todoist token lookup failed", exc_info=True)
+
+    tc = None
+    if todoist_token:
+        try:
+            tc = TodoistClient(todoist_token)
+            todoist_active_ids = {str(t.id) for t in tc.get_tasks(filter_str="today")}
+        except Exception:
+            logger.warning("[review.aggregate] Todoist active fetch failed", exc_info=True)
+
+    gcal_service = None
+    gcal_creds = user_data.get("google_credentials")
+    if gcal_creds:
+        try:
+            svc, _refreshed = build_gcal_service_from_credentials(
+                gcal_creds, settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+            )
+            gcal_service = svc
+        except Exception:
+            logger.warning("[review.aggregate] GCal init failed", exc_info=True)
+
+    for dt_iso in body.schedule_dates:
+        try:
+            target = date.fromisoformat(dt_iso)
+        except Exception:
+            continue
+
+        completed: set[str] = set()
+        if tc is not None:
+            try:
+                completed = tc.get_completed_task_ids_for_date(target)
+            except Exception:
+                pass
+        todoist_completed_for[dt_iso] = completed
+
+        gcal_dicts: list[dict] = []
+        if gcal_service:
+            try:
+                events = get_events(
+                    target_date=target,
+                    timezone_str=tz_str,
+                    calendar_ids=cal_ids,
+                    service=gcal_service,
+                )
+                gcal_dicts = [
+                    {"id": e.id, "summary": e.summary,
+                     "start_time": e.start.isoformat(), "end_time": e.end.isoformat()}
+                    for e in events if not e.is_all_day
+                ]
+            except Exception:
+                logger.warning("[review.aggregate] GCal fetch failed for %s", dt_iso, exc_info=True)
+        gcal_dicts_for[dt_iso] = gcal_dicts
+
+        try:
+            reconcile_today(
+                {
+                    "supabase": supabase,
+                    "user_id": user_id,
+                    "route": "review",
+                    "gcal_events": gcal_dicts,
+                    "todoist_active_ids": todoist_active_ids if dt_iso == today_iso else set(),
+                    "todoist_completed_ids": completed,
+                },
+                target,
+            )
+        except Exception:
+            logger.warning("[review.aggregate] reconcile failed for %s", dt_iso, exc_info=True)
 
     per_day = compute_per_day_stats(user_id, body.schedule_dates, supabase)
     task_detail = compute_task_detail(user_id, body.schedule_dates, supabase)

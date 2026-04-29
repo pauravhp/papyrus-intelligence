@@ -231,6 +231,33 @@ class TodoistClient:
         """
         return self.get_task_by_id(task_id) is None
 
+    def get_completed_task_ids_for_date(self, target_date: "date") -> set[str]:
+        """
+        Returns set of Todoist task IDs completed on target_date (UTC day).
+        Uses Sync API /completed/get_all. Returns empty set on 404 (e.g. free
+        tier where the endpoint is unavailable) — caller treats as "no
+        completions detected" without raising.
+        """
+        from datetime import datetime, timedelta, timezone
+        since = datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc)
+        until = since + timedelta(days=1)
+        resp = requests.post(
+            "https://api.todoist.com/sync/v9/completed/get_all",
+            headers=self.headers,
+            json={
+                "since": since.isoformat(),
+                "until": until.isoformat(),
+                "limit": 200,
+            },
+        )
+        if resp.status_code == 404:
+            return set()
+        if resp.status_code == 401:
+            raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
+        resp.raise_for_status()
+        items = resp.json().get("items") or []
+        return {str(item["task_id"]) for item in items if item.get("task_id")}
+
     def clear_task_schedule(self, task_id: str) -> None:
         """
         Clear due_datetime and duration from a task.

@@ -21,11 +21,14 @@ const GUTTER_WIDTH = 44;
 // past this gets clipped + a "Schedule extends beyond view" notice surfaces.
 const GRID_MAX_HOURS_FROM_DEFAULT_START = 28;
 
+const EMPTY_COMPLETED_SET: Set<string> = new Set();
+
 interface DayColumnProps {
   label: string;
   dayData: DayData | null;
   isToday: boolean;
   planningStatus?: "idle" | "working" | "proposal";
+  todoistCompletedIds?: Set<string>;
 }
 
 function fmtDate(isoDate: string): string {
@@ -54,7 +57,7 @@ function hoursPastColumnMidnight(iso: string, columnDateIso: string): number {
   return (t.getTime() - colMid.getTime()) / 3_600_000;
 }
 
-export default function DayColumn({ label, dayData, isToday, planningStatus }: DayColumnProps) {
+export default function DayColumn({ label, dayData, isToday, planningStatus, todoistCompletedIds = EMPTY_COMPLETED_SET }: DayColumnProps) {
   const showSkeleton = planningStatus === "working";
   const scheduled = dayData?.scheduled ?? [];
   const pushed = dayData?.pushed ?? [];
@@ -340,6 +343,7 @@ export default function DayColumn({ label, dayData, isToday, planningStatus }: D
                   columnDate={columnDate}
                   gridStart={gridStart}
                   isProposed={planningStatus === "proposal"}
+                  todoistCompletedIds={todoistCompletedIds}
                 />
               ))
             )}

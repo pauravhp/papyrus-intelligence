@@ -449,3 +449,67 @@ def test_preflight_404_when_all_rows_have_unusable_proposed_json(client, monkeyp
         resp = client.get("/api/review/preflight", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 404
+
+
+def test_review_aggregate_calls_reconcile_per_day_with_route_review(client, monkeypatch):
+    """/api/review/aggregate calls reconcile_today once per requested date with route='review'."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    # Use safe past dates inside the recent window
+    today = date.today()
+    d1 = (today - timedelta(days=2)).isoformat()
+    d2 = (today - timedelta(days=1)).isoformat()
+
+    mock_sb = MagicMock()
+    # users row lookup (for todoist token + google creds)
+    (
+        mock_sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .single.return_value
+        .execute.return_value
+    ).data = {
+        "config": {"user": {"timezone": "UTC"}, "source_calendar_ids": ["primary"]},
+        "todoist_oauth_token": {"access_token": "tok"},
+        "google_credentials": {"token": "g"},
+    }
+
+    from api.services.reconcile_service import ReconcileDelta
+    fake_recon = MagicMock(return_value=ReconcileDelta())
+
+    fake_tc = MagicMock()
+    fake_tc.get_tasks.return_value = []
+    fake_tc.get_completed_task_ids_for_date.return_value = set()
+
+    # Compute weekday names for d1 and d2 to satisfy DayStatRow validation
+    from datetime import date as _date
+    weekday_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    d1_weekday = weekday_names[_date.fromisoformat(d1).weekday()]
+    d2_weekday = weekday_names[_date.fromisoformat(d2).weekday()]
+
+    with patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review.TodoistClient", return_value=fake_tc), \
+         patch("api.routes.review.get_valid_todoist_token", return_value="tok"), \
+         patch("api.routes.review.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
+         patch("api.routes.review.get_events", return_value=[]), \
+         patch("api.routes.review.reconcile_today", fake_recon), \
+         patch("api.routes.review.compute_per_day_stats", return_value=[
+             {"schedule_date": d1, "weekday": d1_weekday, "tasks_total": 0, "tasks_completed": 0,
+              "rhythms_total": 0, "rhythms_completed": 0},
+             {"schedule_date": d2, "weekday": d2_weekday, "tasks_total": 0, "tasks_completed": 0,
+              "rhythms_total": 0, "rhythms_completed": 0},
+         ]), \
+         patch("api.routes.review.compute_task_detail", return_value={}), \
+         patch("api.routes.review.generate_aggregate_narrative", return_value="ok"):
+        resp = client.post(
+            "/api/review/aggregate",
+            json={"schedule_dates": [d1, d2]},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200
+    assert fake_recon.call_count == 2
+    routes = [c[0][0]["route"] for c in fake_recon.call_args_list]
+    assert routes == ["review", "review"]
+    target_dates = [c[0][1].isoformat() for c in fake_recon.call_args_list]
+    assert sorted(target_dates) == sorted([d1, d2])
