@@ -11,7 +11,7 @@ import posthog
 
 from api.config import settings
 
-posthog.project_api_key = settings.POSTHOG_API_KEY
+posthog.api_key = settings.POSTHOG_API_KEY
 posthog.host = "https://us.i.posthog.com"
 
 
