@@ -134,3 +134,75 @@ def classify_todoist(active_ids: set[str], completed_ids: set[str], item: dict) 
     if task_id in active_ids:
         return TodoistState.PENDING
     return TodoistState.DELETED
+
+
+from typing import Literal as _Literal
+
+ApplyAction = _Literal["KEEP", "DROP"]
+
+
+def _apply_rule(
+    item: dict,
+    gcal_state: GcalState,
+    todoist_state: TodoistState,
+    delta: ReconcileDelta,
+) -> ApplyAction:
+    """
+    Apply the rule matrix from the spec (§6.3) to a single scheduled item.
+    Mutates `item` in place when keeping; appends to `delta`. Returns "DROP"
+    when the caller should remove the item from proposed_json.scheduled[].
+    """
+    # Todoist DELETED column always drops (regardless of GCal state) — except NA.
+    if todoist_state == TodoistState.DELETED:
+        delta.dropped.append(
+            DropReason(
+                task_id=item["task_id"],
+                reason="todoist_deleted",
+                gcal_state=gcal_state.kind,
+            )
+        )
+        return "DROP"
+
+    # GCal column rules apply for PENDING, COMPLETED, NA.
+    if gcal_state.kind == "missing":
+        item["gcal_deleted"] = True
+        delta.gcal_deleted.append(item["task_id"])
+        return "KEEP"
+
+    if gcal_state.kind == "moved":
+        delta.moved.append(
+            TaskMove(
+                task_id=item["task_id"],
+                old_start=item["start_time"],
+                new_start=gcal_state.new_start,
+                old_end=item["end_time"],
+                new_end=gcal_state.new_end,
+            )
+        )
+        item["start_time"] = gcal_state.new_start
+        item["end_time"] = gcal_state.new_end
+
+    # MOVED can co-occur with title/duration edits — apply those too.
+    if gcal_state.title_changed:
+        delta.edited.append(
+            TaskEdit(
+                task_id=item["task_id"],
+                field="title",
+                old_value=item.get("task_name") or "",
+                new_value=gcal_state.new_title or "",
+            )
+        )
+        item["task_name"] = gcal_state.new_title
+
+    if gcal_state.duration_changed:
+        delta.edited.append(
+            TaskEdit(
+                task_id=item["task_id"],
+                field="duration",
+                old_value=int(item.get("duration_minutes") or 0),
+                new_value=int(gcal_state.new_duration_minutes or 0),
+            )
+        )
+        item["duration_minutes"] = int(gcal_state.new_duration_minutes or 0)
+
+    return "KEEP"

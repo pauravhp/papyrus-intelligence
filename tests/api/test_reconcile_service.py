@@ -160,3 +160,139 @@ def test_classify_todoist_deleted_when_in_neither_set():
     item = {"task_id": "12345", "task_name": "X"}
     state = classify_todoist(active_ids=set(), completed_ids=set(), item=item)
     assert state == TodoistState.DELETED
+
+
+from api.services.reconcile_service import _apply_rule
+
+
+def _delta() -> ReconcileDelta:
+    return ReconcileDelta()
+
+
+def test_apply_rule_present_pending_is_noop():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="present")
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.PENDING, delta)
+    assert action == "KEEP"
+    assert delta.has_writes() is False
+    assert "gcal_deleted" not in item
+
+
+def test_apply_rule_moved_pending_mutates_times_and_records():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(
+        kind="moved",
+        new_start="2026-04-29T16:00:00+00:00",
+        new_end="2026-04-29T17:00:00+00:00",
+    )
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.PENDING, delta)
+    assert action == "KEEP"
+    assert item["start_time"] == "2026-04-29T16:00:00+00:00"
+    assert item["end_time"] == "2026-04-29T17:00:00+00:00"
+    assert len(delta.moved) == 1
+    assert delta.moved[0].task_id == "t1"
+    assert delta.moved[0].old_start == "2026-04-29T09:00:00+00:00"
+    assert delta.moved[0].new_start == "2026-04-29T16:00:00+00:00"
+
+
+def test_apply_rule_moved_with_title_change_records_both():
+    item = _scheduled_item("t1", "Old", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(
+        kind="moved",
+        title_changed=True,
+        new_start="2026-04-29T16:00:00+00:00",
+        new_end="2026-04-29T17:00:00+00:00",
+        new_title="New",
+    )
+    delta = _delta()
+    _apply_rule(item, gcal_state, TodoistState.PENDING, delta)
+    assert item["task_name"] == "New"
+    assert len(delta.moved) == 1
+    assert len(delta.edited) == 1
+    assert delta.edited[0].field == "title"
+
+
+def test_apply_rule_edited_duration_pending_mutates_and_records():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="edited", duration_changed=True, new_duration_minutes=30)
+    delta = _delta()
+    _apply_rule(item, gcal_state, TodoistState.PENDING, delta)
+    assert item["duration_minutes"] == 30
+    assert len(delta.edited) == 1
+    assert delta.edited[0].field == "duration"
+    assert delta.edited[0].new_value == 30
+
+
+def test_apply_rule_missing_pending_marks_gcal_deleted():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="missing")
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.PENDING, delta)
+    assert action == "KEEP"
+    assert item["gcal_deleted"] is True
+    assert "t1" in delta.gcal_deleted
+
+
+def test_apply_rule_present_deleted_drops():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="present")
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.DELETED, delta)
+    assert action == "DROP"
+    assert len(delta.dropped) == 1
+    assert delta.dropped[0].task_id == "t1"
+    assert delta.dropped[0].reason == "todoist_deleted"
+    assert delta.dropped[0].gcal_state == "present"
+
+
+def test_apply_rule_missing_deleted_drops_with_missing_gcal_state():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="missing")
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.DELETED, delta)
+    assert action == "DROP"
+    assert delta.dropped[0].gcal_state == "missing"
+
+
+def test_apply_rule_missing_completed_marks_gcal_deleted_not_drop():
+    """Row 10: GCal deleted but Todoist still says completed — keep for Review."""
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="missing")
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.COMPLETED, delta)
+    assert action == "KEEP"
+    assert item["gcal_deleted"] is True
+
+
+def test_apply_rule_moved_completed_mutates_times_no_drop():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(
+        kind="moved",
+        new_start="2026-04-29T16:00:00+00:00",
+        new_end="2026-04-29T17:00:00+00:00",
+    )
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.COMPLETED, delta)
+    assert action == "KEEP"
+    assert item["start_time"] == "2026-04-29T16:00:00+00:00"
+
+
+def test_apply_rule_proj_missing_marks_gcal_deleted():
+    """proj_ tasks: no Todoist column applies, GCal-only rules."""
+    item = _scheduled_item("proj_42", "Finish project", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="missing")
+    delta = _delta()
+    action = _apply_rule(item, gcal_state, TodoistState.NA, delta)
+    assert action == "KEEP"
+    assert item["gcal_deleted"] is True
+
+
+def test_apply_rule_proj_moved_mutates():
+    item = _scheduled_item("proj_42", "Finish project", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    gcal_state = GcalState(kind="moved", new_start="2026-04-29T16:00:00+00:00", new_end="2026-04-29T17:00:00+00:00")
+    delta = _delta()
+    _apply_rule(item, gcal_state, TodoistState.NA, delta)
+    assert item["start_time"] == "2026-04-29T16:00:00+00:00"
+    assert len(delta.moved) == 1
