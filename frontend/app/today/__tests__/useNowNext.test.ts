@@ -8,9 +8,9 @@ describe("computeNowNext", () => {
     const result = computeNowNext({ scheduled: day.scheduled, gcal_events: day.gcal_events, now: FIXED_NOW });
     expect(result.kind).toBe("now");
     if (result.kind !== "now") return;
-    expect(result.current.task_name).toBe("API refactor");
+    expect("task_name" in result.current ? result.current.task_name : null).toBe("API refactor");
     expect(result.minutes_left).toBe(52);
-    expect(result.next?.task_name).toBe("PR review");
+    expect(result.next && "task_name" in result.next ? result.next.task_name : null).toBe("PR review");
   });
 
   it("returns kind:'free' when now is between blocks", () => {
