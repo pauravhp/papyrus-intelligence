@@ -57,6 +57,20 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${gildaDisplay.variable} ${literata.variable} h-full`}
     >
+      <head>
+        {/* Dark-mode favicon overrides — light variants are auto-served from app/ via Next 15 file conventions. */}
+        <link
+          rel="icon"
+          type="image/svg+xml"
+          href="/favicon-dark/icon.svg"
+          media="(prefers-color-scheme: dark)"
+        />
+        <link
+          rel="apple-touch-icon"
+          href="/favicon-dark/apple-icon.png"
+          media="(prefers-color-scheme: dark)"
+        />
+      </head>
       <body className="min-h-full flex flex-col">
         <PostHogProvider>
           <ThemeProvider>{children}</ThemeProvider>
