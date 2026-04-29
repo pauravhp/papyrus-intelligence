@@ -85,22 +85,53 @@ def review_preflight(
     user_id = user["sub"]
     target_date = _validate_review_date(date_param)
 
-    # 1. Get the confirmed schedule for the target date
+    # 1. Get the most recent unreviewed confirmed schedule with non-empty
+    # scheduled[] for the target date. We don't blindly take the highest-id
+    # row: replan or other flows can leave behind a confirmed=1 row whose
+    # proposed_json is null / "{}" / has scheduled=[]. The review queue (in
+    # api/routes/today.py:_compute_review_queue) uses the SAME filters as
+    # this query (confirmed=1, reviewed_at IS NULL), so if we match those
+    # filters we match the queue's view of the day.
     result = (
         supabase.from_("schedule_log")
-        .select("proposed_json")
+        .select("id, proposed_json")
         .eq("user_id", user_id)
         .eq("schedule_date", target_date)
         .eq("confirmed", 1)
+        .is_("reviewed_at", "null")
         .order("id", desc=True)
-        .limit(1)
         .execute()
     )
     rows = result.data or []
-    if not rows or not rows[0].get("proposed_json"):
+    schedule: dict | None = None
+    chosen_row_id: int | None = None
+    for row in rows:
+        raw = row.get("proposed_json")
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        if parsed.get("scheduled"):
+            schedule = parsed
+            chosen_row_id = row.get("id")
+            break
+
+    if schedule is None:
+        logger.warning(
+            "[review.preflight] no usable schedule_log row for user=%s date=%s "
+            "(rows_seen=%d, queue would have included this date)",
+            user_id, target_date, len(rows),
+        )
         raise HTTPException(status_code=404, detail=f"No confirmed schedule for {target_date}")
 
-    schedule = json.loads(rows[0]["proposed_json"])
+    logger.info(
+        "[review.preflight] using schedule_log id=%s for user=%s date=%s",
+        chosen_row_id, user_id, target_date,
+    )
     tasks = schedule.get("scheduled", [])
 
     # 2. Check Todoist for completed task IDs (swallow any failures)

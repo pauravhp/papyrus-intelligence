@@ -22,17 +22,21 @@ def client():
 
 
 def _mock_schedule_log(sb, tasks: list[dict], confirmed: bool = True):
-    """Mock a schedule_log row with the given scheduled tasks (3-eq chain)."""
+    """Mock a schedule_log row with the given scheduled tasks.
+
+    Chain mirrors the preflight query: from.select.eq.eq.eq.is_.order.execute
+    (preflight no longer uses .limit; it iterates rows looking for usable data).
+    """
     proposed = {"scheduled": tasks, "pushed": []}
-    row = {"proposed_json": json.dumps(proposed), "confirmed": 1 if confirmed else 0}
+    row = {"id": 1, "proposed_json": json.dumps(proposed), "confirmed": 1 if confirmed else 0}
     (
         sb.from_.return_value
         .select.return_value
         .eq.return_value
         .eq.return_value
         .eq.return_value
+        .is_.return_value
         .order.return_value
-        .limit.return_value
         .execute.return_value
     ).data = [row]
 
@@ -44,8 +48,8 @@ def _mock_no_schedule(sb):
         .eq.return_value
         .eq.return_value
         .eq.return_value
+        .is_.return_value
         .order.return_value
-        .limit.return_value
         .execute.return_value
     ).data = []
 
@@ -339,3 +343,63 @@ def test_preflight_rejects_future_date(client, monkeypatch):
     with patch("api.routes.review.supabase", MagicMock()):
         resp = client.get(f"/api/review/preflight?date={future}", headers={"Authorization": "Bearer fake-jwt"})
     assert resp.status_code == 400
+
+
+# ── Preflight defensive row selection ─────────────────────────────────────────
+
+
+def _mock_schedule_log_rows(sb, rows: list[dict]):
+    """Mock the preflight query to return a specific list of rows (DESC id)."""
+    (
+        sb.from_.return_value
+        .select.return_value
+        .eq.return_value
+        .eq.return_value
+        .eq.return_value
+        .is_.return_value
+        .order.return_value
+        .execute.return_value
+    ).data = rows
+
+
+def test_preflight_skips_junk_rows_and_uses_first_valid_one(client, monkeypatch):
+    """If the highest-id row has null/empty proposed_json, preflight falls back
+    to the next row that actually has scheduled tasks. Without this the user is
+    stranded — review_queue keeps offering the day but preflight 404s."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    valid_proposed = json.dumps({"scheduled": SAMPLE_TASKS, "pushed": []})
+    rows = [
+        {"id": 99, "proposed_json": None},               # null — skip
+        {"id": 50, "proposed_json": ""},                  # empty string — skip
+        {"id": 40, "proposed_json": "{}"},                # decodes to dict but no scheduled — skip
+        {"id": 30, "proposed_json": valid_proposed},     # valid — use this
+    ]
+    mock_sb = MagicMock()
+    _mock_schedule_log_rows(mock_sb, rows)
+    _mock_rhythms(mock_sb, [])
+    mock_todoist = MagicMock()
+    mock_todoist.get_task.return_value = MagicMock()
+
+    with patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review.TodoistClient", return_value=mock_todoist):
+        resp = client.get("/api/review/preflight", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["tasks"]) == len(SAMPLE_TASKS)
+
+
+def test_preflight_404_when_all_rows_have_unusable_proposed_json(client, monkeypatch):
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    rows = [
+        {"id": 99, "proposed_json": None},
+        {"id": 50, "proposed_json": "{}"},
+        {"id": 40, "proposed_json": json.dumps({"scheduled": []})},
+    ]
+    mock_sb = MagicMock()
+    _mock_schedule_log_rows(mock_sb, rows)
+
+    with patch("api.routes.review.supabase", mock_sb):
+        resp = client.get("/api/review/preflight", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 404
