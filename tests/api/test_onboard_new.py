@@ -89,7 +89,8 @@ def test_scan_raises_400_if_no_gcal_creds(client, monkeypatch):
 
 
 def test_scan_400_on_gcal_token_refresh_failure(client, monkeypatch):
-    """scan returns 400 if GCal token refresh fails (RuntimeError)."""
+    """scan returns 400 with code=gcal_reconnect_required when GCal refresh fails."""
+    from src.calendar_client import GcalReconnectRequired
     _mock_verify(monkeypatch)
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
@@ -98,7 +99,7 @@ def test_scan_400_on_gcal_token_refresh_failure(client, monkeypatch):
 
     with patch("api.routes.onboard.supabase", mock_sb), \
          patch("api.routes.onboard.build_gcal_service_from_credentials",
-               side_effect=RuntimeError("Token expired")):
+               side_effect=GcalReconnectRequired("invalid_scope: Bad Request")):
         resp = client.post(
             "/api/onboard/scan",
             json={"timezone": "America/Vancouver", "calendar_ids": []},
@@ -106,7 +107,9 @@ def test_scan_400_on_gcal_token_refresh_failure(client, monkeypatch):
         )
 
     assert resp.status_code == 400
-    assert "GCal token invalid" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert detail["code"] == "gcal_reconnect_required"
+    assert "invalid_scope" in detail["message"]
 
 
 def test_scan_502_on_llm_json_error(client, monkeypatch):

@@ -26,7 +26,7 @@ from api.services.todoist_token import (
     get_valid_todoist_token,
     surface_todoist_auth_failure,
 )
-from src.calendar_client import build_gcal_service_from_credentials
+from src.calendar_client import GcalReconnectRequired, build_gcal_service_from_credentials
 
 router = APIRouter(prefix="/api")
 
@@ -117,6 +117,11 @@ def _load_user_ctx(user_id: str) -> dict:
             gcal_service = svc
             if refreshed:
                 supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
+        except GcalReconnectRequired as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "gcal_reconnect_required", "message": str(exc)},
+            )
         except Exception as exc:
             print(f"[plan] GCal service init failed: {exc}")
 

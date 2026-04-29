@@ -19,7 +19,7 @@ from api.services.analytics import capture
 from api.services.sync_detector import detect_todoist_gcal_sync
 from api.config import settings
 from api.db import supabase
-from src.calendar_client import WRITE_SCOPES, build_gcal_service_from_credentials, get_events
+from src.calendar_client import GcalReconnectRequired, WRITE_SCOPES, build_gcal_service_from_credentials, get_events
 from src.gcal_colors import GCAL_COLOR_IDS, GCAL_COLOR_NAMES
 from src.llm import _anthropic_json_call, _extract_json
 from src.onboard_patterns import build_pattern_summary
@@ -148,8 +148,11 @@ def onboard_scan(
         )
         if refreshed:
             supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=f"GCal token invalid: {exc}")
+    except GcalReconnectRequired as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "gcal_reconnect_required", "message": str(exc)},
+        )
 
     # Load template
     try:
@@ -261,8 +264,11 @@ def detect_todoist_sync(user: dict = Depends(get_current_user)) -> DetectTodoist
         )
         if refreshed:
             supabase.from_("users").update({"google_credentials": refreshed}).eq("id", user_id).execute()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=f"GCal token invalid: {exc}")
+    except GcalReconnectRequired as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "gcal_reconnect_required", "message": str(exc)},
+        )
 
     result = detect_todoist_gcal_sync(gcal_service)
     return DetectTodoistSyncResponse(**result)

@@ -362,7 +362,7 @@ def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
     _mock_schedule_log(mock_sb, rows)
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u1"})
     monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
-    monkeypatch.setattr("api.routes.today.get_user_calendars", lambda *a, **kw: (None, [], "UTC", False))
+    monkeypatch.setattr("api.routes.today.get_user_calendars", lambda *a, **kw: (None, [], "UTC", False, False))
 
     with patch("api.routes.today.supabase", mock_sb):
         response = client.get("/api/today", headers={"Authorization": "Bearer fake"})
@@ -372,3 +372,47 @@ def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
     by_id = {item["task_id"]: item for item in today["scheduled"]}
     assert by_id["8675309"]["kind"] == "task"
     assert by_id["proj_e1234567-89ab-cdef-0123-456789abcdef"]["kind"] == "rhythm"
+
+
+# ── GCal reconnect-required signaling ─────────────────────────────────────────
+
+
+def test_today_surfaces_gcal_reconnect_required_flag(client, monkeypatch):
+    """When build_gcal_service raises GcalReconnectRequired, /api/today should
+    still return 200 (so the user can read their existing schedule) but include
+    gcal_reconnect_required: true so the frontend can render the banner."""
+    from src.calendar_client import GcalReconnectRequired
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u-rec"})
+
+    # Patch get_user_calendars to simulate the reconnect-required state.
+    monkeypatch.setattr(
+        "api.routes.today.get_user_calendars",
+        lambda *a, **kw: (None, [], "UTC", False, True),
+    )
+    monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
+    mock_sb = _build_today_mock_with_unreviewed_dates([])
+    _mock_schedule_log(mock_sb, [])
+
+    with patch("api.routes.today.supabase", mock_sb):
+        response = client.get("/api/today", headers={"Authorization": "Bearer fake"})
+
+    assert response.status_code == 200
+    assert response.json().get("gcal_reconnect_required") is True
+
+
+def test_today_gcal_reconnect_required_false_in_happy_path(client, monkeypatch):
+    """Happy path: gcal_reconnect_required must be False (not missing/null)."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u-ok"})
+    monkeypatch.setattr(
+        "api.routes.today.get_user_calendars",
+        lambda *a, **kw: (None, ["primary"], "UTC", False, False),
+    )
+    monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
+    mock_sb = _build_today_mock_with_unreviewed_dates([])
+    _mock_schedule_log(mock_sb, [])
+
+    with patch("api.routes.today.supabase", mock_sb):
+        response = client.get("/api/today", headers={"Authorization": "Bearer fake"})
+
+    assert response.status_code == 200
+    assert response.json().get("gcal_reconnect_required") is False

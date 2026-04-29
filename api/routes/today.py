@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
-from src.calendar_client import build_gcal_service_from_credentials, get_events
+from src.calendar_client import GcalReconnectRequired, build_gcal_service_from_credentials, get_events
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,7 @@ def get_user_calendars(user_id: str) -> tuple:
     cal_ids = ["primary"]
     tz_str = "UTC"
     todoist_connected = False
+    gcal_reconnect_required = False
     try:
         user_row = (
             supabase.from_("users")
@@ -192,11 +193,14 @@ def get_user_calendars(user_id: str) -> tuple:
                         supabase.from_("users").update(
                             {"google_credentials": refreshed}
                         ).eq("id", user_id).execute()
+                except GcalReconnectRequired as e:
+                    logger.warning("[today] gcal reconnect required for user %s: %s", user_id, e)
+                    gcal_reconnect_required = True
                 except Exception as e:
                     logger.warning("Failed to build GCal service for user %s: %s", user_id, e)
     except Exception:
         pass
-    return gcal_service, cal_ids, tz_str, todoist_connected
+    return gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required
 
 
 def _fetch_day_gcal_events(
@@ -271,7 +275,7 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
             by_date[d] = row
 
     # Fetch user config + google credentials via patchable helper
-    gcal_service, cal_ids, tz_str, todoist_connected = get_user_calendars(user_id)
+    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required = get_user_calendars(user_id)
 
     # Derive config for nudge/cutoff; re-read only the config portion
     config: dict = {}
@@ -329,4 +333,5 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         "review_available": has_confirmed_schedule and cutoff,
         "setup_nudge": setup_nudge,
         "review_queue": review_queue,
+        "gcal_reconnect_required": gcal_reconnect_required,
     }
