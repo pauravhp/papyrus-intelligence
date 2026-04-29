@@ -158,14 +158,42 @@ def review_preflight(
     except Exception:
         logger.warning("Todoist preflight failed, defaulting all tasks to incomplete")
 
-    # 3. Get active rhythms
+    # 3. Active rhythms applicable to target_date — and not already in scheduled[]
+    # as a proj_<rhythm_id> synthetic task. Two filters:
+    #
+    # (a) days_of_week — a rhythm with non-empty days_of_week only applies on
+    #     those weekdays; NULL/empty means "every day" (legacy backward-compat,
+    #     same convention as planner._rhythm_applies_today).
+    # (b) Not already in tasks[] — when a rhythm is scheduled into the day, it
+    #     becomes a synthetic task with task_id = "proj_<rhythm_id>". Showing
+    #     the same rhythm in both the Tasks section and the Rhythms section
+    #     means the user reviews it twice.
     rhythms_result = (
         supabase.from_("rhythms")
-        .select("id, rhythm_name")
+        .select("id, rhythm_name, days_of_week")
         .eq("user_id", user_id)
         .execute()
     )
-    rhythms = rhythms_result.data or []
+    all_rhythms = rhythms_result.data or []
+
+    target_dt = date.fromisoformat(target_date)
+    weekday_names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+    target_weekday = weekday_names[target_dt.weekday()]
+
+    scheduled_proj_ids = {
+        t["task_id"][len("proj_"):]
+        for t in tasks
+        if isinstance(t.get("task_id"), str) and t["task_id"].startswith("proj_")
+    }
+
+    rhythms: list[dict] = []
+    for r in all_rhythms:
+        days = r.get("days_of_week")
+        if days and target_weekday not in days:
+            continue
+        if str(r["id"]) in scheduled_proj_ids:
+            continue
+        rhythms.append({"id": r["id"], "rhythm_name": r["rhythm_name"]})
 
     return {
         "tasks": [
@@ -199,7 +227,8 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
             "scheduled_at": t.scheduled_at,
             "completed_at": datetime.now(timezone.utc).isoformat() if t.completed else None,
             "incomplete_reason": t.incomplete_reason,
-            "was_agent_scheduled": True,
+            # Stored as bigint (legacy SQLite-mirror schema). 1 = agent-scheduled.
+            "was_agent_scheduled": 1,
             "sync_source": "review_ui",
         }
         for t in body.tasks
