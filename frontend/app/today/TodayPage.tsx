@@ -354,7 +354,7 @@ export default function TodayPage() {
         <motion.div
           layout
           className="today-desktop"
-          style={{ display: "flex", gap: 24 }}
+          style={{ gap: 24 }}
         >
           <AnimatePresence initial={false}>
             {!planningOpen && focusedDay === "today" && (
