@@ -11,6 +11,8 @@ import ReviewRhythmRow, { ReviewRhythm, ReviewRhythmState } from "./ReviewRhythm
 import ReviewSummary from "./ReviewSummary";
 import MultiDayReviewSummary from "./MultiDayReviewSummary";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+
 type Phase = "review" | "submitting" | "aggregate-loading" | "aggregate";
 
 interface ReviewModalProps {
@@ -56,7 +58,7 @@ export default function ReviewModal({ token, dates, onClose }: ReviewModalProps)
       setLoading(true);
       setError(null);
       try {
-        const url = `/api/review/preflight?date=${encodeURIComponent(activeDate)}`;
+        const url = `${API_BASE}/api/review/preflight?date=${encodeURIComponent(activeDate)}`;
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) {
           if (!cancelled) {
@@ -123,7 +125,7 @@ export default function ReviewModal({ token, dates, onClose }: ReviewModalProps)
           .filter(r => rhythmStates[r.id].completed !== null)
           .map(r => ({ rhythm_id: r.id, completed: rhythmStates[r.id].completed as boolean })),
       };
-      const res = await fetch("/api/review/submit", {
+      const res = await fetch(`${API_BASE}/api/review/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
@@ -140,7 +142,7 @@ export default function ReviewModal({ token, dates, onClose }: ReviewModalProps)
   async function fetchAggregate(): Promise<void> {
     setPhase("aggregate-loading");
     try {
-      const res = await fetch("/api/review/aggregate", {
+      const res = await fetch(`${API_BASE}/api/review/aggregate`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ schedule_dates: dates }),
