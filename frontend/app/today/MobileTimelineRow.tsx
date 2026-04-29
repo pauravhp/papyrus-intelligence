@@ -9,6 +9,7 @@ interface CommonProps {
 interface TaskRowProps extends CommonProps {
   kind: "task" | "rhythm";
   item: ScheduledItem;
+  isDone?: boolean;
 }
 
 interface GcalRowProps extends CommonProps {
@@ -69,6 +70,7 @@ export default function MobileTimelineRow(props: MobileTimelineRowProps) {
   }
 
   const item = props.item;
+  const isDone = props.isDone ?? false;
   const stripeColor =
     props.kind === "rhythm"
       ? RHYTHM_STRIPE
@@ -104,8 +106,8 @@ export default function MobileTimelineRow(props: MobileTimelineRowProps) {
         data-kind={props.kind}
         style={{ width: 4, borderRadius: 2, background: stripeColor, flexShrink: 0 }}
       />
-      <span style={{ flex: 1, padding: "8px 0", color: "var(--text)", fontSize: 13, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word" }}>
-        {item.task_name}
+      <span style={{ flex: 1, padding: "8px 0", color: "var(--text)", fontSize: 13, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word", ...(isDone && { textDecoration: "line-through", opacity: 0.6 }) }}>
+        {isDone && "✓ "}{item.task_name}
       </span>
       {props.kind === "rhythm" && <span style={badgeStyle("rhythm")}>RHYTHM</span>}
       <span style={durationStyle}>{fmtDuration(item.duration_minutes)}</span>
