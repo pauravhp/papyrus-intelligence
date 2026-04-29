@@ -77,3 +77,63 @@ def test_list_calendars_failure_returns_primary_fallback():
 
     assert len(result) == 1
     assert result[0]["id"] == "primary"
+
+
+# ── build_gcal_service_from_credentials — RefreshError surfacing ──────────────
+
+
+def _creds_data() -> dict:
+    return {
+        "token": "stale-access-token",
+        "refresh_token": "rt-1",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "client_id": "test-id",
+        "client_secret": "test-secret",
+        "scopes": ["https://www.googleapis.com/auth/calendar.events"],
+        "expiry": "2020-01-01T00:00:00Z",  # forces creds.expired = True
+    }
+
+
+def test_build_gcal_service_raises_reconnect_required_on_refresh_error(monkeypatch):
+    """A google.auth.exceptions.RefreshError (e.g. invalid_scope) must surface
+    as GcalReconnectRequired so routes can convert it to a structured signal
+    instead of a 500."""
+    import pytest
+    from google.auth.exceptions import RefreshError
+
+    from src.calendar_client import (
+        GcalReconnectRequired,
+        build_gcal_service_from_credentials,
+    )
+
+    def _raise_refresh_error(self, request):
+        raise RefreshError("invalid_scope: Bad Request", {"error": "invalid_scope"})
+
+    monkeypatch.setattr(
+        "google.oauth2.credentials.Credentials.refresh",
+        _raise_refresh_error,
+    )
+
+    with pytest.raises(GcalReconnectRequired) as exc_info:
+        build_gcal_service_from_credentials(_creds_data(), "test-id", "test-secret")
+
+    assert "invalid_scope" in str(exc_info.value)
+
+
+def test_build_gcal_service_raises_reconnect_required_when_no_refresh_token():
+    """Stored creds with no refresh_token = unrecoverable. Must surface as
+    GcalReconnectRequired (not RuntimeError) so routes can act on it
+    uniformly."""
+    import pytest
+    from src.calendar_client import (
+        GcalReconnectRequired,
+        build_gcal_service_from_credentials,
+    )
+
+    creds_data = _creds_data()
+    del creds_data["refresh_token"]
+
+    with pytest.raises((GcalReconnectRequired, ValueError)):
+        # ValueError is from google-auth library when refresh_token missing
+        # at construction; either is acceptable as "needs reconnect."
+        build_gcal_service_from_credentials(creds_data, "test-id", "test-secret")

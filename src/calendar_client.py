@@ -2,11 +2,20 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from src.models import CalendarEvent
+
+
+class GcalReconnectRequired(Exception):
+    """Raised when stored Google credentials cannot be refreshed and the user
+    must re-OAuth. Covers scope upgrades (invalid_scope), revoked grants
+    (invalid_grant), and any other RefreshError. Routes catch this and either
+    surface a `gcal_reconnect_required` flag on the response or return
+    HTTP 400 with `{"code": "gcal_reconnect_required", ...}`."""
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 WRITE_SCOPES = [
@@ -192,11 +201,16 @@ def build_gcal_service_from_credentials(
     refreshed: dict | None = None
     if not creds.valid:
         if creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError as exc:
+                raise GcalReconnectRequired(str(exc)) from exc
             import json as _json
             refreshed = _json.loads(creds.to_json())
         else:
-            raise RuntimeError("GCal token is invalid and cannot be refreshed.")
+            raise GcalReconnectRequired(
+                "GCal credentials invalid and cannot be refreshed."
+            )
 
     service = build("calendar", "v3", credentials=creds)
     return service, refreshed
