@@ -1,5 +1,16 @@
 """Unit tests for api.services.reconcile_service."""
 
+import os
+
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SECRET_KEY", "test-secret")
+os.environ.setdefault("ENCRYPTION_KEY", "test-enc-key-32-chars-padding!!")
+os.environ.setdefault("GOOGLE_CLIENT_ID", "test-client-id")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
+os.environ.setdefault("TODOIST_CLIENT_ID", "test-todoist-id")
+os.environ.setdefault("TODOIST_CLIENT_SECRET", "test-todoist-secret")
+os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test")
+
 from api.services.reconcile_service import (
     ReconcileDelta,
     TaskMove,
@@ -415,3 +426,46 @@ def test_reconcile_today_no_writes_when_no_changes():
     delta = reconcile_today(user_ctx, _date(2026, 4, 29))
     assert delta.has_writes() is False
     sb.from_.return_value.update.assert_not_called()
+
+
+from unittest.mock import patch as _patch
+
+
+def test_reconcile_today_emits_posthog_event():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    sb = _mock_supabase_with_row(_row([item], ["evt1"]))
+    user_ctx = {
+        "supabase": sb,
+        "user_id": "u1",
+        "route": "today",
+        "gcal_events": [_gcal_event("evt1", "X", "2026-04-29T16:00:00+00:00", "2026-04-29T17:00:00+00:00")],
+        "todoist_active_ids": {"t1"},
+        "todoist_completed_ids": set(),
+    }
+    with _patch("api.services.reconcile_service.capture") as cap:
+        reconcile_today(user_ctx, _date(2026, 4, 29))
+    cap.assert_called_once()
+    args, kwargs = cap.call_args
+    assert args[0] == "u1"
+    assert args[1] == "reconcile_run"
+    payload = args[2]
+    assert payload["route"] == "today"
+    assert payload["moved_count"] == 1
+    assert payload["dropped_count"] == 0
+    assert payload["skipped_reviewed"] is False
+    assert "duration_ms" in payload
+
+
+def test_reconcile_today_emits_telemetry_with_skipped_reviewed():
+    item = _scheduled_item("t1", "X", "2026-04-29T09:00:00+00:00", "2026-04-29T10:00:00+00:00", 60)
+    sb = _mock_supabase_with_row(_row([item], ["evt1"], reviewed=True))
+    user_ctx = {
+        "supabase": sb, "user_id": "u1", "route": "review",
+        "gcal_events": [], "todoist_active_ids": set(), "todoist_completed_ids": set(),
+    }
+    with _patch("api.services.reconcile_service.capture") as cap:
+        reconcile_today(user_ctx, _date(2026, 4, 29))
+    cap.assert_called_once()
+    payload = cap.call_args[0][2]
+    assert payload["skipped_reviewed"] is True
+    assert payload["route"] == "review"

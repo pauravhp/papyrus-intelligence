@@ -210,7 +210,9 @@ def _apply_rule(
 
 import json
 import logging
+import time
 from datetime import date
+from api.services.analytics import capture
 
 logger = logging.getLogger(__name__)
 
@@ -218,24 +220,32 @@ logger = logging.getLogger(__name__)
 def reconcile_today(user_ctx: dict, target_date: date) -> ReconcileDelta:
     """
     Lazy reconcile of the latest confirmed schedule_log row for target_date.
-    Mutates proposed_json in place if external state diverges. Returns a
-    structured delta (also useful as PostHog payload).
-
-    Required user_ctx keys:
-      - supabase: Supabase client
-      - user_id: str
-      - gcal_events: list[dict] with id/summary/start_time/end_time
-      - todoist_active_ids: set[str]
-      - todoist_completed_ids: set[str]
-
-    No-op cases:
-      - No confirmed row for target_date.
-      - reviewed_at is set on the row (skipped_reviewed=True).
-      - No diffs detected.
+    See module docstring + spec for full semantics.
     """
+    started = time.perf_counter()
     supabase = user_ctx["supabase"]
     user_id = user_ctx["user_id"]
+    route = user_ctx.get("route", "unknown")
     delta = ReconcileDelta()
+
+    def _emit():
+        try:
+            capture(
+                user_id,
+                "reconcile_run",
+                {
+                    "route": route,
+                    "target_date": target_date.isoformat(),
+                    "moved_count": len(delta.moved),
+                    "edited_count": len(delta.edited),
+                    "gcal_deleted_count": len(delta.gcal_deleted),
+                    "dropped_count": len(delta.dropped),
+                    "skipped_reviewed": delta.skipped_reviewed,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+        except Exception:
+            logger.warning("[reconcile] telemetry capture failed", exc_info=True)
 
     row_resp = (
         supabase.from_("schedule_log")
@@ -249,11 +259,13 @@ def reconcile_today(user_ctx: dict, target_date: date) -> ReconcileDelta:
     )
     rows = row_resp.data or []
     if not rows:
+        _emit()
         return delta
     row = rows[0]
 
     if row.get("reviewed_at"):
         delta.skipped_reviewed = True
+        _emit()
         return delta
 
     try:
@@ -262,6 +274,7 @@ def reconcile_today(user_ctx: dict, target_date: date) -> ReconcileDelta:
         gcal_event_ids = list(json.loads(row.get("gcal_event_ids") or "[]"))
     except (json.JSONDecodeError, TypeError) as exc:
         logger.warning("[reconcile] malformed JSON for user=%s date=%s: %s", user_id, target_date, exc)
+        _emit()
         return delta
 
     gcal_by_id = {e["id"]: e for e in user_ctx.get("gcal_events") or [] if e.get("id")}
@@ -280,19 +293,18 @@ def reconcile_today(user_ctx: dict, target_date: date) -> ReconcileDelta:
             new_scheduled.append(item)
             new_event_ids.append(event_id)
 
-    if not delta.has_writes():
-        return delta
+    if delta.has_writes():
+        proposed["scheduled"] = new_scheduled
+        try:
+            supabase.from_("schedule_log").update({
+                "proposed_json": json.dumps(proposed),
+                "gcal_event_ids": json.dumps(new_event_ids),
+            }).eq("id", row["id"]).execute()
+        except Exception as exc:
+            logger.warning(
+                "[reconcile] persist failed for user=%s date=%s delta=%s: %s",
+                user_id, target_date, delta, exc,
+            )
 
-    proposed["scheduled"] = new_scheduled
-    try:
-        supabase.from_("schedule_log").update({
-            "proposed_json": json.dumps(proposed),
-            "gcal_event_ids": json.dumps(new_event_ids),
-        }).eq("id", row["id"]).execute()
-    except Exception as exc:
-        logger.warning(
-            "[reconcile] persist failed for user=%s date=%s delta=%s: %s",
-            user_id, target_date, delta, exc,
-        )
-
+    _emit()
     return delta
