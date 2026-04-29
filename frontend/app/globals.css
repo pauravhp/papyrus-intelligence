@@ -144,6 +144,8 @@ body {
 @media (max-width: 767px) {
   .today-desktop { display: none; }
   .today-mobile  { display: block; }
+  .today-header-actions { display: none; }
+  .today-mobile { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
 }
 
 /* Inner padding for the auth'd app shell main content. Clamps on mobile. */

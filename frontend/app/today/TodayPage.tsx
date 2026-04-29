@@ -14,6 +14,10 @@ import SplitPlanButton from "./SplitPlanButton";
 import PlanningPanel from "./PlanningPanel";
 import ReplanButton from "./ReplanButton";
 import ReplanModal from "./ReplanModal";
+import MobileDayList from "./MobileDayList";
+import MobileDayTabs from "./MobileDayTabs";
+import MobileActionBar from "./MobileActionBar";
+import MobilePlanningSheet from "./MobilePlanningSheet";
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(
@@ -25,6 +29,11 @@ function useWindowWidth(): number {
     return () => window.removeEventListener("resize", handler);
   }, []);
   return width;
+}
+
+function useIsMobile(breakpoint = 880): boolean {
+  const w = useWindowWidth();
+  return w < breakpoint;
 }
 
 export interface ScheduledItem {
@@ -104,6 +113,7 @@ export default function TodayPage() {
   const [autoShiftToTomorrowSuggested, setAutoShiftToTomorrowSuggested] = useState(false);
 
   const windowWidth = useWindowWidth();
+  const isMobile = useIsMobile();
 
   // When the user opens Plan with a target day, focus the schedule view on
   // that day. Without this, planningTarget="tomorrow" leaves today's column
@@ -410,44 +420,14 @@ export default function TodayPage() {
           </AnimatePresence>
         </motion.div>
 
-        {/* Mobile: tabs */}
+        {/* Mobile: tabs + list */}
         <div className="today-mobile">
-          <div
-            role="tablist"
-            style={{ display: "flex", borderBottom: "1px solid var(--border)", marginBottom: 24 }}
-          >
-            {days.map((d) => (
-              <button
-                key={d.key}
-                id={`tab-${d.key}`}
-                role="tab"
-                aria-selected={activeTab === d.key}
-                aria-controls="today-tabpanel"
-                onClick={() => setActiveTab(d.key)}
-                className="today-mobile-tab"
-                style={{
-                  flex: 1,
-                  background: "none",
-                  border: "none",
-                  borderBottom: activeTab === d.key ? "2px solid var(--accent)" : "2px solid transparent",
-                  color: activeTab === d.key ? "var(--accent)" : "var(--text-muted)",
-                  fontSize: 14,
-                  fontFamily: "var(--font-literata)",
-                  cursor: "pointer",
-                  marginBottom: -1,
-                }}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
-          <div
-            id="today-tabpanel"
-            role="tabpanel"
-            aria-labelledby={`tab-${activeTab}`}
-          >
-            <DayColumn
-              label={days.find(d => d.key === activeTab)!.label}
+          <MobileDayTabs
+            active={activeTab}
+            onChange={(t) => setActiveTab(t)}
+          />
+          <div id="today-tabpanel" role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
+            <MobileDayList
               dayData={
                 activeTab === "today"
                   ? todayColumnData
@@ -456,11 +436,12 @@ export default function TodayPage() {
                   : data?.yesterday ?? null
               }
               isToday={activeTab === "today"}
+              now={new Date()}
               planningStatus={
                 (activeTab === "today" && planningTarget === "today") ||
                 (activeTab === "tomorrow" && planningTarget === "tomorrow")
                   ? planningStatus
-                  : undefined
+                  : "idle"
               }
             />
           </div>
@@ -492,28 +473,56 @@ export default function TodayPage() {
         )}
       </div>
 
-      {/* Planning panel — slides in when open */}
+      {/* Planning panel — slides in (desktop) or bottom sheet (mobile) when open */}
       <AnimatePresence>
         {planningOpen && (
-          <motion.div
-            key="planning-panel"
-            initial={{ x: 340, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 340, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 280, damping: 28 }}
-            style={{ flexShrink: 0 }}
-          >
-            <PlanningPanel
-              token={token}
-              contextNote={planningContext}
-              targetDate={planningTarget}
-              onScheduleProposed={handleScheduleProposed}
-              onConfirm={handlePanelConfirm}
-              onClose={handlePanelClose}
-            />
-          </motion.div>
+          isMobile ? (
+            <MobilePlanningSheet key="mobile-planning-sheet" onClose={handlePanelClose}>
+              <PlanningPanel
+                token={token}
+                contextNote={planningContext}
+                targetDate={planningTarget}
+                onScheduleProposed={handleScheduleProposed}
+                onConfirm={handlePanelConfirm}
+                onClose={handlePanelClose}
+              />
+            </MobilePlanningSheet>
+          ) : (
+            <motion.div
+              key="planning-panel"
+              initial={{ x: 340, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 340, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 28 }}
+              style={{ flexShrink: 0 }}
+            >
+              <PlanningPanel
+                token={token}
+                contextNote={planningContext}
+                targetDate={planningTarget}
+                onScheduleProposed={handleScheduleProposed}
+                onConfirm={handlePanelConfirm}
+                onClose={handlePanelClose}
+              />
+            </motion.div>
+          )
         )}
       </AnimatePresence>
+
+      {/* Mobile bottom action bar */}
+      {isMobile && (
+        <MobileActionBar
+          isConfirmed={isConfirmed}
+          nowHour={nowDate.getHours()}
+          autoShiftToTomorrow={autoShiftToTomorrowSuggested}
+          reviewAvailable={!!data?.review_available}
+          planningOpen={planningOpen}
+          onPlan={() => handlePlan(undefined, "today")}
+          onReplan={() => setReplanOpen(true)}
+          onPlanTomorrow={handlePlanTomorrowFromCta}
+          onReview={() => setReviewOpen(true)}
+        />
+      )}
     </div>
   );
 }
