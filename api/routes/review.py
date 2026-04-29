@@ -158,42 +158,29 @@ def review_preflight(
     except Exception:
         logger.warning("Todoist preflight failed, defaulting all tasks to incomplete")
 
-    # 3. Active rhythms applicable to target_date — and not already in scheduled[]
-    # as a proj_<rhythm_id> synthetic task. Two filters:
-    #
-    # (a) days_of_week — a rhythm with non-empty days_of_week only applies on
-    #     those weekdays; NULL/empty means "every day" (legacy backward-compat,
-    #     same convention as planner._rhythm_applies_today).
-    # (b) Not already in tasks[] — when a rhythm is scheduled into the day, it
-    #     becomes a synthetic task with task_id = "proj_<rhythm_id>". Showing
-    #     the same rhythm in both the Tasks section and the Rhythms section
-    #     means the user reviews it twice.
-    rhythms_result = (
-        supabase.from_("rhythms")
-        .select("id, rhythm_name, days_of_week")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    all_rhythms = rhythms_result.data or []
-
-    target_dt = date.fromisoformat(target_date)
-    weekday_names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-    target_weekday = weekday_names[target_dt.weekday()]
-
-    scheduled_proj_ids = {
-        t["task_id"][len("proj_"):]
-        for t in tasks
-        if isinstance(t.get("task_id"), str) and t["task_id"].startswith("proj_")
-    }
-
-    rhythms: list[dict] = []
-    for r in all_rhythms:
-        days = r.get("days_of_week")
-        if days and target_weekday not in days:
-            continue
-        if str(r["id"]) in scheduled_proj_ids:
-            continue
-        rhythms.append({"id": r["id"], "rhythm_name": r["rhythm_name"]})
+    # 3. Split scheduled[] by task_id prefix:
+    #   - "proj_<rhythm_id>" → synthetic rhythm task; review via Rhythms section
+    #     so the submit writes rhythm_completions (not task_history).
+    #   - Anything else → real Todoist task; review via Tasks section.
+    # No days_of_week filter — if the user (or an LLM refinement) put a rhythm
+    # onto an off-day, it's still in scheduled[] and still reviewable here.
+    real_tasks: list[dict] = []
+    scheduled_rhythms: list[dict] = []
+    for t in tasks:
+        task_id = t.get("task_id") or ""
+        if task_id.startswith("proj_"):
+            try:
+                rhythm_id = int(task_id[len("proj_"):])
+            except ValueError:
+                # malformed proj_ id — drop it rather than crash the modal
+                logger.warning("[review.preflight] non-integer rhythm id in task_id=%s", task_id)
+                continue
+            scheduled_rhythms.append({
+                "id": rhythm_id,
+                "rhythm_name": t.get("task_name") or "(unnamed rhythm)",
+            })
+        else:
+            real_tasks.append(t)
 
     return {
         "tasks": [
@@ -204,9 +191,9 @@ def review_preflight(
                 "scheduled_at": t["start_time"],
                 "already_completed_in_todoist": t["task_id"] in completed_ids,
             }
-            for t in tasks
+            for t in real_tasks
         ],
-        "rhythms": rhythms,
+        "rhythms": scheduled_rhythms,
     }
 
 

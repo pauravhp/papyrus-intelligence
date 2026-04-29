@@ -84,6 +84,10 @@ SAMPLE_RHYTHMS = [{"id": 1, "rhythm_name": "Morning run"}]
 
 
 def test_preflight_returns_tasks_with_todoist_completion_status(client, monkeypatch):
+    """Tasks-section items are real Todoist tasks; the Rhythms section comes
+    from scheduled[] entries with task_id starting "proj_". SAMPLE_TASKS has
+    none of those, so rhythms is empty here. See the dedicated test below
+    for the proj_<rhythm_id> split."""
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
     mock_sb = MagicMock()
     _mock_schedule_log(mock_sb, SAMPLE_TASKS)
@@ -105,8 +109,50 @@ def test_preflight_returns_tasks_with_todoist_completion_status(client, monkeypa
     assert t1["already_completed_in_todoist"] is True
     assert t2["already_completed_in_todoist"] is False
     assert t1["estimated_duration_mins"] == 90
+    assert data["rhythms"] == []  # no proj_ tasks in SAMPLE_TASKS
+
+
+def test_preflight_splits_proj_synthetic_tasks_into_rhythms_section(client, monkeypatch):
+    """A scheduled item with task_id="proj_<rhythm_id>" is a synthetic rhythm
+    task. It belongs in the Rhythms section so the submit writes
+    rhythm_completions (not task_history). The Tasks section contains only
+    real Todoist tasks. Each item is reviewed exactly once."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    tasks_with_synthetic = [
+        {
+            "task_id": "real_t1",
+            "task_name": "Real Todoist task",
+            "duration_minutes": 30,
+            "start_time": "2026-04-15T09:00:00+05:30",
+            "end_time": "2026-04-15T09:30:00+05:30",
+        },
+        {
+            "task_id": "proj_42",
+            "task_name": "Morning run",
+            "duration_minutes": 30,
+            "start_time": "2026-04-15T07:00:00+05:30",
+            "end_time": "2026-04-15T07:30:00+05:30",
+        },
+    ]
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, tasks_with_synthetic)
+    _mock_rhythms(mock_sb, [])  # active-rhythms list is now ignored by preflight
+
+    mock_todoist = MagicMock()
+    mock_todoist.get_task.return_value = MagicMock()
+
+    with patch("api.routes.review.supabase", mock_sb), \
+         patch("api.routes.review.TodoistClient", return_value=mock_todoist):
+        resp = client.get("/api/review/preflight", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # Real task only in Tasks section
+    assert len(data["tasks"]) == 1
+    assert data["tasks"][0]["task_id"] == "real_t1"
+    # Synthetic rhythm only in Rhythms section, with rhythm_id parsed from task_id
     assert len(data["rhythms"]) == 1
-    assert data["rhythms"][0]["rhythm_name"] == "Morning run"
+    assert data["rhythms"][0] == {"id": 42, "rhythm_name": "Morning run"}
 
 
 def test_preflight_404_when_no_confirmed_schedule(client, monkeypatch):
