@@ -5,6 +5,7 @@ POST /api/replan/preflight — check which tasks Todoist marks as completed
 """
 
 import json
+import logging
 import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -17,6 +18,7 @@ from api.config import settings
 from api.db import supabase
 from api.services.analytics import capture
 from api.services.planner import _is_within_idempotency_window
+from api.services.reconcile_service import reconcile_today
 from api.services.todoist_token import (
     TodoistTokenError,
     get_valid_todoist_token,
@@ -24,6 +26,8 @@ from api.services.todoist_token import (
 )
 from src.calendar_client import build_gcal_service_from_credentials, create_event, delete_event, get_events
 from src.todoist_client import TodoistClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -149,6 +153,55 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
     tz = ZoneInfo(tz_str)
+
+    # ── Reconcile today (#6 sync-back) before reading today's schedule ──────
+    today_obj = date.today()
+    todoist_active_ids: set[str] = set()
+    todoist_completed_ids: set[str] = set()
+    if user_ctx.get("todoist_api_key"):
+        try:
+            tc = TodoistClient(user_ctx["todoist_api_key"])
+            todoist_active_ids = {str(t.id) for t in tc.get_tasks(filter_str="today")}
+            todoist_completed_ids = tc.get_completed_task_ids_for_date(today_obj)
+        except Exception:
+            logger.warning("[replan] Todoist fetch for reconcile failed", exc_info=True)
+
+    today_gcal_dicts: list[dict] = []
+    if user_ctx.get("gcal_service"):
+        try:
+            cal_ids = (
+                user_ctx["config"].get("source_calendar_ids")
+                or user_ctx["config"].get("calendar_ids")
+                or ["primary"]
+            )
+            today_events = get_events(
+                target_date=today_obj,
+                timezone_str=tz_str,
+                calendar_ids=cal_ids,
+                service=user_ctx["gcal_service"],
+            )
+            today_gcal_dicts = [
+                {"id": e.id, "summary": e.summary,
+                 "start_time": e.start.isoformat(), "end_time": e.end.isoformat()}
+                for e in today_events if not e.is_all_day
+            ]
+        except Exception:
+            logger.warning("[replan] GCal fetch for reconcile failed", exc_info=True)
+
+    try:
+        reconcile_today(
+            {
+                "supabase": user_ctx["supabase"],
+                "user_id": user_ctx["user_id"],
+                "route": "replan",
+                "gcal_events": today_gcal_dicts,
+                "todoist_active_ids": todoist_active_ids,
+                "todoist_completed_ids": todoist_completed_ids,
+            },
+            today_obj,
+        )
+    except Exception:
+        logger.warning("[replan] reconcile_today failed — continuing with stale state", exc_info=True)
 
     today_row = _load_today_schedule(user_id)
     if not today_row:
