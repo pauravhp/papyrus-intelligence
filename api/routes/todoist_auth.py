@@ -93,8 +93,13 @@ def todoist_oauth_start(
     # registered URL if exactly one is configured, but errors with
     # "Redirect URI required" when multiple URLs are registered (because it
     # can't safely choose). Sending it always is the durable fix.
+    # Use app.todoist.com (not api.) per current Todoist docs. The api.
+    # subdomain silently redirects authenticated users to app., but the
+    # not-logged-in path lands on api.todoist.com/auth/login which is a
+    # 404 — caught when whodini0407 hit Connect Todoist in incognito on
+    # 2026-04-30 and never reached the consent screen.
     auth_url = (
-        "https://api.todoist.com/oauth/authorize"
+        "https://app.todoist.com/oauth/authorize"
         f"?client_id={settings.TODOIST_CLIENT_ID}"
         "&scope=data:read_write"
         f"&state={_sign_state(user_id)}"
