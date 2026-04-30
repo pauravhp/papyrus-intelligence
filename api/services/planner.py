@@ -33,7 +33,7 @@ from src.calendar_client import create_event, get_events
 from src.models import CalendarEvent, TodoistTask
 from src.scheduler import compute_free_windows
 from src.todoist_client import TodoistClient
-from api.services.defaults import with_meal_defaults
+from api.services.defaults import with_meal_defaults, with_sleep_defaults
 from api.services.extractor import Block, ExtractionResult, extract_constraints
 from api.services.rhythm_service import get_active_rhythms
 from api.services.schedule_service import schedule_day
@@ -93,6 +93,10 @@ def _is_within_idempotency_window(confirmed_at_iso) -> bool:
 
 def _ensure_meal_blocks(config: dict) -> dict:
     return with_meal_defaults(config)
+
+
+def _ensure_sleep_defaults(config: dict) -> dict:
+    return with_sleep_defaults(config)
 
 
 def _resolve_calendar_ids(config: dict) -> list[str]:
@@ -544,7 +548,7 @@ def run_schedule_pipeline(
       }
     """
     # ── 0. Setup ──────────────────────────────────────────────────────────────
-    config = _ensure_meal_blocks(user_ctx["config"])
+    config = _ensure_sleep_defaults(_ensure_meal_blocks(user_ctx["config"]))
     # Default matches src/scheduler.py — must stay in sync, otherwise the extractor
     # and compute_free_windows disagree on the user's local time and we end up
     # blocking the wrong hour-of-day. Caught on 2026-04-25: extractor saw UTC,

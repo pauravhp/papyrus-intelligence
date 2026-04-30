@@ -129,10 +129,19 @@ def google_oauth_start(
     return RedirectResponse(url=auth_url, status_code=302)
 
 
+def _oauth_error_redirect(reason: str) -> RedirectResponse:
+    """Build a friendly redirect to the frontend's /oauth-error page."""
+    return RedirectResponse(
+        url=f"{settings.FRONTEND_URL}/oauth-error?reason={reason}",
+        status_code=302,
+    )
+
+
 @router.get("/auth/google/callback")
 def google_oauth_callback(
     code: str = Query(...),
     state: str = Query(...),
+    scope: str = Query(default=""),
 ) -> RedirectResponse:
     """
     Google redirects here after user grants (or denies) consent.
@@ -140,6 +149,13 @@ def google_oauth_callback(
     Verifies the HMAC state, exchanges the auth code for an access + refresh
     token, and persists the full Credentials JSON as jsonb in users.google_credentials.
     Redirects to the frontend onboard page on success.
+
+    Failure modes redirect to /oauth-error rather than raising HTTP errors:
+    - partial_scope:        user unchecked one or more scopes on the consent screen
+    - token_exchange_failed: anything else fetch_token can raise
+    Both produce a friendly "Connect again with all permissions" page on the
+    frontend instead of a raw 502 Bad Gateway. Caught in prod for user
+    8222c77d-… on 2026-04-30 — three retries before they granted full scope.
 
     Note: google_credentials is stored as plain jsonb for now.
     Encryption via pgcrypto (encrypt_field SQL function) is a pending migration —
@@ -149,6 +165,14 @@ def google_oauth_callback(
         user_id = _verify_state(state)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    # Validate granted scopes BEFORE fetch_token so we don't burn the auth
+    # code on a guaranteed-to-fail exchange. Google passes granted scopes as
+    # a space-separated string in the `scope` query param.
+    granted = set(scope.split()) if scope else set()
+    missing = [s for s in _SCOPES if s not in granted]
+    if granted and missing:
+        return _oauth_error_redirect("partial_scope")
 
     # Retrieve the PKCE code_verifier and redirect_after stored during google_oauth_start.
     row = (
@@ -177,11 +201,11 @@ def google_oauth_callback(
     )
     try:
         flow.fetch_token(code=code)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Token exchange failed: {exc}",
-        ) from exc
+    except Exception:
+        # Belt-and-suspenders: even after the explicit-scope check above, the
+        # exchange can fail (network blip, clock skew, oauthlib's own scope
+        # warning if Google omits the scope param). Same UX either way.
+        return _oauth_error_redirect("token_exchange_failed")
 
     # Clear the one-time verifier and redirect_after now that the exchange is complete.
     supabase.from_("users").update(

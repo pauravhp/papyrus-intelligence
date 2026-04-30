@@ -77,6 +77,65 @@ def test_google_callback_uses_redirect_after(mock_flow_cls, mock_verify_state, m
 @patch("api.routes.google_auth.supabase")
 @patch("api.routes.google_auth._verify_state", return_value=FAKE_USER_ID)
 @patch("api.routes.google_auth.Flow")
+def test_google_callback_redirects_on_partial_scope(mock_flow_cls, mock_verify_state, mock_sb):
+    """Partial-scope consent must redirect to /oauth-error, not 502.
+
+    Reproduces the user 8222c77d-… incident: Google's consent screen had
+    unchecked scope boxes and the friend granted only a subset. The previous
+    code raised HTTPException(502) which surfaced as a generic Bad Gateway
+    page; we now redirect to a friendly /oauth-error?reason=partial_scope.
+    """
+    mock_flow = MagicMock()
+    mock_flow_cls.from_client_config.return_value = mock_flow
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"oauth_code_verifier": "v", "oauth_redirect_after": "/dashboard/settings"}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(error=None)
+
+    # Granted only one of the three required scopes.
+    granted_scope = "https://www.googleapis.com/auth/calendar.readonly"
+    resp = client.get(
+        f"/auth/google/callback?code=abc&state=fake-state&scope={granted_scope}",
+    )
+
+    assert resp.status_code == 302
+    assert "/oauth-error" in resp.headers["location"]
+    assert "partial_scope" in resp.headers["location"]
+    # fetch_token must NOT be called — we shouldn't burn the auth code or
+    # mint a Credentials object built from incomplete scopes.
+    mock_flow.fetch_token.assert_not_called()
+
+
+@patch("api.routes.google_auth.supabase")
+@patch("api.routes.google_auth._verify_state", return_value=FAKE_USER_ID)
+@patch("api.routes.google_auth.Flow")
+def test_google_callback_redirects_on_token_exchange_failure(mock_flow_cls, mock_verify_state, mock_sb):
+    """Other fetch_token errors must also redirect, not raise 502."""
+    mock_flow = MagicMock()
+    mock_flow.fetch_token.side_effect = RuntimeError("transient network error")
+    mock_flow_cls.from_client_config.return_value = mock_flow
+    mock_sb.from_.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = MagicMock(
+        data={"oauth_code_verifier": "v", "oauth_redirect_after": None}
+    )
+    mock_sb.from_.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(error=None)
+
+    full_scope = " ".join([
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.app.created",
+    ])
+    resp = client.get(
+        f"/auth/google/callback?code=abc&state=fake-state&scope={full_scope}",
+    )
+
+    assert resp.status_code == 302
+    assert "/oauth-error" in resp.headers["location"]
+    assert "token_exchange_failed" in resp.headers["location"]
+
+
+@patch("api.routes.google_auth.supabase")
+@patch("api.routes.google_auth._verify_state", return_value=FAKE_USER_ID)
+@patch("api.routes.google_auth.Flow")
 def test_google_callback_clears_redirect_after(mock_flow_cls, mock_verify_state, mock_sb):
     """Callback clears oauth_redirect_after after using it."""
     mock_flow = MagicMock()

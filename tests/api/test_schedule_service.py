@@ -642,6 +642,118 @@ def test_with_meal_defaults_helper_fills_in_for_empty_config():
     assert names == ["Breakfast", "Lunch", "Dinner"]
 
 
+# ── with_sleep_defaults — null-trap regression ───────────────────────────────
+# Ref. user 8222c77d-…: users.config.sleep had explicit-null fields, which
+# slipped past dict.get(k, default) in src/scheduler.py and crashed
+# compute_free_windows with NoneType.strip(). This helper normalises the dict
+# at config-read time so every consumer sees real values.
+
+
+def test_with_sleep_defaults_fills_missing_sleep_dict():
+    """Config with no 'sleep' key at all must get the full default block."""
+    from api.services.defaults import with_sleep_defaults, DEFAULT_SLEEP
+
+    out = with_sleep_defaults({"user": {"timezone": "America/Vancouver"}})
+    assert out["sleep"] == DEFAULT_SLEEP
+
+
+def test_with_sleep_defaults_replaces_explicit_nulls():
+    """A sleep dict with explicit-null fields must get defaults applied."""
+    from api.services.defaults import with_sleep_defaults
+
+    cfg = {
+        "sleep": {
+            "default_wake_time":       None,
+            "morning_buffer_minutes":  None,
+            "first_task_not_before":   None,
+            "no_tasks_after":          None,
+            "weekend_nothing_before":  None,
+            "weekend_days":            None,
+        }
+    }
+    out = with_sleep_defaults(cfg)
+    assert out["sleep"]["default_wake_time"]      == "09:00"
+    assert out["sleep"]["morning_buffer_minutes"] == 90
+    assert out["sleep"]["first_task_not_before"]  == "10:30"
+    assert out["sleep"]["no_tasks_after"]         == "23:00"
+    assert out["sleep"]["weekend_nothing_before"] == "13:00"
+    assert out["sleep"]["weekend_days"]           == ["saturday", "sunday"]
+
+
+def test_with_sleep_defaults_preserves_user_set_values():
+    """Non-null user values must win over the defaults."""
+    from api.services.defaults import with_sleep_defaults
+
+    cfg = {
+        "sleep": {
+            "default_wake_time":      "06:30",
+            "morning_buffer_minutes": 30,
+            "no_tasks_after":         "22:00",
+        }
+    }
+    out = with_sleep_defaults(cfg)
+    assert out["sleep"]["default_wake_time"]      == "06:30"
+    assert out["sleep"]["morning_buffer_minutes"] == 30
+    assert out["sleep"]["no_tasks_after"]         == "22:00"
+    # untouched fields fall back
+    assert out["sleep"]["first_task_not_before"]  == "10:30"
+    assert out["sleep"]["weekend_nothing_before"] == "13:00"
+
+
+def test_with_sleep_defaults_treats_empty_string_as_missing():
+    """A cleared time field in settings persists '' — that must fall back too."""
+    from api.services.defaults import with_sleep_defaults
+
+    cfg = {"sleep": {"default_wake_time": "", "no_tasks_after": ""}}
+    out = with_sleep_defaults(cfg)
+    assert out["sleep"]["default_wake_time"] == "09:00"
+    assert out["sleep"]["no_tasks_after"]    == "23:00"
+
+
+def test_with_sleep_defaults_handles_partial_dict_with_one_null():
+    """A single null field shouldn't blow away a sibling user value."""
+    from api.services.defaults import with_sleep_defaults
+
+    cfg = {
+        "sleep": {
+            "default_wake_time": "07:15",
+            "no_tasks_after":    None,  # this is the failure mode in prod
+        }
+    }
+    out = with_sleep_defaults(cfg)
+    assert out["sleep"]["default_wake_time"] == "07:15"
+    assert out["sleep"]["no_tasks_after"]    == "23:00"
+
+
+def test_compute_free_windows_does_not_crash_on_nulled_sleep_dict():
+    """End-to-end: planner pipeline must survive a sleep dict full of nulls."""
+    from datetime import date
+    from src.scheduler import compute_free_windows
+    from api.services.defaults import with_sleep_defaults
+
+    nulled_config = {
+        "user": {"timezone": "America/Vancouver"},
+        "sleep": {
+            "default_wake_time":      None,
+            "morning_buffer_minutes": None,
+            "first_task_not_before":  None,
+            "no_tasks_after":         None,
+            "weekend_nothing_before": None,
+        },
+    }
+    # Without the helper this would raise AttributeError: NoneType.strip()
+    # on src/scheduler.py:57. With the helper it should just compute windows.
+    safe_config = with_sleep_defaults(nulled_config)
+    windows = compute_free_windows(
+        events=[],
+        target_date=date(2026, 4, 7),  # Tuesday — non-weekend
+        context=safe_config,
+    )
+    # Smoke check: we got at least one window back, no crash.
+    assert isinstance(windows, list)
+    assert len(windows) > 0
+
+
 # ── Item 5: deadline reaches the LLM ─────────────────────────────────────────
 
 

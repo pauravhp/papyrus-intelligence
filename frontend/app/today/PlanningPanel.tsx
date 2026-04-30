@@ -62,6 +62,16 @@ async function parseErrorCode(res: Response): Promise<string | null> {
   return null;
 }
 
+// Best-effort extraction of a human-readable detail string. FastAPI's default
+// HTTPException emits {detail: "<string>"}; uvicorn's 500 page is HTML.
+async function parseErrorMessage(res: Response): Promise<string | null> {
+  try {
+    const json = await res.clone().json();
+    if (typeof json?.detail === "string") return json.detail;
+  } catch { /* HTML body */ }
+  return null;
+}
+
 export default function PlanningPanel({
   token,
   contextNote,
@@ -77,6 +87,10 @@ export default function PlanningPanel({
   const [refineLoading, setRefineLoading] = useState(false);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  // Soft "still working" hint shown after ~25s of working state. Distinct
+  // from planError — the request hasn't failed, it's just slow. Reset on
+  // every retry so the timer restarts.
+  const [slowHint, setSlowHint] = useState(false);
   const [needsTodoistReconnect, setNeedsTodoistReconnect] = useState(false);
   const [needsGcalReconnect, setNeedsGcalReconnect] = useState(false);
   // True between Confirm-click and confirmed state. Drives the button's
@@ -96,6 +110,15 @@ export default function PlanningPanel({
     return () => clearTimeout(t);
   }, [status, progressStep]);
 
+  // After ~25 seconds of working state, hint that it's slow. Most plan calls
+  // resolve in 5-12s; past 25s we want the user to know we're not stuck.
+  // Reset is handled in runPlan/runRefine where we re-enter the working state.
+  useEffect(() => {
+    if (status !== "working") return;
+    const t = setTimeout(() => setSlowHint(true), 25000);
+    return () => clearTimeout(t);
+  }, [status]);
+
   // Fire the planning request exactly once on mount
   useEffect(() => {
     if (hasFired.current) return;
@@ -105,6 +128,10 @@ export default function PlanningPanel({
   }, []);
 
   async function runPlan() {
+    setPlanError(null);
+    setProgressStep(0);
+    setSlowHint(false);
+    setStatus("working");
     try {
       const res = await fetch(`${API_BASE}/api/plan`, {
         method: "POST",
@@ -123,7 +150,8 @@ export default function PlanningPanel({
           setStatus("proposal");
           return;
         }
-        throw new Error(`API error: ${res.status}`);
+        const msg = await parseErrorMessage(res);
+        throw new Error(msg ?? `Server error (${res.status})`);
       }
       const data: Proposal = await res.json();
       setProposal(data);
@@ -135,7 +163,7 @@ export default function PlanningPanel({
       });
       setStatus("proposal");
     } catch (err) {
-      setPlanError(`Planning failed: ${(err as Error).message}`);
+      setPlanError((err as Error).message);
       setStatus("proposal");
     }
   }
@@ -245,6 +273,7 @@ export default function PlanningPanel({
     if (!message || refineLoading) return;
     setRefinementInput("");
     setRefineLoading(true);
+    setSlowHint(false);
     setStatus("working");
     setProgressStep(2); // Jump to "Building your schedule"
     // Event name retained as "chat_message_sent" for continuity with existing
@@ -278,6 +307,11 @@ export default function PlanningPanel({
               />
             ))}
           </div>
+          {slowHint && (
+            <p style={{ fontSize: 11, color: "var(--text-faint)", fontStyle: "italic", textAlign: "center", maxWidth: 240, fontFamily: "var(--font-literata)", lineHeight: 1.5 }}>
+              Taking longer than usual — still working.
+            </p>
+          )}
           <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
             {PROGRESS_STEPS.map((step, i) => (
               <div key={step} style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -392,9 +426,50 @@ export default function PlanningPanel({
 
           {/* Agent reasoning — prose, not bubbles */}
           {!needsTodoistReconnect && !needsGcalReconnect && (planError ? (
-            <p style={{ fontSize: 13, color: "var(--text-muted)", fontFamily: "var(--font-literata)", fontStyle: "italic" }}>
-              {planError} — close the panel and try again.
-            </p>
+            <div
+              style={{
+                background: "var(--surface-raised)",
+                border: "1px solid #d4a55a",
+                borderRadius: 10,
+                padding: 14,
+                display: "flex",
+                gap: 12,
+                alignItems: "flex-start",
+              }}
+            >
+              <div style={{ background: "rgba(212,165,90,0.15)", padding: 8, borderRadius: 8, flexShrink: 0, color: "#d4a55a", display: "flex" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 13, color: "var(--text)", fontWeight: 500, fontFamily: "var(--font-literata)" }}>
+                  Planning didn’t finish
+                </p>
+                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, lineHeight: 1.55, fontFamily: "var(--font-literata)" }}>
+                  {planError}
+                </p>
+                <button
+                  onClick={runPlan}
+                  style={{
+                    marginTop: 10,
+                    background: "var(--accent)",
+                    color: "var(--bg)",
+                    border: "none",
+                    padding: "6px 12px",
+                    borderRadius: 6,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    fontFamily: "var(--font-literata)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
           ) : (
             reasoning && (
               <div>

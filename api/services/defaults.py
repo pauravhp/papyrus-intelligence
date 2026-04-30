@@ -6,10 +6,6 @@ Why a separate module: every consumer of the user's config (planner, replan,
 future routes that read meal blocks) should see the same defaults rather than
 each call site re-implementing what "no daily_blocks set" means. Centralising
 here lets a single change propagate everywhere.
-
-Currently only meal-block defaults live here. Other defaults (sleep cutoff,
-min_gap, etc.) are still inlined at their consumers since they have only one
-reader; once a second consumer appears, lift the default into this module.
 """
 
 from __future__ import annotations
@@ -26,6 +22,21 @@ DEFAULT_MEAL_BLOCKS = [
 ]
 
 
+# Sleep / day-shape defaults. compute_free_windows reads these via dict.get,
+# which falls back ONLY when the key is missing — an explicit-null value
+# bypasses the in-code default and crashes _parse_hm("None") with
+# AttributeError: NoneType.strip(). Apply with_sleep_defaults() at config-read
+# time to normalise nulls into real values before they reach the scheduler.
+DEFAULT_SLEEP: dict = {
+    "default_wake_time":       "09:00",
+    "morning_buffer_minutes":  90,
+    "first_task_not_before":   "10:30",
+    "no_tasks_after":          "23:00",
+    "weekend_nothing_before":  "13:00",
+    "weekend_days":            ["saturday", "sunday"],
+}
+
+
 def with_meal_defaults(config: dict) -> dict:
     """Return a config with daily_blocks defaulted if the user hasn't set any.
 
@@ -35,3 +46,31 @@ def with_meal_defaults(config: dict) -> dict:
     if config.get("daily_blocks"):
         return config
     return {**config, "daily_blocks": list(DEFAULT_MEAL_BLOCKS)}
+
+
+def with_sleep_defaults(config: dict) -> dict:
+    """Return a config whose sleep dict has every required field non-null.
+
+    Per-field merge (not dict-level): a partial sleep dict with one null
+    sibling keeps the user's other values and only fills the null fields.
+    Missing keys and None values are treated identically — both fall back
+    to DEFAULT_SLEEP.
+    """
+    user_sleep = config.get("sleep") or {}
+
+    def _pick(key, default):
+        value = user_sleep.get(key)
+        # None, empty string, and empty list all fall back. The empty string
+        # case shows up when a user clears a time field in /settings/schedule
+        # — the form persists "" rather than removing the key.
+        if value is None or value == "" or value == []:
+            return default
+        return value
+
+    merged = {key: _pick(key, default) for key, default in DEFAULT_SLEEP.items()}
+    # Preserve any extra fields the user has set that we don't enumerate
+    # in DEFAULT_SLEEP (e.g. default_sleep_time, late_night_threshold).
+    for key, value in user_sleep.items():
+        if key not in merged and value is not None:
+            merged[key] = value
+    return {**config, "sleep": merged}
