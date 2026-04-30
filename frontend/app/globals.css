@@ -242,3 +242,58 @@ body {
   .landing-hero-inner { padding: 0 24px; }
   .landing-section { padding: 64px 24px; }
 }
+
+/* ── Driver.js popover theme override ──────────────────────────────────────
+   The default driver.js styles are bright white-on-white and crash visually
+   into our cream / dark themes. Re-skin the popover to match the rest of the
+   app. The driver-overlay (page dimmer) is left at its default rgba(0,0,0)
+   so the table behind it is visibly de-emphasized. */
+.driver-popover {
+  background-color: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18) !important;
+  font-family: var(--font-literata), serif !important;
+  padding: 18px 20px !important;
+  max-width: 360px !important;
+}
+.driver-popover-title {
+  color: var(--text) !important;
+  font-family: var(--font-literata), serif !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  margin-bottom: 8px !important;
+}
+.driver-popover-description {
+  color: var(--text-muted) !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+.driver-popover-arrow-side-top.driver-popover-arrow,
+.driver-popover-arrow-side-bottom.driver-popover-arrow,
+.driver-popover-arrow-side-left.driver-popover-arrow,
+.driver-popover-arrow-side-right.driver-popover-arrow {
+  border-color: var(--surface) !important;
+}
+.driver-popover-close-btn {
+  color: var(--text-muted) !important;
+  background: transparent !important;
+  border: 1px solid var(--border-strong) !important;
+  border-radius: 8px !important;
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-family: var(--font-literata), serif !important;
+  text-shadow: none !important;
+  /* driver.js positions the close button absolute top-right by default;
+     keep it inline with body content for our wider popover. */
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  margin-top: 14px !important;
+  cursor: pointer !important;
+}
+.driver-popover-close-btn:hover {
+  color: var(--text) !important;
+  border-color: var(--accent) !important;
+}

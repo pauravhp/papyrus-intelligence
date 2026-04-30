@@ -3,11 +3,19 @@
 import { useMemo, useState } from "react";
 import NumberField from "@/components/NumberField";
 import type {
+  CategoryLabel,
   DurationMinutes,
   RhythmProposal,
   TaskProposal,
   Weekday,
 } from "@/lib/migrationApi";
+
+const CATEGORY_OPTIONS: { value: CategoryLabel; label: string }[] = [
+  { value: null,          label: "—" },
+  { value: "@deep-work",  label: "Deep work" },
+  { value: "@admin",      label: "Admin" },
+  { value: "@quick",      label: "Quick" },
+];
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -236,13 +244,30 @@ function TaskRow({
           aria-label="Task name"
         />
       </td>
-      <td style={{ ...TD, width: 90 }}>
+      <td style={{ ...TD, width: 130 }}>
+        <select
+          value={task.category_label ?? ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            onUpdate({ category_label: (v === "" ? null : v) as CategoryLabel });
+          }}
+          style={{ ...SELECT, width: "100%" }}
+          aria-label="Label"
+        >
+          {CATEGORY_OPTIONS.map((opt) => (
+            <option key={opt.value ?? "none"} value={opt.value ?? ""}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </td>
+      <td style={{ ...TD, width: 100 }}>
         <select
           value={task.duration_minutes}
           onChange={(e) =>
             onUpdate({ duration_minutes: Number(e.target.value) as DurationMinutes })
           }
-          style={SELECT}
+          style={{ ...SELECT, width: "100%" }}
           aria-label="Duration"
         >
           {BLESSED_DURATIONS.map((d) => (
@@ -252,7 +277,7 @@ function TaskRow({
           ))}
         </select>
       </td>
-      <td style={{ ...TD, width: 130 }}>
+      <td style={{ ...TD, width: 160 }}>
         <input
           type="date"
           value={task.deadline ?? ""}
@@ -274,12 +299,18 @@ function TaskRow({
           {task.reasoning}
         </span>
       </td>
-      <td style={{ ...TD, width: 90 }}>
+      <td style={{ ...TD, width: 110 }}>
         <button
-          style={BUTTON_GHOST}
+          style={{
+            ...BUTTON_GHOST,
+            color: "var(--accent)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: 6,
+            padding: "5px 10px",
+          }}
           onClick={onPromote}
-          title="Promote to routine"
-          aria-label="Move to routines"
+          title="Convert this task into a recurring routine"
+          aria-label="Convert to routine"
         >
           → Routine
         </button>
@@ -332,8 +363,8 @@ function RhythmRow({
           aria-label="Routine name"
         />
       </td>
-      <td style={{ ...TD, width: 220 }}>
-        <div style={{ display: "flex", gap: 3, flexWrap: "wrap" as const }}>
+      <td style={{ ...TD, width: 230 }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" as const }}>
           {DAYS.map((day) => {
             const on = rhythm.days_of_week.includes(day);
             return (
@@ -351,18 +382,18 @@ function RhythmRow({
           })}
         </div>
       </td>
-      <td style={{ ...TD, width: 72 }}>
+      <td style={{ ...TD, width: 64 }}>
         <NumberField
           value={rhythm.sessions_per_week}
           onChange={(n) => onUpdate({ sessions_per_week: n })}
           min={1}
           max={21}
           fallback={3}
-          style={{ ...INPUT, width: 52 }}
+          style={{ ...INPUT, width: "100%" }}
           ariaLabel="Sessions per week"
         />
       </td>
-      <td style={{ ...TD, width: 90 }}>
+      <td style={{ ...TD, width: 100 }}>
         <select
           value={rhythm.session_min_minutes}
           onChange={(e) =>
@@ -370,7 +401,7 @@ function RhythmRow({
               session_min_minutes: Number(e.target.value) as DurationMinutes,
             })
           }
-          style={SELECT}
+          style={{ ...SELECT, width: "100%" }}
           aria-label="Min duration"
         >
           {BLESSED_DURATIONS.map((d) => (
@@ -380,7 +411,7 @@ function RhythmRow({
           ))}
         </select>
       </td>
-      <td style={{ ...TD, width: 90 }}>
+      <td style={{ ...TD, width: 100 }}>
         <select
           value={rhythm.session_max_minutes}
           onChange={(e) =>
@@ -388,7 +419,7 @@ function RhythmRow({
               session_max_minutes: Number(e.target.value) as DurationMinutes,
             })
           }
-          style={SELECT}
+          style={{ ...SELECT, width: "100%" }}
           aria-label="Max duration"
         >
           {BLESSED_DURATIONS.map((d) => (
@@ -409,12 +440,18 @@ function RhythmRow({
           {rhythm.reasoning}
         </span>
       </td>
-      <td style={{ ...TD, width: 80 }}>
+      <td style={{ ...TD, width: 100 }}>
         <button
-          style={BUTTON_GHOST}
+          style={{
+            ...BUTTON_GHOST,
+            color: "var(--accent)",
+            border: "1px solid var(--border-strong)",
+            borderRadius: 6,
+            padding: "5px 10px",
+          }}
           onClick={onDemote}
-          title="Demote to task"
-          aria-label="Move to tasks"
+          title="Convert this routine back into a one-off task"
+          aria-label="Convert to task"
         >
           → Task
         </button>
@@ -438,6 +475,7 @@ export default function MigrationPreview({
   const [tasks, setTasks] = useState<TaskProposal[]>(initialTasks);
   const [rhythms, setRhythms] = useState<RhythmProposal[]>(initialRhythms);
   const [unmatchedOpen, setUnmatchedOpen] = useState(false);
+  const [labelHelpOpen, setLabelHelpOpen] = useState(false);
 
   // -------------------------------------------------------------------------
   // Task handlers
@@ -566,19 +604,58 @@ export default function MigrationPreview({
         >
           {headerLabel}
         </h2>
-        <a
-          href="#"
-          onClick={(e) => e.preventDefault()}
+        <button
+          type="button"
+          onClick={() => setLabelHelpOpen((v) => !v)}
+          aria-expanded={labelHelpOpen}
           style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
             fontSize: 12,
             color: "var(--accent)",
-            textDecoration: "none",
+            textDecoration: "underline",
+            textDecorationStyle: "dotted",
+            textUnderlineOffset: 3,
+            cursor: "pointer",
             whiteSpace: "nowrap",
+            fontFamily: "var(--font-literata)",
           }}
         >
-          Why these labels?
-        </a>
+          {labelHelpOpen ? "Hide label guide" : "Why these labels?"}
+        </button>
       </div>
+
+      {/* Label help panel — toggled by the header link */}
+      {labelHelpOpen && (
+        <div
+          style={{
+            background: "var(--surface-raised)",
+            border: "1px solid var(--border)",
+            borderRadius: 10,
+            padding: "14px 16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+            marginTop: -8,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.55, fontFamily: "var(--font-literata)" }}>
+            Labels group similar tasks so Papyrus can place them at the right
+            time of day. They&apos;re saved on each task as a Todoist label.
+          </p>
+          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 6, fontSize: 12, lineHeight: 1.5 }}>
+            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Deep work</span>
+            <span style={{ color: "var(--text-muted)" }}>Writing, designing, building, focused thinking — placed in your longest morning windows.</span>
+            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Admin</span>
+            <span style={{ color: "var(--text-muted)" }}>Email, replies, scheduling, paperwork — batched into shorter mid-day slots.</span>
+            <span style={{ color: "var(--accent)", fontWeight: 600 }}>Quick</span>
+            <span style={{ color: "var(--text-muted)" }}>15-minute one-offs that aren&apos;t deep work — slot into gaps between meetings.</span>
+            <span style={{ color: "var(--text-faint)", fontWeight: 600 }}>—</span>
+            <span style={{ color: "var(--text-muted)" }}>Leave unset when the task doesn&apos;t fit any category.</span>
+          </div>
+        </div>
+      )}
 
       {/* Tasks section */}
       <div>
@@ -602,10 +679,11 @@ export default function MigrationPreview({
                 <tr>
                   <th style={{ ...TH, width: 32 }} />
                   <th style={TH}>Name</th>
-                  <th style={{ ...TH, width: 90 }}>Duration</th>
-                  <th style={{ ...TH, width: 130 }}>Deadline</th>
+                  <th style={{ ...TH, width: 130 }}>Label</th>
+                  <th style={{ ...TH, width: 100 }}>Duration</th>
+                  <th style={{ ...TH, width: 160 }}>Deadline</th>
                   <th style={TH}>Why</th>
-                  <th style={{ ...TH, width: 90 }} />
+                  <th style={{ ...TH, width: 110 }}>Move</th>
                 </tr>
               </thead>
               <tbody>
@@ -645,12 +723,12 @@ export default function MigrationPreview({
                 <tr>
                   <th style={{ ...TH, width: 32 }} />
                   <th style={TH}>Name</th>
-                  <th style={{ ...TH, width: 220 }}>Days</th>
-                  <th style={{ ...TH, width: 72 }}>Wk</th>
-                  <th style={{ ...TH, width: 90 }}>Min</th>
-                  <th style={{ ...TH, width: 90 }}>Max</th>
+                  <th style={{ ...TH, width: 230 }}>Days</th>
+                  <th style={{ ...TH, width: 64 }}>Wk</th>
+                  <th style={{ ...TH, width: 100 }}>Min</th>
+                  <th style={{ ...TH, width: 100 }}>Max</th>
                   <th style={TH}>Why</th>
-                  <th style={{ ...TH, width: 80 }} />
+                  <th style={{ ...TH, width: 100 }}>Move</th>
                 </tr>
               </thead>
               <tbody>
