@@ -35,6 +35,26 @@ def test_get_completed_task_ids_for_date_returns_empty_on_404():
     assert result == set()
 
 
+def test_get_completed_task_ids_for_date_returns_empty_on_410():
+    """Sync v9 was retired (410 Gone) — must degrade like 404, not raise.
+
+    Reproduces the prod incident on 2026-04-30 where every /api/today call
+    raised HTTPError out of this function and silently killed reconcile —
+    which then DROPped every scheduled item from schedule_log.proposed_json.
+    The 410-handling branch must short-circuit BEFORE raise_for_status().
+    """
+    import requests
+    client = TodoistClient(api_token="test_token")
+    fake_resp = MagicMock()
+    fake_resp.status_code = 410
+    # Make raise_for_status actually raise so the test can only pass if the
+    # function takes the 410 short-circuit before reaching that line.
+    fake_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("410 Gone")
+    with patch("src.todoist_client.requests.post", return_value=fake_resp):
+        result = client.get_completed_task_ids_for_date(date(2026, 4, 29))
+    assert result == set()
+
+
 def test_get_completed_task_ids_for_date_raises_on_auth_failure():
     client = TodoistClient(api_token="bad_token")
     fake_resp = MagicMock()

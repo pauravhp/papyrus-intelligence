@@ -338,12 +338,20 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     today_obj = today
     todoist_active_ids: set[str] = set()
     todoist_completed_ids: set[str] = set()
+    # Track whether BOTH Todoist calls returned cleanly. If either failed, we
+    # cannot safely reconcile: items not in active_ids look "deleted" and the
+    # current rule-set DROPs them from schedule_log.proposed_json. Caught in
+    # prod 2026-04-30 — the sync v9 endpoint returned 410, the exception
+    # killed the second assignment, reconcile ran against partial data and
+    # wiped every scheduled item from a confirmed schedule.
+    todoist_fetch_ok = False
     if todoist_connected:
         try:
             tod_token = get_valid_todoist_token(supabase, user_id)
             tc = TodoistClient(tod_token)
             todoist_active_ids = {str(t.id) for t in tc.get_tasks(filter_str="today")}
             todoist_completed_ids = tc.get_completed_task_ids_for_date(today_obj)
+            todoist_fetch_ok = True
         except TodoistTokenError:
             logger.warning("[today] Todoist token invalid — skipping reconcile fetch")
         except Exception:
@@ -367,33 +375,39 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         except Exception:
             logger.warning("[today] GCal fetch for reconcile failed", exc_info=True)
 
-    try:
-        reconcile_today(
-            {
-                "supabase": supabase,
-                "user_id": user_id,
-                "route": "today",
-                "gcal_events": today_gcal_dicts,
-                "todoist_active_ids": todoist_active_ids,
-                "todoist_completed_ids": todoist_completed_ids,
-            },
-            today_obj,
-        )
-        # Re-read today's row so the response reflects any reconcile mutations
-        refreshed = (
-            supabase.from_("schedule_log")
-            .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
-            .eq("user_id", user_id)
-            .eq("schedule_date", today_str)
-            .eq("confirmed", 1)
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if isinstance(refreshed.data, list) and refreshed.data and refreshed.data[0].get("proposed_json"):
-            by_date[today_str] = refreshed.data[0]
-    except Exception:
-        logger.warning("[today] reconcile_today failed — serving pre-reconcile state", exc_info=True)
+    if not todoist_fetch_ok and todoist_connected:
+        # Bail out of reconcile entirely. Without confirmed Todoist state we
+        # can't tell deleted-in-Todoist apart from "API hiccup" and the
+        # latter would silently destroy the user's schedule.
+        logger.info("[today] skipping reconcile — Todoist fetch did not complete")
+    else:
+        try:
+            reconcile_today(
+                {
+                    "supabase": supabase,
+                    "user_id": user_id,
+                    "route": "today",
+                    "gcal_events": today_gcal_dicts,
+                    "todoist_active_ids": todoist_active_ids,
+                    "todoist_completed_ids": todoist_completed_ids,
+                },
+                today_obj,
+            )
+            # Re-read today's row so the response reflects any reconcile mutations
+            refreshed = (
+                supabase.from_("schedule_log")
+                .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
+                .eq("user_id", user_id)
+                .eq("schedule_date", today_str)
+                .eq("confirmed", 1)
+                .order("id", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if isinstance(refreshed.data, list) and refreshed.data and refreshed.data[0].get("proposed_json"):
+                by_date[today_str] = refreshed.data[0]
+        except Exception:
+            logger.warning("[today] reconcile_today failed — serving pre-reconcile state", exc_info=True)
 
     cutoff = _cutoff_passed(config)
     review_queue = _compute_review_queue(user_id, today, cutoff)

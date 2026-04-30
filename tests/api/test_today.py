@@ -89,6 +89,57 @@ def test_get_today_returns_three_days(client, monkeypatch):
     assert data["today"]["all_day_events"] == []
 
 
+def test_today_skips_reconcile_when_todoist_fetch_fails(client, monkeypatch):
+    """A Todoist API failure during the reconcile pre-fetch must not delete the user's schedule.
+
+    Reproduces the prod incident on 2026-04-30: get_completed_task_ids_for_date
+    raised HTTPError 410, the exception was caught, but reconcile_today still
+    ran with todoist_completed_ids={} and dropped every scheduled item from
+    schedule_log.proposed_json. With the safety guard, reconcile must be
+    skipped entirely when the Todoist fetch did not complete.
+    """
+    from datetime import date
+    today_str = date.today().isoformat()
+    schedule = {
+        "scheduled": [{"task_id": "real-1", "task_name": "Deep work",
+                       "start_time": f"{today_str}T09:00:00-07:00",
+                       "end_time":   f"{today_str}T10:30:00-07:00",
+                       "duration_minutes": 90}],
+        "pushed": [],
+        "reasoning_summary": "",
+    }
+    rows = [{"schedule_date": today_str, "proposed_json": json.dumps(schedule),
+             "confirmed_at": f"{today_str}T08:00:00Z", "gcal_event_ids": "[]"}]
+
+    mock_sb = MagicMock()
+    _mock_schedule_log(mock_sb, rows)
+
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    # Todoist fetch raises (simulating sync v9 410 from prod)
+    failing_tc = MagicMock()
+    failing_tc.get_tasks.side_effect = RuntimeError("Todoist API down")
+
+    mock_svc = MagicMock()
+    reconcile_spy = MagicMock()
+    with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
+         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.reconcile_today", reconcile_spy), \
+         patch("api.routes.today.get_valid_todoist_token", return_value="tok"), \
+         patch("api.routes.today.TodoistClient", return_value=failing_tc), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(mock_svc, ["primary"], "UTC", True, False)):
+        resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    # Critical: reconcile must NOT have been called when the Todoist fetch
+    # failed. Otherwise it'd silently DROP every scheduled item.
+    reconcile_spy.assert_not_called()
+    # Schedule still shows up in the response — pre-reconcile state preserved.
+    assert len(resp.json()["today"]["scheduled"]) == 1
+
+
 def test_get_today_handles_no_schedule(client, monkeypatch):
     """GET /api/today returns None for all days when no confirmed schedules."""
     mock_sb = MagicMock()

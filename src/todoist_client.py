@@ -250,7 +250,12 @@ class TodoistClient:
                 "limit": 200,
             },
         )
-        if resp.status_code == 404:
+        # 404: free-tier where the endpoint isn't available.
+        # 410: Sync v9 has been retired by Todoist (caught in prod 2026-04-30 —
+        # the unhandled 410 cascaded into reconcile dropping every scheduled
+        # item from schedule_log). TODO: migrate to the v1 completed-tasks
+        # endpoint; until then, missing completion data is non-fatal.
+        if resp.status_code in (404, 410):
             return set()
         if resp.status_code == 401:
             raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
@@ -298,18 +303,27 @@ class TodoistClient:
 
     def schedule_task(self, task_id: str, start_dt: "datetime", duration_minutes: int) -> None:
         """Set due_datetime + duration on a task (used for reschedule write-back)."""
+        body = {
+            "due_datetime": start_dt.isoformat(),
+            "duration": duration_minutes,
+            "duration_unit": "minute",
+        }
         resp = requests.post(
             f"{TODOIST_BASE}/tasks/{task_id}",
             headers=self.headers,
-            json={
-                "due_datetime": start_dt.isoformat(),
-                "duration": duration_minutes,
-                "duration_unit": "minute",
-            },
+            json=body,
         )
         if resp.status_code == 401:
             raise RuntimeError("Todoist API auth failed — check TODOIST_API_TOKEN")
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # Pull Todoist's response body into the error so the caller's log
+            # surfaces the actual rejection reason. Without this we just see
+            # "400 Bad Request" with no clue which field is wrong.
+            raise requests.exceptions.HTTPError(
+                f"{resp.status_code} {resp.reason} for {resp.url} | "
+                f"body={body} | response={resp.text[:500]}",
+                response=resp,
+            )
 
     def create_task(
         self,
