@@ -45,7 +45,7 @@ if [[ "${1:-}" == "--firsttime" ]]; then
    User=$(whoami)
    WorkingDirectory=${REPO_DIR}
    EnvironmentFile=${REPO_DIR}/.env
-   ExecStart=${REPO_DIR}/venv/bin/uvicorn api.main:app --host 127.0.0.1 --port ${PORT}
+   ExecStart=${REPO_DIR}/venv/bin/uvicorn api.main:app --host 127.0.0.1 --port ${PORT} --workers 2
    Restart=on-failure
    RestartSec=3
 
