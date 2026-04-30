@@ -38,14 +38,24 @@ DEFAULT_SLEEP: dict = {
 
 
 def with_meal_defaults(config: dict) -> dict:
-    """Return a config with daily_blocks defaulted if the user hasn't set any.
+    """Return a config with daily_blocks defaulted PER-MEAL.
 
-    Returns the original dict unchanged when daily_blocks is non-empty so the
-    user's explicit configuration always wins.
+    A user-customised entry for any of Breakfast / Lunch / Dinner is kept
+    verbatim. Missing meals are filled in from DEFAULT_MEAL_BLOCKS. This
+    matters because the onboarding scan can return a partial list (e.g.
+    only Breakfast inferred from morning calendar events) and the planner
+    would then schedule tasks during lunch and dinner — caught when
+    whodini0407's auto-import plan placed a 30-min meeting straight
+    through 18:30-19:30 on 2026-04-30.
+
+    Non-meal user blocks (e.g. "Reading time") are preserved alongside.
     """
-    if config.get("daily_blocks"):
-        return config
-    return {**config, "daily_blocks": list(DEFAULT_MEAL_BLOCKS)}
+    user_blocks: list[dict] = list(config.get("daily_blocks") or [])
+    have_names = {b.get("name", "").lower() for b in user_blocks}
+    for default in DEFAULT_MEAL_BLOCKS:
+        if default["name"].lower() not in have_names:
+            user_blocks.append(dict(default))
+    return {**config, "daily_blocks": user_blocks}
 
 
 def with_sleep_defaults(config: dict) -> dict:

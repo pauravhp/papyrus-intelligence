@@ -620,14 +620,44 @@ def test_first_time_user_gets_default_meal_blocks_in_prompt():
     assert "Dinner 18:30–19:30" in prompt
 
 
-def test_with_meal_defaults_helper_returns_unchanged_when_user_set():
-    """The helper must not clobber a user's explicit daily_blocks."""
+def test_with_meal_defaults_helper_keeps_user_meals_and_fills_missing():
+    """User-customised meals win; missing meals get defaulted in.
+
+    Per-meal merge behaviour: the helper preserves any user entry whose
+    name matches Breakfast/Lunch/Dinner verbatim, and appends the missing
+    ones. Other custom blocks (e.g. "Brunch") are kept and the standard
+    meals are still added alongside — by design, users either accept the
+    default meal trio or customise each one.
+    """
     from api.services.defaults import with_meal_defaults
 
-    user_blocks = [{"name": "Brunch", "start": "11:00", "end": "12:30"}]
+    cfg = {
+        "daily_blocks": [
+            {"name": "Lunch", "start": "13:00", "end": "14:00", "days": "all", "movable": False, "buffer_before_minutes": 0, "buffer_after_minutes": 0},
+        ]
+    }
+    out = with_meal_defaults(cfg)
+    names = [b["name"] for b in out["daily_blocks"]]
+    # User's customised Lunch survives
+    assert {"name": "Lunch", "start": "13:00", "end": "14:00", "days": "all", "movable": False, "buffer_before_minutes": 0, "buffer_after_minutes": 0} in out["daily_blocks"]
+    # Breakfast and Dinner are filled in with defaults
+    assert "Breakfast" in names
+    assert "Dinner" in names
+    # No duplicate Lunch from defaults
+    assert names.count("Lunch") == 1
+
+
+def test_with_meal_defaults_helper_passes_through_when_all_meals_present():
+    """When user has all three meals customised, no extra blocks are added."""
+    from api.services.defaults import with_meal_defaults
+
+    user_blocks = [
+        {"name": "Breakfast", "start": "07:00", "end": "07:30"},
+        {"name": "Lunch",     "start": "13:00", "end": "14:00"},
+        {"name": "Dinner",    "start": "20:00", "end": "21:00"},
+    ]
     cfg = {"daily_blocks": user_blocks}
     out = with_meal_defaults(cfg)
-    # Same blocks object; user wins
     assert out["daily_blocks"] == user_blocks
 
 

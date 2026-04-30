@@ -18,8 +18,84 @@ import type {
   PlanResponse,
 } from "@/lib/migrationApi";
 import MigrationPreview from "@/components/MigrationPreview";
-import DemoTour from "@/components/DemoTour";
 import PapyrusCalendarConfirm from "@/components/PapyrusCalendarConfirm";
+import DayColumn from "@/app/today/DayColumn";
+import type { DayData, ScheduledItem } from "@/app/today/TodayPage";
+
+// Inline banner that replaces the driver.js popover overlay.
+// Driver.js's overlay collided badly with our table-based layouts —
+// the close button text wrapped vertically and the popover obscured
+// the content it was supposed to introduce. A simple themed banner
+// at the top of each step is calmer and never blocks anything.
+function InlineBanner({
+  title,
+  body,
+  onSkip,
+}: {
+  title: string;
+  body: string;
+  onSkip?: () => void;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--accent-tint)",
+        border: "1px solid rgba(196,130,26,0.28)",
+        borderRadius: 10,
+        padding: "12px 16px",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+        marginBottom: 16,
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <p
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--text)",
+            margin: 0,
+            marginBottom: 4,
+            fontFamily: "var(--font-literata)",
+          }}
+        >
+          {title}
+        </p>
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--text-muted)",
+            margin: 0,
+            lineHeight: 1.5,
+            fontFamily: "var(--font-literata)",
+          }}
+        >
+          {body}
+        </p>
+      </div>
+      {onSkip && (
+        <button
+          onClick={onSkip}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-faint)",
+            fontSize: 11,
+            fontFamily: "var(--font-literata)",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            padding: "4px 6px",
+            flexShrink: 0,
+          }}
+          aria-label="Skip the rest of the import demo"
+        >
+          Skip demo
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Variant type — keep all three for forward-compatibility
@@ -203,6 +279,17 @@ const CARD: React.CSSProperties = {
   padding: "24px",
   maxWidth: 680,
   margin: "0 auto",
+  marginTop: 40,
+};
+
+const WALKTHROUGH_CARD: React.CSSProperties = {
+  background: "var(--surface)",
+  border: "1px solid var(--border)",
+  borderRadius: 12,
+  padding: "24px",
+  maxWidth: 760,
+  margin: "0 auto",
+  marginTop: 40,
 };
 
 const HEADING: React.CSSProperties = {
@@ -304,10 +391,6 @@ const NOTE: React.CSSProperties = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -393,11 +476,26 @@ export default function ImportStage({ variant, onComplete }: Props) {
     autoPlanFiredRef.current = true;
     const result = p.result;
     dispatch({ type: "AUTO_PLAN_START", result });
+    // After 7 PM local, ask the planner for tomorrow instead of today —
+    // a fresh-from-import "today" plan past dinner is mostly empty cutoff
+    // window, which makes the demo land flat. Tomorrow uses full defaults
+    // (wake → cutoff, with meal blocks and any GCal events already there).
+    const targetDate = new Date().getHours() >= 19 ? "tomorrow" : "today";
     (async () => {
       try {
         const token = await getToken();
-        const plan = await runPlanForToday(token);
-        dispatch({ type: "AUTO_PLAN_OK", result, plan });
+        const plan = await runPlanForToday(token, targetDate);
+        // Belt-and-suspenders: if the planner itself reports the day is
+        // already over (auto_shift_to_tomorrow_suggested), retry on tomorrow.
+        if (
+          targetDate === "today" &&
+          plan.auto_shift_to_tomorrow_suggested === true
+        ) {
+          const retried = await runPlanForToday(token, "tomorrow");
+          dispatch({ type: "AUTO_PLAN_OK", result, plan: retried });
+        } else {
+          dispatch({ type: "AUTO_PLAN_OK", result, plan });
+        }
       } catch {
         dispatch({ type: "AUTO_PLAN_FAIL", result, message: "Couldn't generate a plan." });
       }
@@ -590,7 +688,11 @@ export default function ImportStage({ variant, onComplete }: Props) {
     const { result } = phase;
     return (
       <div style={CARD}>
-        <DemoTour step="post_commit" anchor={null} onSkip={handleSkipOut} />
+        <InlineBanner
+          title="Saved"
+          body="Tasks are in your Todoist; routines are in Papyrus. I'll generate a schedule next."
+          onSkip={handleSkipOut}
+        />
         <div style={SPINNER_WRAP}>
           <div style={SPINNER} />
           <p style={{ ...NOTE, marginTop: 0 }}>
@@ -598,7 +700,7 @@ export default function ImportStage({ variant, onComplete }: Props) {
             {result.rhythms_created > 0
               ? ` and ${result.rhythms_created} rhythm${result.rhythms_created !== 1 ? "s" : ""}`
               : ""}
-            . Generating today&apos;s schedule…
+            . Generating your schedule…
           </p>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -610,10 +712,14 @@ export default function ImportStage({ variant, onComplete }: Props) {
   if (phase.tag === "auto_planning") {
     return (
       <div style={CARD}>
-        <DemoTour step="auto_plan" anchor={null} onSkip={handleSkipOut} />
+        <InlineBanner
+          title="Planning…"
+          body="Reading your free windows and choosing where each task fits best."
+          onSkip={handleSkipOut}
+        />
         <div style={SPINNER_WRAP}>
           <div style={SPINNER} />
-          <p style={{ ...NOTE, marginTop: 0 }}>Generating today&apos;s schedule from what you just imported…</p>
+          <p style={{ ...NOTE, marginTop: 0 }}>Generating your schedule from what you just imported…</p>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -624,7 +730,10 @@ export default function ImportStage({ variant, onComplete }: Props) {
   if (phase.tag === "auto_plan_failed") {
     return (
       <div style={CARD}>
-        <DemoTour step="schedule_walkthrough_failed" anchor={null} onSkip={handleSkipOut} />
+        <InlineBanner
+          title="Couldn't generate a plan"
+          body="Your tasks are saved. Try Plan today manually from the dashboard once you're in."
+        />
         <div style={{ marginTop: 16 }}>
           <button style={BTN_PRIMARY} onClick={handleSkipOut}>
             Take me to dashboard
@@ -634,51 +743,85 @@ export default function ImportStage({ variant, onComplete }: Props) {
     );
   }
 
-  // Schedule walkthrough — read-only list + DemoTour bubble
+  // Schedule walkthrough — DayColumn (Today-view style) + inline banner
   if (phase.tag === "schedule_walkthrough") {
     const { plan } = phase;
+    // Sort defensively — the LLM occasionally returns blocks out of order.
+    const sortedScheduled = [...plan.scheduled].sort(
+      (a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+    );
+    // Derive whether the plan landed on today or tomorrow from the first
+    // scheduled item's local date — we don't carry target_date through state.
+    const firstStart = sortedScheduled[0]?.start_time;
+    const planDate = firstStart
+      ? (() => {
+          const d = new Date(firstStart);
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        })()
+      : (() => {
+          const d = new Date();
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        })();
+    const todayStr = (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    })();
+    const isToday = planDate === todayStr;
+    const dayLabel = isToday ? "Today" : "Tomorrow";
+
+    // Convert PlanScheduledItem → ScheduledItem (DayColumn's expected shape).
+    // We don't have a category/kind from the planner, so fall back to "task"
+    // and null category.
+    const synthScheduled: ScheduledItem[] = sortedScheduled.map((item) => ({
+      task_id: item.task_id ?? `synth-${item.start_time}`,
+      task_name: item.task_name,
+      start_time: item.start_time,
+      end_time: item.end_time,
+      duration_minutes: item.duration_minutes,
+      category: null,
+      kind: "task",
+    }));
+    const dayData: DayData = {
+      schedule_date: planDate,
+      scheduled: synthScheduled,
+      pushed: plan.pushed.map((p) => ({
+        task_id: p.task_id ?? "",
+        reason: p.reason,
+        task_name: p.task_name,
+      })),
+      confirmed_at: null,
+      gcal_events: [],
+      all_day_events: [],
+    };
+
     return (
-      <div style={CARD}>
-        <DemoTour
-          step="schedule_walkthrough"
-          anchor={null}
-          variables={{ summary: plan.reasoning_summary }}
+      <div style={WALKTHROUGH_CARD}>
+        <InlineBanner
+          title={`Here's your ${dayLabel.toLowerCase()}`}
+          body={
+            plan.reasoning_summary ||
+            `I've placed your imported tasks across ${dayLabel.toLowerCase()}. Review the layout below — if it looks right, continue and I'll write events to your calendar.`
+          }
           onSkip={handleSkipOut}
         />
-        <p style={HEADING}>Today&apos;s schedule</p>
-        {plan.scheduled.length === 0 ? (
-          <p style={{ ...NOTE }}>No tasks could be scheduled for today.</p>
+        <p style={HEADING}>{dayLabel}&apos;s schedule</p>
+        {synthScheduled.length === 0 ? (
+          <p style={{ ...NOTE }}>
+            No tasks could be scheduled for {dayLabel.toLowerCase()}.
+          </p>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", display: "flex", flexDirection: "column", gap: 8 }}>
-            {plan.scheduled.map((item, i) => (
-              <li
-                key={i}
-                style={{
-                  background: "var(--surface-raised)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: "10px 14px",
-                  fontFamily: "var(--font-literata)",
-                }}
-              >
-                <span style={{ fontWeight: 600, color: "var(--text)", fontSize: 13 }}>
-                  {item.task_name}
-                </span>
-                <span style={{ color: "var(--text-muted)", fontSize: 12, marginLeft: 8 }}>
-                  {fmtTime(item.start_time)}–{fmtTime(item.end_time)} ({item.duration_minutes}m)
-                </span>
-                {item.reasoning && (
-                  <em style={{ display: "block", color: "var(--text-faint)", fontSize: 12, marginTop: 2, fontStyle: "italic" }}>
-                    {item.reasoning}
-                  </em>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div style={{ marginBottom: 20 }}>
+            <DayColumn
+              label={dayLabel}
+              dayData={dayData}
+              isToday={isToday}
+            />
+          </div>
         )}
         {plan.pushed.length > 0 && (
           <p style={{ ...NOTE, marginBottom: 16 }}>
-            {plan.pushed.length} task{plan.pushed.length !== 1 ? "s" : ""} pushed to tomorrow.
+            {plan.pushed.length} task{plan.pushed.length !== 1 ? "s" : ""} pushed to the next day.
           </p>
         )}
         <div style={{ display: "flex", gap: 10 }}>
@@ -700,7 +843,11 @@ export default function ImportStage({ variant, onComplete }: Props) {
   if (phase.tag === "settings_nudge") {
     return (
       <div style={CARD}>
-        <DemoTour step="settings_nudge" anchor={null} onSkip={handleSkipOut} />
+        <InlineBanner
+          title="Quick settings check"
+          body="I used some defaults — meal times, end-of-day cutoff. Want to fine-tune before we put this on your calendar?"
+          onSkip={handleSkipOut}
+        />
         <p style={HEADING}>Quick settings check</p>
         <p style={{ ...NOTE, marginBottom: 16 }}>
           I used some defaults — meal times, end-of-day cutoff. Want to fine-tune?
@@ -757,7 +904,10 @@ export default function ImportStage({ variant, onComplete }: Props) {
   if (phase.tag === "gcal_done") {
     return (
       <div style={CARD}>
-        <DemoTour step="done" anchor={null} onSkip={handleSkipOut} />
+        <InlineBanner
+          title="You're set"
+          body="Come back tomorrow morning, hit Plan today, and we'll do this for real."
+        />
         <p style={HEADING}>You&apos;re all set</p>
         <p style={{ ...NOTE, marginBottom: 16 }}>
           Tomorrow morning, come back and hit Plan today.
@@ -782,20 +932,13 @@ export default function ImportStage({ variant, onComplete }: Props) {
     );
   }
 
-  // Reveal: MigrationPreview + DemoTour overlay
+  // Reveal: MigrationPreview (the preview's own header already announces
+  // the count + has the "Why these labels?" toggle, so no separate banner).
   if (phase.tag === "reveal") {
     const { tasks, rhythms, unmatched } = phase;
-    const tasksN = tasks.length;
-    const rhythmsN = rhythms.length;
 
     return (
-      <div>
-        <DemoTour
-          step="reveal"
-          anchor={null}
-          variables={{ tasksN, rhythmsN }}
-          onSkip={handleSkipOut}
-        />
+      <div style={{ paddingTop: 40, maxWidth: 980, margin: "0 auto" }}>
         <MigrationPreview
           initialTasks={tasks}
           initialRhythms={rhythms}

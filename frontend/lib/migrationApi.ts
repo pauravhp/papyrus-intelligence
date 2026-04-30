@@ -140,8 +140,11 @@ export async function commitMigration(
  * Generates a proposed schedule for today. One LLM call, no external writes.
  * Used by the migration assistant demo to auto-plan after import.
  */
-export async function runPlanForToday(token: string): Promise<PlanResponse> {
-  return apiPost<PlanResponse>("/api/plan", { target_date: "today" }, token);
+export async function runPlanForToday(
+  token: string,
+  targetDate: "today" | "tomorrow" = "today",
+): Promise<PlanResponse> {
+  return apiPost<PlanResponse>("/api/plan", { target_date: targetDate }, token);
 }
 
 /**
