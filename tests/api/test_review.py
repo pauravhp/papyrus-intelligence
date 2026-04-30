@@ -235,6 +235,130 @@ def test_submit_writes_rhythm_completions(client, monkeypatch):
     mock_sb.from_.assert_any_call("rhythm_completions")
 
 
+def test_submit_closes_completed_todoist_tasks(client, monkeypatch):
+    """A completed real task must trigger Todoist close_task; rhythm tasks (proj_*) must be skipped."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+
+    payload = {
+        "tasks": [
+            {
+                "task_id": "real-task-1",
+                "task_name": "Deep work",
+                "completed": True,
+                "actual_duration_mins": 90,
+                "estimated_duration_mins": 90,
+                "scheduled_at": "2026-04-15T09:00:00+05:30",
+                "incomplete_reason": None,
+            },
+            {
+                "task_id": "real-task-2",
+                "task_name": "Skipped",
+                "completed": False,  # not completed → must NOT be closed
+                "actual_duration_mins": None,
+                "estimated_duration_mins": 30,
+                "scheduled_at": "2026-04-15T11:00:00+05:30",
+                "incomplete_reason": "ran out of time",
+            },
+            {
+                "task_id": "proj_42",
+                "task_name": "Daily meditation",
+                "completed": True,  # rhythm — must NOT be closed (not a real Todoist task)
+                "actual_duration_mins": 20,
+                "estimated_duration_mins": 20,
+                "scheduled_at": "2026-04-15T07:00:00+05:30",
+                "incomplete_reason": None,
+            },
+        ],
+        "rhythms": [],
+    }
+
+    mock_client = MagicMock()
+    with (
+        patch("api.routes.review.supabase", mock_sb),
+        patch("api.routes.review.get_valid_todoist_token", return_value="tok"),
+        patch("api.routes.review.TodoistClient", return_value=mock_client),
+    ):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    # Only the real, completed task gets closed
+    mock_client.close_task.assert_called_once_with("real-task-1")
+
+
+def test_submit_swallows_todoist_failure(client, monkeypatch):
+    """If Todoist close_task raises, the local save still succeeds."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+
+    payload = {
+        "tasks": [
+            {
+                "task_id": "real-task-1",
+                "task_name": "Deep work",
+                "completed": True,
+                "actual_duration_mins": 90,
+                "estimated_duration_mins": 90,
+                "scheduled_at": "2026-04-15T09:00:00+05:30",
+                "incomplete_reason": None,
+            },
+        ],
+        "rhythms": [],
+    }
+
+    mock_client = MagicMock()
+    mock_client.close_task.side_effect = RuntimeError("Todoist 503")
+
+    with (
+        patch("api.routes.review.supabase", mock_sb),
+        patch("api.routes.review.get_valid_todoist_token", return_value="tok"),
+        patch("api.routes.review.TodoistClient", return_value=mock_client),
+    ):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    assert resp.json()["saved"] is True
+    mock_client.close_task.assert_called_once_with("real-task-1")
+
+
+def test_submit_skips_todoist_when_no_completed_tasks(client, monkeypatch):
+    """If no real tasks are marked completed, don't even build a Todoist client."""
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+    mock_sb = MagicMock()
+    mock_sb.from_.return_value.upsert.return_value.execute.return_value.data = []
+
+    payload = {
+        "tasks": [
+            {
+                "task_id": "proj_42",
+                "task_name": "Rhythm only",
+                "completed": True,  # rhythm — not a real task
+                "actual_duration_mins": 20,
+                "estimated_duration_mins": 20,
+                "scheduled_at": "2026-04-15T07:00:00+05:30",
+                "incomplete_reason": None,
+            },
+        ],
+        "rhythms": [{"rhythm_id": 42, "completed": True}],
+    }
+
+    token_mock = MagicMock()
+    client_mock = MagicMock()
+    with (
+        patch("api.routes.review.supabase", mock_sb),
+        patch("api.routes.review.get_valid_todoist_token", token_mock),
+        patch("api.routes.review.TodoistClient", client_mock),
+    ):
+        resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
+
+    assert resp.status_code == 200
+    # No real-task completions → Todoist is never touched
+    token_mock.assert_not_called()
+    client_mock.assert_not_called()
+
+
 def test_submit_is_idempotent_on_resubmit(client, monkeypatch):
     """Second submit with same data should not raise — upsert handles conflict."""
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
@@ -361,7 +485,9 @@ def test_submit_response_no_longer_includes_summary_line(client, monkeypatch):
         resp = client.post("/api/review/submit", json=payload, headers={"Authorization": "Bearer fake-jwt"})
     assert resp.status_code == 200
     assert "summary_line" not in resp.json()
-    assert resp.json() == {"saved": True}
+    # Response now also reports Todoist completion counts (always zero when
+    # no completed real tasks were submitted).
+    assert resp.json() == {"saved": True, "todoist_closed": 0, "todoist_failed": 0}
 
 
 def test_preflight_accepts_date_param(client, monkeypatch):

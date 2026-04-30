@@ -252,6 +252,34 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
         "reviewed_at": datetime.now(timezone.utc).isoformat()
     }).eq("user_id", user_id).eq("schedule_date", target_date).eq("confirmed", 1).is_("reviewed_at", "null").execute()
 
+    # 4. Close completed tasks back in Todoist. Skip rhythm IDs (proj_*) and
+    #    empty IDs — neither corresponds to a real Todoist task. Per-task
+    #    failures are swallowed: a Todoist outage must not invalidate the
+    #    local save the user just confirmed.
+    todoist_close_ids = [
+        t.task_id for t in body.tasks
+        if t.completed and t.task_id and not t.task_id.startswith("proj_")
+    ]
+    todoist_closed = 0
+    todoist_failed = 0
+    if todoist_close_ids:
+        try:
+            todoist_token = get_valid_todoist_token(supabase, user_id)
+            todoist = TodoistClient(api_token=todoist_token)
+            for tid in todoist_close_ids:
+                try:
+                    todoist.close_task(tid)
+                    todoist_closed += 1
+                except Exception as exc:
+                    todoist_failed += 1
+                    logger.warning("[review.submit] close_task failed for %s: %s", tid, exc)
+        except TodoistTokenError as exc:
+            logger.warning("[review.submit] no valid Todoist token, skipping close: %s", exc)
+            todoist_failed = len(todoist_close_ids)
+        except Exception as exc:
+            logger.warning("[review.submit] Todoist client init failed: %s", exc)
+            todoist_failed = len(todoist_close_ids)
+
     background_tasks.add_task(
         capture,
         user_id,
@@ -261,10 +289,16 @@ def review_submit(body: ReviewSubmitRequest, background_tasks: BackgroundTasks, 
             "tasks_completed": sum(1 for t in body.tasks if t.completed),
             "rhythms_total": len(body.rhythms),
             "rhythms_completed": sum(1 for r in body.rhythms if r.completed),
+            "todoist_closed": todoist_closed,
+            "todoist_failed": todoist_failed,
         },
     )
 
-    return {"saved": True}
+    return {
+        "saved": True,
+        "todoist_closed": todoist_closed,
+        "todoist_failed": todoist_failed,
+    }
 
 
 class AggregateRequest(BaseModel):
