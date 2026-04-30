@@ -69,8 +69,9 @@ if [[ "${1:-}" == "--firsttime" ]]; then
    sudo systemctl reload caddy
 
 5) (Optional) Allow passwordless service restart for $(whoami):
-   echo "$(whoami) ALL=(ALL) NOPASSWD: /bin/systemctl restart ${SERVICE_NAME}" | sudo tee /etc/sudoers.d/${SERVICE_NAME}
+   echo "$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ${SERVICE_NAME}.service" | sudo tee /etc/sudoers.d/${SERVICE_NAME}
    sudo chmod 440 /etc/sudoers.d/${SERVICE_NAME}
+   sudo visudo -c -f /etc/sudoers.d/${SERVICE_NAME}  # syntax check
 
 After running 1-4, verify:
   curl -I https://${HOSTNAME}/health
