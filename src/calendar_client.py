@@ -86,6 +86,71 @@ def _detect_user_timezone(service) -> str | None:
         return None
 
 
+def _resolve_tz(service, timezone_str: str) -> ZoneInfo:
+    tz_str = _normalize_timezone(timezone_str)
+    if tz_str == "UTC":
+        detected = _detect_user_timezone(service)
+        if detected:
+            tz_str = _normalize_timezone(detected)
+    return ZoneInfo(tz_str)
+
+
+def _parse_gcal_item(item: dict, tz: ZoneInfo) -> CalendarEvent:
+    start_raw = item.get("start", {})
+    end_raw = item.get("end", {})
+    is_all_day = "date" in start_raw and "dateTime" not in start_raw
+    if is_all_day:
+        start_dt = datetime.strptime(start_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
+        end_dt = datetime.strptime(end_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
+    else:
+        start_dt = datetime.fromisoformat(start_raw["dateTime"])
+        end_dt = datetime.fromisoformat(end_raw["dateTime"])
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=tz)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=tz)
+    return CalendarEvent(
+        id=item.get("id", ""),
+        summary=item.get("summary", "(No title)"),
+        start=start_dt,
+        end=end_dt,
+        color_id=item.get("colorId"),
+        is_all_day=is_all_day,
+    )
+
+
+def _list_events_window(
+    service,
+    calendar_ids: list[str],
+    time_min_iso: str,
+    time_max_iso: str,
+    tz: ZoneInfo,
+) -> list[CalendarEvent]:
+    seen_ids: set[str] = set()
+    events: list[CalendarEvent] = []
+    for cal_id in calendar_ids:
+        try:
+            result = service.events().list(
+                calendarId=cal_id,
+                timeMin=time_min_iso,
+                timeMax=time_max_iso,
+                singleEvents=True,
+                orderBy="startTime",
+            ).execute()
+        except Exception as exc:
+            import sys
+            print(f"[get_events] calendar {cal_id!r} failed: {exc}", file=sys.stderr)
+            continue
+        for item in result.get("items", []):
+            event_id = item.get("id", "")
+            if event_id in seen_ids:
+                continue
+            seen_ids.add(event_id)
+            events.append(_parse_gcal_item(item, tz))
+    events.sort(key=lambda e: e.start)
+    return events
+
+
 def get_events(
     target_date: date,
     timezone_str: str = "America/Vancouver",
@@ -106,79 +171,43 @@ def get_events(
     """
     if not calendar_ids:
         return []
-
     if service is None:
         service = _get_calendar_service()
-
-    tz_str = _normalize_timezone(timezone_str)
-    # Auto-detect timezone from GCal when config is unset (UTC default)
-    if tz_str == "UTC":
-        detected = _detect_user_timezone(service)
-        if detected:
-            tz_str = _normalize_timezone(detected)
-
-    tz = ZoneInfo(tz_str)
-
+    tz = _resolve_tz(service, timezone_str)
     start_of_day = datetime(target_date.year, target_date.month, target_date.day,
                             0, 0, 0, tzinfo=tz)
     end_of_day = datetime(target_date.year, target_date.month, target_date.day,
                           23, 59, 59, tzinfo=tz)
+    return _list_events_window(
+        service, calendar_ids, start_of_day.isoformat(), end_of_day.isoformat(), tz
+    )
 
-    time_min = start_of_day.isoformat()
-    time_max = end_of_day.isoformat()
 
-    cal_ids = calendar_ids
+def get_events_range(
+    start_date: date,
+    end_date: date,
+    timezone_str: str = "America/Vancouver",
+    calendar_ids: list[str] | None = None,
+    service=None,
+) -> list[CalendarEvent]:
+    """Fetch events overlapping [start_date 00:00, end_date 23:59:59] in user's tz.
 
-    seen_ids: set[str] = set()
-    events: list[CalendarEvent] = []
-
-    for cal_id in cal_ids:
-        try:
-            result = service.events().list(
-                calendarId=cal_id,
-                timeMin=time_min,
-                timeMax=time_max,
-                singleEvents=True,
-                orderBy="startTime",
-            ).execute()
-        except Exception as exc:
-            import sys
-            print(f"[get_events] calendar {cal_id!r} failed: {exc}", file=sys.stderr)
-            continue  # skip calendars we can't read
-
-        for item in result.get("items", []):
-            event_id = item.get("id", "")
-            if event_id in seen_ids:
-                continue  # deduplicate (same event can appear in multiple calendars)
-            seen_ids.add(event_id)
-
-            start_raw = item.get("start", {})
-            end_raw = item.get("end", {})
-
-            is_all_day = "date" in start_raw and "dateTime" not in start_raw
-
-            if is_all_day:
-                start_dt = datetime.strptime(start_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
-                end_dt = datetime.strptime(end_raw["date"], "%Y-%m-%d").replace(tzinfo=tz)
-            else:
-                start_dt = datetime.fromisoformat(start_raw["dateTime"])
-                end_dt = datetime.fromisoformat(end_raw["dateTime"])
-                if start_dt.tzinfo is None:
-                    start_dt = start_dt.replace(tzinfo=tz)
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=tz)
-
-            events.append(CalendarEvent(
-                id=event_id,
-                summary=item.get("summary", "(No title)"),
-                start=start_dt,
-                end=end_dt,
-                color_id=item.get("colorId"),
-                is_all_day=is_all_day,
-            ))
-
-    events.sort(key=lambda e: e.start)
-    return events
+    One round-trip per calendar (vs N for per-day fetches). Caller buckets
+    results by date using overlap semantics — an event included if it overlaps
+    that day's [00:00, 24:00) window in the same tz.
+    """
+    if not calendar_ids:
+        return []
+    if service is None:
+        service = _get_calendar_service()
+    tz = _resolve_tz(service, timezone_str)
+    start_of_window = datetime(start_date.year, start_date.month, start_date.day,
+                               0, 0, 0, tzinfo=tz)
+    end_of_window = datetime(end_date.year, end_date.month, end_date.day,
+                             23, 59, 59, tzinfo=tz)
+    return _list_events_window(
+        service, calendar_ids, start_of_window.isoformat(), end_of_window.isoformat(), tz
+    )
 
 
 def build_gcal_service_from_credentials(

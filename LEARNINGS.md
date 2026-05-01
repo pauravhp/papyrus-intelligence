@@ -191,6 +191,26 @@ API gotchas and architectural decisions. Read before touching any API client cod
 
 ---
 
+## PERF-1 — `/api/today` async fan-out + single GCal range fetch (CYR-5, 2026-05-01)
+
+**Pre-refactor `/api/today` chained ~9 hops sequentially**: 2 Supabase reads of the same `users` row, 2 reads of `schedule_log`, 4 GCal `events.list` calls (3 per-day display fetches + 1 unfiltered duplicate today-fetch for reconcile), and 2 Todoist calls. Total: ~8 s wall clock, dominated by the 4 GCal RTTs. Handler was synchronous (`def`, not `async def`).
+
+**Fix**: convert handler to `async def` and fan out independent I/O via `asyncio.gather` + `asyncio.to_thread` (the supabase, googleapiclient, and Todoist clients are all blocking sync libs):
+
+- Phase 1: `schedule_log` window read ‖ users-row read (via `get_user_calendars`, now returning a 6-tuple including the parsed `config` dict — eliminates the second users-row read).
+- Phase 2: GCal range fetch ‖ Todoist (active+completed) ‖ `_compute_review_queue`.
+- Phase 3: `reconcile_today` + post-reconcile re-read (sequential — writes).
+
+**`get_events_range(start_date, end_date, ...)`** added to `src/calendar_client.py` — replaces 3× per-day `events.list` calls with one `events.list` per calendar over the full window. Caller (`_bucket_events_by_day`) buckets by overlap so cross-midnight events still appear in both adjacent days' columns (preserves the previous per-day-fetch semantics).
+
+**The reconcile fetch's papyrus-event filter was a red herring.** Reconcile needs the unfiltered today list; display needs the filtered one. Same data, two views — the duplicate fetch was eliminated by deriving both views from the single range fetch in `_bucket_events_by_day`.
+
+**Reconcile is *not* deferred.** Per the prod incident in commit `c4dc74a`, reconcile must run synchronously on the read path with the safety guard intact: `if not todoist_fetch_ok and todoist_connected: skip`. Async fan-out doesn't change that — `to_thread(reconcile_today, ...)` runs in Phase 3 *after* the parallel fetches resolve.
+
+**Test seam moved from `get_events` → `_fetch_gcal_range`.** Tests that mocked `api.routes.today.get_events` to inject events now mock `api.routes.today._fetch_gcal_range`, which wraps the new range API and is patchable. Same shape (returns `list[CalendarEvent]`).
+
+---
+
 ## BUG-3 — GCal calendar selection (discovered 2026-04-16)
 
 **`get_events` originally only queried `"primary"` + an explicit `calendar_ids` whitelist from Supabase config.** The whitelist was always empty (not populated during onboarding), so only primary calendar was queried — missing events in non-primary calendars (e.g. work meetings in a shared org calendar).

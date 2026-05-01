@@ -5,6 +5,7 @@ Only returns entries where confirmed = 1 (written to GCal).
 For each date, returns the most recent confirmed entry (highest id).
 GCal events are fetched live for each day and returned alongside confirmed schedule data.
 """
+import asyncio
 import json
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -15,7 +16,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from api.auth import get_current_user, require_beta_access
 from api.config import settings
 from api.db import supabase
-from src.calendar_client import GcalReconnectRequired, build_gcal_service_from_credentials, get_events
+from src.calendar_client import (
+    GcalReconnectRequired,
+    build_gcal_service_from_credentials,
+    get_events_range,
+)
 from src.todoist_client import TodoistClient
 from api.services.reconcile_service import reconcile_today
 from api.services.todoist_token import get_valid_todoist_token, TodoistTokenError
@@ -158,14 +163,19 @@ def _tag_kind(scheduled: list[dict]) -> list[dict]:
 
 
 def get_user_calendars(user_id: str) -> tuple:
-    """Fetch GCal service, calendar IDs, and timezone for a user.
-    Returns (gcal_service, cal_ids, tz_str).
+    """Fetch GCal service, calendar IDs, timezone, and config for a user.
+
+    Returns (gcal_service, cal_ids, tz_str, todoist_connected,
+    gcal_reconnect_required, config). The config dict is the user's full
+    config — callers use it for cutoff/nudge logic without re-reading the
+    users row.
     """
     gcal_service = None
     cal_ids = ["primary"]
     tz_str = "UTC"
     todoist_connected = False
     gcal_reconnect_required = False
+    config: dict = {}
     try:
         user_row = (
             supabase.from_("users")
@@ -203,7 +213,7 @@ def get_user_calendars(user_id: str) -> tuple:
                     logger.warning("Failed to build GCal service for user %s: %s", user_id, e)
     except Exception:
         pass
-    return gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required
+    return gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required, config
 
 
 def _fetch_day_gcal_events(
@@ -215,6 +225,147 @@ def _fetch_day_gcal_events(
 ) -> tuple[list[dict], list[str]]:
     """Thin wrapper around _fetch_gcal_for_date; patchable in tests."""
     return _fetch_gcal_for_date(target_date, tz_str, cal_ids, gcal_service, papyrus_event_ids)
+
+
+def _bucket_events_by_day(
+    events: list,
+    target_dates: list[date],
+    tz_str: str,
+    papyrus_event_ids: set[str],
+) -> tuple[list[tuple[list[dict], list[str]]], list[dict]]:
+    """Bucket a flat list of CalendarEvents into per-day filtered views and an
+    unfiltered today-events list (for reconcile).
+
+    Each event is included in every day's bucket whose [00:00, 24:00) window
+    in the user's tz overlaps the event — preserving the per-day-fetch
+    semantics of the previous implementation, where a cross-midnight event
+    appeared in both the start day's and end day's columns.
+
+    Returns (per_day_results, today_unfiltered_dicts) where per_day_results
+    is a list aligned to target_dates, each entry (timed_dicts, all_day_names)
+    with papyrus events filtered out of the timed list.
+    """
+    try:
+        tz = ZoneInfo(tz_str)
+    except Exception:
+        tz = ZoneInfo("UTC")
+
+    today_obj = target_dates[1] if len(target_dates) >= 2 else (target_dates[0] if target_dates else date.today())
+    today_unfiltered: list[dict] = []
+
+    per_day: list[tuple[list[dict], list[str]]] = []
+    for d_obj in target_dates:
+        day_start = datetime(d_obj.year, d_obj.month, d_obj.day, 0, 0, 0, tzinfo=tz)
+        day_end = day_start + timedelta(days=1)
+        timed: list[dict] = []
+        all_day: list[str] = []
+        for e in events:
+            try:
+                e_start = e.start.astimezone(tz) if e.start.tzinfo else e.start.replace(tzinfo=tz)
+                e_end = e.end.astimezone(tz) if e.end.tzinfo else e.end.replace(tzinfo=tz)
+            except Exception:
+                continue
+            if not (e_start < day_end and e_end > day_start):
+                continue
+            if e.is_all_day:
+                all_day.append(e.summary)
+            else:
+                if e.id in papyrus_event_ids:
+                    continue
+                timed.append({
+                    "id": e.id,
+                    "summary": e.summary,
+                    "start_time": e.start.isoformat(),
+                    "end_time": e.end.isoformat(),
+                    "color_hex": GCAL_COLOR_HEX.get(e.color_id) if e.color_id else None,
+                })
+        per_day.append((timed, all_day))
+
+        if d_obj == today_obj:
+            today_unfiltered = [
+                {"id": e.id, "summary": e.summary,
+                 "start_time": e.start.isoformat(), "end_time": e.end.isoformat()}
+                for e in events
+                if not e.is_all_day
+                and e.start.astimezone(tz) < day_end
+                and e.end.astimezone(tz) > day_start
+            ]
+
+    return per_day, today_unfiltered
+
+
+def _fetch_gcal_range(
+    start_date: date,
+    end_date: date,
+    gcal_service,
+    cal_ids: list,
+    tz_str: str,
+) -> list:
+    """Fetch GCal events for [start_date, end_date]. Returns [] on failure or
+    when service/cal_ids are empty. Patchable in tests.
+    """
+    if not gcal_service or not cal_ids:
+        return []
+    try:
+        return get_events_range(
+            start_date=start_date,
+            end_date=end_date,
+            timezone_str=tz_str,
+            calendar_ids=cal_ids,
+            service=gcal_service,
+        )
+    except Exception:
+        logger.warning("[today] GCal range fetch failed", exc_info=True)
+        return []
+
+
+def _fetch_todoist_for_today(user_id: str, today_obj: date) -> tuple[set[str], set[str], bool]:
+    """Fetch Todoist active + completed task IDs for today. Returns
+    (active_ids, completed_ids, ok). ok=True only if BOTH calls succeeded —
+    callers must skip reconcile when ok=False (see commit c4dc74a).
+    """
+    try:
+        tod_token = get_valid_todoist_token(supabase, user_id)
+        tc = TodoistClient(tod_token)
+        active = {str(t.id) for t in tc.get_tasks(filter_str="today")}
+        completed = tc.get_completed_task_ids_for_date(today_obj)
+        return active, completed, True
+    except TodoistTokenError:
+        logger.warning("[today] Todoist token invalid — skipping reconcile fetch")
+    except Exception:
+        logger.warning("[today] Todoist fetch for reconcile failed", exc_info=True)
+    return set(), set(), False
+
+
+def _fetch_schedule_log_window(user_id: str, dates: list[str]) -> list[dict]:
+    """Read confirmed schedule_log rows for the given iso dates."""
+    result = (
+        supabase.from_("schedule_log")
+        .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
+        .eq("user_id", user_id)
+        .in_("schedule_date", dates)
+        .eq("confirmed", 1)
+        .order("id", desc=True)
+        .execute()
+    )
+    return result.data or []
+
+
+def _fetch_today_row(user_id: str, today_str: str) -> dict | None:
+    """Read the most recent confirmed schedule_log row for today, post-reconcile."""
+    refreshed = (
+        supabase.from_("schedule_log")
+        .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
+        .eq("user_id", user_id)
+        .eq("schedule_date", today_str)
+        .eq("confirmed", 1)
+        .order("id", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if isinstance(refreshed.data, list) and refreshed.data and refreshed.data[0].get("proposed_json"):
+        return refreshed.data[0]
+    return None
 
 
 def _parse_day(
@@ -246,68 +397,41 @@ def _parse_day(
 
 
 @router.get("/today")
-def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
+async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     """
     Returns confirmed schedules for yesterday, today, and tomorrow.
     GCal events are fetched live for each day and merged into the response.
     Uses idx_schedule_log_user_date index for efficiency.
+
+    Independent I/O is fanned out via asyncio.gather so total latency is
+    dominated by the slowest hop, not their sum:
+      Phase 1: schedule_log read ‖ users-row read
+      Phase 2: GCal range fetch ‖ Todoist (active+completed) ‖ review_queue
+      Phase 3: reconcile + post-reconcile re-read (sequential — writes)
     """
     user_id: str = user["sub"]
     today = date.today()
-    dates = [
-        (today - timedelta(days=1)).isoformat(),
-        today.isoformat(),
-        (today + timedelta(days=1)).isoformat(),
-    ]
+    today_obj = today
+    date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
+    dates = [d.isoformat() for d in date_objs]
+    today_str = dates[1]
 
-    result = (
-        supabase.from_("schedule_log")
-        .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
-        .eq("user_id", user_id)
-        .in_("schedule_date", dates)
-        .eq("confirmed", 1)
-        .order("id", desc=True)
-        .execute()
+    # ── Phase 1: parallel reads (schedule_log + users) ────────────────────────
+    schedule_rows, user_data = await asyncio.gather(
+        asyncio.to_thread(_fetch_schedule_log_window, user_id, dates),
+        asyncio.to_thread(get_user_calendars, user_id),
     )
+    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required, config = user_data
 
     # Group by date — first row per date is the most recent (desc order)
     by_date: dict[str, dict] = {}
-    for row in (result.data or []):
+    for row in (schedule_rows or []):
         d = row["schedule_date"]
         if d not in by_date:
             by_date[d] = row
 
-    # Fetch user config + google credentials via patchable helper
-    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required = get_user_calendars(user_id)
-
-    # Derive config for nudge/cutoff; re-read only the config portion
-    config: dict = {}
-    try:
-        cfg_row = (
-            supabase.from_("users")
-            .select("config")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-        if cfg_row.data:
-            config = cfg_row.data.get("config") or {}
-    except Exception:
-        pass  # review_available defaults to False on error
-
-    # Check if a confirmed schedule exists for today (separate lightweight query)
-    today_str = dates[1]  # dates[1] is today's iso string
-    schedule_check = (
-        supabase.from_("schedule_log")
-        .select("id")
-        .eq("user_id", user_id)
-        .eq("schedule_date", today_str)
-        .eq("confirmed", 1)
-        .order("id", desc=True)
-        .limit(1)
-        .execute()
-    )
-    has_confirmed_schedule = bool(schedule_check.data)
+    # Today's confirmed-schedule check is derivable from the rows we already have
+    has_confirmed_schedule = today_str in by_date
 
     needs_calendar = not config.get("source_calendar_ids")
     needs_todoist = not todoist_connected
@@ -317,7 +441,6 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         "needs_calendar": needs_calendar,
         "needs_todoist": needs_todoist,
     }
-    date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
 
     # Union papyrus_event_ids across ALL three days. A cross-midnight Papyrus
     # event written for yesterday's row also satisfies GCal's "events on
@@ -328,61 +451,40 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     for d_str in dates:
         all_papyrus_ids |= _papyrus_ids(by_date.get(d_str))
 
-    gcal_results: list[tuple[list, list]] = []
-    for d_obj, d_str in zip(date_objs, dates):
-        gcal_results.append(
-            _fetch_day_gcal_events(d_obj, gcal_service, cal_ids, tz_str, all_papyrus_ids)
-        )
+    cutoff = _cutoff_passed(config)
 
-    # ── Reconcile today (#6 sync-back) ───────────────────────────────────────
-    today_obj = today
-    todoist_active_ids: set[str] = set()
-    todoist_completed_ids: set[str] = set()
-    # Track whether BOTH Todoist calls returned cleanly. If either failed, we
-    # cannot safely reconcile: items not in active_ids look "deleted" and the
-    # current rule-set DROPs them from schedule_log.proposed_json. Caught in
-    # prod 2026-04-30 — the sync v9 endpoint returned 410, the exception
-    # killed the second assignment, reconcile ran against partial data and
-    # wiped every scheduled item from a confirmed schedule.
-    todoist_fetch_ok = False
-    if todoist_connected:
-        try:
-            tod_token = get_valid_todoist_token(supabase, user_id)
-            tc = TodoistClient(tod_token)
-            todoist_active_ids = {str(t.id) for t in tc.get_tasks(filter_str="today")}
-            todoist_completed_ids = tc.get_completed_task_ids_for_date(today_obj)
-            todoist_fetch_ok = True
-        except TodoistTokenError:
-            logger.warning("[today] Todoist token invalid — skipping reconcile fetch")
-        except Exception:
-            logger.warning("[today] Todoist fetch for reconcile failed", exc_info=True)
+    # ── Phase 2: parallel external fetches + review queue ─────────────────────
+    # Single GCal range call covers all 3 days (was 4 separate calls — 3 for
+    # display + 1 unfiltered duplicate for reconcile). The unfiltered today
+    # slice is derived from the same response in _bucket_events_by_day.
+    todoist_coro = (
+        asyncio.to_thread(_fetch_todoist_for_today, user_id, today_obj)
+        if todoist_connected
+        else _noop_todoist()
+    )
+    gcal_events_flat, todoist_data, review_queue = await asyncio.gather(
+        asyncio.to_thread(
+            _fetch_gcal_range, date_objs[0], date_objs[2], gcal_service, cal_ids, tz_str
+        ),
+        todoist_coro,
+        asyncio.to_thread(_compute_review_queue, user_id, today, cutoff),
+    )
+    todoist_active_ids, todoist_completed_ids, todoist_fetch_ok = todoist_data
 
-    # Fetch today's full GCal event list (no papyrus filter) for reconcile
-    today_gcal_dicts: list[dict] = []
-    if gcal_service:
-        try:
-            today_events_full = get_events(
-                target_date=today_obj,
-                timezone_str=tz_str,
-                calendar_ids=cal_ids,
-                service=gcal_service,
-            )
-            today_gcal_dicts = [
-                {"id": e.id, "summary": e.summary,
-                 "start_time": e.start.isoformat(), "end_time": e.end.isoformat()}
-                for e in today_events_full if not e.is_all_day
-            ]
-        except Exception:
-            logger.warning("[today] GCal fetch for reconcile failed", exc_info=True)
+    gcal_results, today_gcal_dicts = _bucket_events_by_day(
+        gcal_events_flat, date_objs, tz_str, all_papyrus_ids
+    )
 
+    # ── Phase 3: reconcile (writes — must run sequentially after fetches) ─────
     if not todoist_fetch_ok and todoist_connected:
         # Bail out of reconcile entirely. Without confirmed Todoist state we
         # can't tell deleted-in-Todoist apart from "API hiccup" and the
-        # latter would silently destroy the user's schedule.
+        # latter would silently destroy the user's schedule (see commit c4dc74a).
         logger.info("[today] skipping reconcile — Todoist fetch did not complete")
     else:
         try:
-            reconcile_today(
+            await asyncio.to_thread(
+                reconcile_today,
                 {
                     "supabase": supabase,
                     "user_id": user_id,
@@ -393,24 +495,11 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
                 },
                 today_obj,
             )
-            # Re-read today's row so the response reflects any reconcile mutations
-            refreshed = (
-                supabase.from_("schedule_log")
-                .select("schedule_date, proposed_json, confirmed_at, gcal_event_ids")
-                .eq("user_id", user_id)
-                .eq("schedule_date", today_str)
-                .eq("confirmed", 1)
-                .order("id", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if isinstance(refreshed.data, list) and refreshed.data and refreshed.data[0].get("proposed_json"):
-                by_date[today_str] = refreshed.data[0]
+            refreshed = await asyncio.to_thread(_fetch_today_row, user_id, today_str)
+            if refreshed:
+                by_date[today_str] = refreshed
         except Exception:
             logger.warning("[today] reconcile_today failed — serving pre-reconcile state", exc_info=True)
-
-    cutoff = _cutoff_passed(config)
-    review_queue = _compute_review_queue(user_id, today, cutoff)
 
     return {
         "yesterday": _parse_day(by_date.get(dates[0]), dates[0], gcal_results[0][0], gcal_results[0][1]),
@@ -422,3 +511,11 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         "gcal_reconnect_required": gcal_reconnect_required,
         "todoist_completed_ids": sorted(todoist_completed_ids),
     }
+
+
+async def _noop_todoist() -> tuple[set[str], set[str], bool]:
+    """Stand-in for the Todoist coroutine when the user has no Todoist
+    connection — keeps the gather call uniform. todoist_fetch_ok=True so the
+    reconcile guard does NOT skip (the guard targets *failed* fetches for
+    *connected* users only)."""
+    return set(), set(), True
