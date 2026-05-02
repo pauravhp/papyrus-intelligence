@@ -8,7 +8,9 @@ GCal events are fetched live for each day and returned alongside confirmed sched
 import asyncio
 import json
 import logging
+import time
 from datetime import date, datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -410,13 +412,17 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
       Phase 3: reconcile + post-reconcile re-read (sequential — writes)
     """
     user_id: str = user["sub"]
+    timings: dict[str, int] = {}
+    t_total = time.perf_counter()
 
     # ── Phase 1: user row first (we need the user's timezone) ─────────────────
     # `today` MUST be derived from the user's tz, not the server's. Servers
     # commonly run in UTC; without this, a user in PDT loading /today at
     # 5pm-ish their time (= past midnight UTC) sees their current day
     # rendered as "yesterday". Costs one Supabase RTT before we can fan out.
+    t = time.perf_counter()
     user_data = await asyncio.to_thread(get_user_calendars, user_id)
+    timings["users_row"] = int((time.perf_counter() - t) * 1000)
     gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required, config = user_data
 
     try:
@@ -444,19 +450,20 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     # Single GCal range call covers all 3 days (was 4 separate calls — 3 for
     # display + 1 unfiltered duplicate for reconcile). The unfiltered today
     # slice is derived from the same response in _bucket_events_by_day.
+    t = time.perf_counter()
     todoist_coro = (
-        asyncio.to_thread(_fetch_todoist_for_today, user_id, today_obj)
+        _timed("todoist", timings, _fetch_todoist_for_today, user_id, today_obj)
         if todoist_connected
-        else _noop_todoist()
+        else _noop_todoist_timed(timings)
     )
     schedule_rows, gcal_events_flat, todoist_data, review_queue = await asyncio.gather(
-        asyncio.to_thread(_fetch_schedule_log_window, user_id, dates),
-        asyncio.to_thread(
-            _fetch_gcal_range, date_objs[0], date_objs[2], gcal_service, cal_ids, tz_str
-        ),
+        _timed("schedule_log", timings, _fetch_schedule_log_window, user_id, dates),
+        _timed("gcal", timings, _fetch_gcal_range,
+               date_objs[0], date_objs[2], gcal_service, cal_ids, tz_str),
         todoist_coro,
-        asyncio.to_thread(_compute_review_queue, user_id, today, cutoff),
+        _timed("review_queue", timings, _compute_review_queue, user_id, today, cutoff),
     )
+    timings["phase2_total"] = int((time.perf_counter() - t) * 1000)
     todoist_active_ids, todoist_completed_ids, todoist_fetch_ok = todoist_data
 
     # Group by date — first row per date is the most recent (desc order)
@@ -482,13 +489,16 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     )
 
     # ── Phase 3: reconcile (writes — must run sequentially after fetches) ─────
+    reconcile_skipped = False
     if not todoist_fetch_ok and todoist_connected:
         # Bail out of reconcile entirely. Without confirmed Todoist state we
         # can't tell deleted-in-Todoist apart from "API hiccup" and the
         # latter would silently destroy the user's schedule (see commit c4dc74a).
         logger.info("[today] skipping reconcile — Todoist fetch did not complete")
+        reconcile_skipped = True
     else:
         try:
+            t = time.perf_counter()
             await asyncio.to_thread(
                 reconcile_today,
                 {
@@ -501,11 +511,37 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
                 },
                 today_obj,
             )
+            timings["reconcile"] = int((time.perf_counter() - t) * 1000)
+            t = time.perf_counter()
             refreshed = await asyncio.to_thread(_fetch_today_row, user_id, today_str)
+            timings["reconcile_reread"] = int((time.perf_counter() - t) * 1000)
             if refreshed:
                 by_date[today_str] = refreshed
         except Exception:
             logger.warning("[today] reconcile_today failed — serving pre-reconcile state", exc_info=True)
+
+    timings["total"] = int((time.perf_counter() - t_total) * 1000)
+    # One INFO line per request — granular enough to root-cause slow loads,
+    # cheap enough not to bloat logs. Drop to DEBUG once the perf work settles.
+    logger.info(
+        "[today] timings_ms total=%d users_row=%d gcal=%d todoist=%d schedule_log=%d "
+        "review_queue=%d phase2_total=%d reconcile=%s reconcile_reread=%s "
+        "(events=%d active_tasks=%d schedule_rows=%d cal_ids=%d skipped=%s)",
+        timings["total"],
+        timings.get("users_row", -1),
+        timings.get("gcal", -1),
+        timings.get("todoist", -1),
+        timings.get("schedule_log", -1),
+        timings.get("review_queue", -1),
+        timings.get("phase2_total", -1),
+        timings.get("reconcile", "—"),
+        timings.get("reconcile_reread", "—"),
+        len(gcal_events_flat),
+        len(todoist_active_ids),
+        len(schedule_rows or []),
+        len(cal_ids or []),
+        reconcile_skipped,
+    )
 
     return {
         "yesterday": _parse_day(by_date.get(dates[0]), dates[0], gcal_results[0][0], gcal_results[0][1]),
@@ -525,3 +561,27 @@ async def _noop_todoist() -> tuple[set[str], set[str], bool]:
     reconcile guard does NOT skip (the guard targets *failed* fetches for
     *connected* users only)."""
     return set(), set(), True
+
+
+async def _noop_todoist_timed(timings: dict[str, int]) -> tuple[set[str], set[str], bool]:
+    """Same as _noop_todoist but records a 0ms timing so summary log lines
+    stay uniform across connected/disconnected users."""
+    timings["todoist"] = 0
+    return set(), set(), True
+
+
+async def _timed(
+    label: str,
+    timings: dict[str, int],
+    blocking_fn: Callable[..., Any],
+    *args: Any,
+) -> Any:
+    """Wrap `asyncio.to_thread(blocking_fn, *args)` with elapsed-ms tracking
+    into the shared `timings` dict. For tasks running in `asyncio.gather`,
+    the recorded ms is each task's own wall-clock — they run on independent
+    threads so the values reflect their actual cost, not their critical-path
+    contribution."""
+    t = time.perf_counter()
+    result = await asyncio.to_thread(blocking_fn, *args)
+    timings[label] = int((time.perf_counter() - t) * 1000)
+    return result
