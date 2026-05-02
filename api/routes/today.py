@@ -253,7 +253,17 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
     Uses idx_schedule_log_user_date index for efficiency.
     """
     user_id: str = user["sub"]
-    today = date.today()
+
+    # `today` MUST be derived from the user's tz, not the server's. The VPS runs
+    # in UTC; without this, a user in PDT loading /today after midnight UTC
+    # (= late evening their time) sees their actual current day rendered as
+    # "yesterday" because date.today() on the server already rolled.
+    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required = get_user_calendars(user_id)
+    try:
+        user_tz = ZoneInfo(tz_str)
+    except Exception:
+        user_tz = ZoneInfo("UTC")
+    today = _get_now().astimezone(user_tz).date()
     dates = [
         (today - timedelta(days=1)).isoformat(),
         today.isoformat(),
@@ -276,9 +286,6 @@ def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         d = row["schedule_date"]
         if d not in by_date:
             by_date[d] = row
-
-    # Fetch user config + google credentials via patchable helper
-    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required = get_user_calendars(user_id)
 
     # Derive config for nudge/cutoff; re-read only the config portion
     config: dict = {}
