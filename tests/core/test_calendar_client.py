@@ -137,3 +137,56 @@ def test_build_gcal_service_raises_reconnect_required_when_no_refresh_token():
         # ValueError is from google-auth library when refresh_token missing
         # at construction; either is acceptable as "needs reconnect."
         build_gcal_service_from_credentials(creds_data, "test-id", "test-secret")
+
+
+def test_get_events_range_one_call_per_calendar_for_window():
+    """get_events_range fetches events across [start_date, end_date] with a
+    single events.list() call per calendar — not per day. This is the core
+    /today optimization: collapses 3×N round-trips into 1×N."""
+    from datetime import date, timedelta
+    from src.calendar_client import get_events_range
+
+    mock_svc = MagicMock()
+    mock_svc.events.return_value.list.return_value.execute.return_value = _make_event_response()
+
+    today = date.today()
+    get_events_range(
+        start_date=today - timedelta(days=1),
+        end_date=today + timedelta(days=1),
+        timezone_str="America/New_York",
+        calendar_ids=["primary", "work@co.com"],
+        service=mock_svc,
+    )
+
+    list_mock = mock_svc.events.return_value.list
+    # Two calendars × one window = 2 API calls (was 6 with per-day fetches)
+    assert list_mock.call_count == 2
+
+
+def test_get_events_range_empty_calendar_ids_returns_empty():
+    from datetime import date
+    from src.calendar_client import get_events_range
+    mock_svc = MagicMock()
+    result = get_events_range(date.today(), date.today(), calendar_ids=[], service=mock_svc)
+    assert result == []
+    mock_svc.events.assert_not_called()
+
+
+def test_get_events_range_window_spans_full_three_day_range():
+    """timeMin/timeMax span the full window, not just one day."""
+    from datetime import date, timedelta
+    from src.calendar_client import get_events_range
+    mock_svc = MagicMock()
+    mock_svc.events.return_value.list.return_value.execute.return_value = _make_event_response()
+
+    start = date(2026, 5, 1)
+    end = date(2026, 5, 3)
+    # Non-UTC tz so we don't trip the _detect_user_timezone fallback (which
+    # would call into the MagicMock and break ZoneInfo).
+    get_events_range(
+        start_date=start, end_date=end,
+        timezone_str="America/New_York", calendar_ids=["primary"], service=mock_svc,
+    )
+    kwargs = mock_svc.events.return_value.list.call_args.kwargs
+    assert kwargs["timeMin"].startswith("2026-05-01")
+    assert kwargs["timeMax"].startswith("2026-05-03")

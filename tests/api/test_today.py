@@ -36,6 +36,16 @@ def _mock_schedule_log(sb, rows):
     sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.gte.return_value.lte.return_value.order.return_value.execute.return_value.data = []
 
 
+def _today_in_tz(tz_name: str = "UTC") -> str:
+    """Compute today's iso date in the given tz — must match what the route
+    derives via `_get_now().astimezone(user_tz).date()`. Tests that hand the
+    route a tz of "UTC" must seed schedule_log with the UTC date, not
+    `date.today()` (which uses the test runner's local tz)."""
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    return datetime.now(timezone.utc).astimezone(ZoneInfo(tz_name)).date().isoformat()
+
+
 def _build_today_mock_with_unreviewed_dates(dates: list[str]) -> MagicMock:
     """Build a supabase MagicMock configured for both schedule_log queries and the review_queue query."""
     mock_sb = MagicMock()
@@ -51,9 +61,10 @@ def _build_today_mock_with_unreviewed_dates(dates: list[str]) -> MagicMock:
 def test_get_today_returns_three_days(client, monkeypatch):
     """GET /api/today returns yesterday/today/tomorrow keys."""
     from datetime import date, timedelta
-    today_str = date.today().isoformat()
-    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
-    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+    # Match the user-tz logic in the route: tz_str="UTC" → today is UTC today.
+    today_str = _today_in_tz("UTC")
+    yesterday_str = (date.fromisoformat(today_str) - timedelta(days=1)).isoformat()
+    tomorrow_str = (date.fromisoformat(today_str) + timedelta(days=1)).isoformat()
 
     schedule = {
         "scheduled": [{"task_id": "1", "task_name": "Deep work", "start_time": f"{today_str}T09:00:00-07:00", "end_time": f"{today_str}T10:30:00-07:00", "duration_minutes": 90}],
@@ -69,11 +80,11 @@ def test_get_today_returns_three_days(client, monkeypatch):
 
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
-         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today._fetch_gcal_range", return_value=[]), \
          patch("api.routes.today.supabase", mock_sb), \
          patch("api.routes.today.reconcile_today"), \
          patch("api.routes.today.get_user_calendars",
-               return_value=(mock_svc, ["primary"], "UTC", False, False)):
+               return_value=(mock_svc, ["primary"], "UTC", False, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -98,8 +109,7 @@ def test_today_skips_reconcile_when_todoist_fetch_fails(client, monkeypatch):
     schedule_log.proposed_json. With the safety guard, reconcile must be
     skipped entirely when the Todoist fetch did not complete.
     """
-    from datetime import date
-    today_str = date.today().isoformat()
+    today_str = _today_in_tz("UTC")
     schedule = {
         "scheduled": [{"task_id": "real-1", "task_name": "Deep work",
                        "start_time": f"{today_str}T09:00:00-07:00",
@@ -123,13 +133,13 @@ def test_today_skips_reconcile_when_todoist_fetch_fails(client, monkeypatch):
     mock_svc = MagicMock()
     reconcile_spy = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
-         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today._fetch_gcal_range", return_value=[]), \
          patch("api.routes.today.supabase", mock_sb), \
          patch("api.routes.today.reconcile_today", reconcile_spy), \
          patch("api.routes.today.get_valid_todoist_token", return_value="tok"), \
          patch("api.routes.today.TodoistClient", return_value=failing_tc), \
          patch("api.routes.today.get_user_calendars",
-               return_value=(mock_svc, ["primary"], "UTC", True, False)):
+               return_value=(mock_svc, ["primary"], "UTC", True, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -149,11 +159,11 @@ def test_get_today_handles_no_schedule(client, monkeypatch):
 
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
-         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today._fetch_gcal_range", return_value=[]), \
          patch("api.routes.today.supabase", mock_sb), \
          patch("api.routes.today.reconcile_today"), \
          patch("api.routes.today.get_user_calendars",
-               return_value=(mock_svc, ["primary"], "UTC", False, False)):
+               return_value=(mock_svc, ["primary"], "UTC", False, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -190,10 +200,16 @@ def test_today_response_includes_review_available_false_before_cutoff(client):
     assert resp.json()["review_available"] is False
 
 
-def test_today_response_includes_review_available_true_after_cutoff(client):
+def test_today_response_includes_review_available_true_after_cutoff(client, monkeypatch):
     """review_available is True when current time is at or after sleep_time - 2.5h."""
     from unittest.mock import patch, MagicMock
     from datetime import datetime, timezone
+
+    # 01:00 UTC on 2026-04-16 = 21:00 ET on 2026-04-15 — after cutoff (20:30 ET)
+    # `today` is now derived from _get_now() in the user's tz, so the
+    # schedule_log row's date must match the patched user-tz date (2026-04-15).
+    mock_now = datetime(2026, 4, 16, 1, 0, 0, tzinfo=timezone.utc)
+    today_str = "2026-04-15"
 
     mock_sb = MagicMock()
     mock_sb.from_.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value.data = {
@@ -202,15 +218,22 @@ def test_today_response_includes_review_available_true_after_cutoff(client):
             "rules": {"hard": []},
         },
     }
-    mock_sb.from_.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = [
-        {"id": 1}
-    ]
-    # 01:00 UTC next day = 21:00 ET — after cutoff of 20:30 ET
-    mock_now = datetime(2026, 4, 16, 1, 0, 0, tzinfo=timezone.utc)
+    _mock_schedule_log(mock_sb, [{
+        "schedule_date": today_str,
+        "proposed_json": json.dumps({"scheduled": [], "pushed": []}),
+        "confirmed_at": f"{today_str}T08:00:00Z",
+        "gcal_event_ids": "[]",
+    }])
 
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
     with patch("api.routes.today.supabase", mock_sb), \
          patch("api.routes.today._get_now", return_value=mock_now), \
-         patch("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"}):
+         patch("api.routes.today._fetch_gcal_range", return_value=[]), \
+         patch("api.routes.today.reconcile_today"), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(None, [], "America/New_York", False, False,
+                             {"user": {"timezone": "America/New_York", "sleep_time": "23:00"},
+                              "rules": {"hard": []}})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -245,7 +268,7 @@ def test_today_includes_gcal_events_when_no_confirmed_schedule(client, monkeypat
     from datetime import date, datetime, timezone
     from src.models import CalendarEvent
 
-    today = date.today()
+    today = date.fromisoformat(_today_in_tz("UTC"))
     mock_start = datetime(today.year, today.month, today.day, 9, 0, tzinfo=timezone.utc)
     mock_end = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
     ev1 = CalendarEvent(id="evt-1", summary="Team sync", start=mock_start, end=mock_end, color_id=None, is_all_day=False)
@@ -258,8 +281,10 @@ def test_today_includes_gcal_events_when_no_confirmed_schedule(client, monkeypat
 
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
-         patch("api.routes.today.get_events", return_value=[ev1, ev2]), \
-         patch("api.routes.today.supabase", mock_sb):
+         patch("api.routes.today._fetch_gcal_range", return_value=[ev1, ev2]), \
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(mock_svc, ["primary"], "UTC", False, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -274,8 +299,8 @@ def test_today_filters_papyrus_created_events(client, monkeypatch):
     from datetime import date, datetime, timezone
     from src.models import CalendarEvent
 
-    today = date.today()
-    today_str = today.isoformat()
+    today_str = _today_in_tz("UTC")
+    today = date.fromisoformat(today_str)
     mock_start = datetime(today.year, today.month, today.day, 9, 0, tzinfo=timezone.utc)
     mock_end = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
 
@@ -297,8 +322,10 @@ def test_today_filters_papyrus_created_events(client, monkeypatch):
 
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
-         patch("api.routes.today.get_events", return_value=[ev_papyrus, ev_other]), \
-         patch("api.routes.today.supabase", mock_sb):
+         patch("api.routes.today._fetch_gcal_range", return_value=[ev_papyrus, ev_other]), \
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(mock_svc, ["primary"], "UTC", False, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -310,8 +337,7 @@ def test_today_filters_papyrus_created_events(client, monkeypatch):
 
 def test_today_degrades_gracefully_without_gcal_credentials(client, monkeypatch):
     """No GCal credentials → gcal_events: [], confirmed schedule still returns normally."""
-    from datetime import date
-    today_str = date.today().isoformat()
+    today_str = _today_in_tz("UTC")
     schedule = {
         "scheduled": [{"task_id": "t1", "task_name": "Focus", "start_time": f"{today_str}T09:00:00Z", "end_time": f"{today_str}T10:00:00Z", "duration_minutes": 60}],
         "pushed": [],
@@ -335,7 +361,7 @@ def test_today_degrades_gracefully_without_gcal_credentials(client, monkeypatch)
     with patch("api.routes.today.supabase", mock_sb), \
          patch("api.routes.today.reconcile_today"), \
          patch("api.routes.today.get_user_calendars",
-               return_value=(None, [], "UTC", False, False)):
+               return_value=(None, [], "UTC", False, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -350,7 +376,7 @@ def test_today_separates_all_day_events(client, monkeypatch):
     from datetime import date, datetime, timezone
     from src.models import CalendarEvent
 
-    today = date.today()
+    today = date.fromisoformat(_today_in_tz("UTC"))
     mock_start = datetime(today.year, today.month, today.day, 0, 0, tzinfo=timezone.utc)
     mock_end = datetime(today.year, today.month, today.day, 23, 59, tzinfo=timezone.utc)
     timed_start = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
@@ -366,8 +392,10 @@ def test_today_separates_all_day_events(client, monkeypatch):
 
     mock_svc = MagicMock()
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(mock_svc, None)), \
-         patch("api.routes.today.get_events", return_value=[ev_all_day, ev_timed]), \
-         patch("api.routes.today.supabase", mock_sb):
+         patch("api.routes.today._fetch_gcal_range", return_value=[ev_all_day, ev_timed]), \
+         patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(mock_svc, ["primary"], "UTC", False, False, {})):
         resp = client.get("/api/today", headers={"Authorization": "Bearer fake-jwt"})
 
     assert resp.status_code == 200
@@ -407,7 +435,7 @@ def test_today_response_includes_unreviewed_dates_oldest_first(client, monkeypat
 def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
     """Items whose task_id starts with 'proj_' are rhythms; others are tasks."""
     rows = [{
-        "schedule_date": date.today().isoformat(),
+        "schedule_date": _today_in_tz("UTC"),
         "proposed_json": json.dumps({
             "scheduled": [
                 {"task_id": "8675309", "task_name": "Write spec", "start_time": "2026-04-28T09:00:00-07:00", "end_time": "2026-04-28T10:30:00-07:00", "duration_minutes": 90, "category": "deep_work"},
@@ -421,8 +449,8 @@ def test_get_today_tags_kind_rhythm_vs_task(client, monkeypatch):
     mock_sb = _build_today_mock_with_unreviewed_dates([])
     _mock_schedule_log(mock_sb, rows)
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u1"})
-    monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
-    monkeypatch.setattr("api.routes.today.get_user_calendars", lambda *a, **kw: (None, [], "UTC", False, False))
+    monkeypatch.setattr("api.routes.today._fetch_gcal_range", lambda *a, **kw: [])
+    monkeypatch.setattr("api.routes.today.get_user_calendars", lambda *a, **kw: (None, [], "UTC", False, False, {}))
     monkeypatch.setattr("api.routes.today.reconcile_today", lambda *a, **kw: None)
 
     with patch("api.routes.today.supabase", mock_sb):
@@ -448,9 +476,9 @@ def test_today_surfaces_gcal_reconnect_required_flag(client, monkeypatch):
     # Patch get_user_calendars to simulate the reconnect-required state.
     monkeypatch.setattr(
         "api.routes.today.get_user_calendars",
-        lambda *a, **kw: (None, [], "UTC", False, True),
+        lambda *a, **kw: (None, [], "UTC", False, True, {}),
     )
-    monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
+    monkeypatch.setattr("api.routes.today._fetch_gcal_range", lambda *a, **kw: [])
     monkeypatch.setattr("api.routes.today.reconcile_today", lambda *a, **kw: None)
     mock_sb = _build_today_mock_with_unreviewed_dates([])
     _mock_schedule_log(mock_sb, [])
@@ -467,9 +495,9 @@ def test_today_gcal_reconnect_required_false_in_happy_path(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "u-ok"})
     monkeypatch.setattr(
         "api.routes.today.get_user_calendars",
-        lambda *a, **kw: (None, ["primary"], "UTC", False, False),
+        lambda *a, **kw: (None, ["primary"], "UTC", False, False, {}),
     )
-    monkeypatch.setattr("api.routes.today._fetch_day_gcal_events", lambda *a, **kw: ([], []))
+    monkeypatch.setattr("api.routes.today._fetch_gcal_range", lambda *a, **kw: [])
     monkeypatch.setattr("api.routes.today.reconcile_today", lambda *a, **kw: None)
     mock_sb = _build_today_mock_with_unreviewed_dates([])
     _mock_schedule_log(mock_sb, [])
@@ -514,12 +542,12 @@ def test_today_calls_reconcile_and_hides_gcal_deleted(client, monkeypatch):
     fake_tc.get_tasks.return_value = [MagicMock(id="t_keep")]
     fake_tc.get_completed_task_ids_for_date.return_value = {"t_done"}
 
-    # get_user_calendars now returns 5-tuple including gcal_reconnect_required.
+    # get_user_calendars returns 6-tuple now (added: config dict).
     with patch("api.routes.today.build_gcal_service_from_credentials", return_value=(MagicMock(), None)), \
-         patch("api.routes.today.get_events", return_value=[]), \
+         patch("api.routes.today._fetch_gcal_range", return_value=[]), \
          patch("api.routes.today.supabase", mock_sb), \
          patch("api.routes.today.get_user_calendars",
-               return_value=(MagicMock(), ["primary"], "UTC", True, False)), \
+               return_value=(MagicMock(), ["primary"], "UTC", True, False, {})), \
          patch("api.routes.today.reconcile_today", fake_recon), \
          patch("api.routes.today.TodoistClient", return_value=fake_tc), \
          patch("api.routes.today.get_valid_todoist_token", return_value="tok"):
@@ -543,3 +571,122 @@ def test_today_calls_reconcile_and_hides_gcal_deleted(client, monkeypatch):
 
     # Response surfaces completed IDs to frontend
     assert body["todoist_completed_ids"] == ["t_done"]
+
+
+# ── _bucket_events_by_day: derives per-day views + reconcile slice from one fetch ──
+
+
+def test_bucket_events_by_day_buckets_per_day_and_filters_papyrus():
+    """A flat list of CalendarEvents bucketizes into per-day filtered views,
+    while the unfiltered today slice is returned alongside for reconcile."""
+    from datetime import datetime, timezone, date as _date, timedelta
+    from src.models import CalendarEvent
+    from api.routes.today import _bucket_events_by_day
+
+    today = _date.today()
+    yesterday = today - timedelta(days=1)
+    tomorrow = today + timedelta(days=1)
+
+    def _ev(eid, summary, day, h0, h1, all_day=False):
+        s = datetime(day.year, day.month, day.day, h0, 0, tzinfo=timezone.utc)
+        e = datetime(day.year, day.month, day.day, h1, 0, tzinfo=timezone.utc)
+        return CalendarEvent(id=eid, summary=summary, start=s, end=e, color_id=None, is_all_day=all_day)
+
+    events = [
+        _ev("y-1", "Yest meeting", yesterday, 9, 10),
+        _ev("t-1", "Today A", today, 10, 11),
+        _ev("t-papy", "Papyrus task", today, 12, 13),
+        _ev("tm-1", "Tomorrow A", tomorrow, 14, 15),
+        _ev("ad", "Holiday", today, 0, 23, all_day=True),
+    ]
+    per_day, today_unfiltered = _bucket_events_by_day(
+        events, [yesterday, today, tomorrow], "UTC", papyrus_event_ids={"t-papy"}
+    )
+    yest_timed, _ = per_day[0]
+    today_timed, today_all_day = per_day[1]
+    tom_timed, _ = per_day[2]
+
+    assert {e["id"] for e in yest_timed} == {"y-1"}
+    # Papyrus filtered out of the display view
+    assert {e["id"] for e in today_timed} == {"t-1"}
+    assert today_all_day == ["Holiday"]
+    assert {e["id"] for e in tom_timed} == {"tm-1"}
+
+    # Reconcile slice is unfiltered (papyrus included) and excludes all-day
+    assert {e["id"] for e in today_unfiltered} == {"t-1", "t-papy"}
+
+
+def test_bucket_events_by_day_cross_midnight_event_appears_in_both_days():
+    """Pre-refactor: per-day GCal fetches each independently returned a
+    cross-midnight event for both its start and end day. The new
+    single-fetch + bucket-by-overlap path must preserve this so the UI
+    doesn't lose blocks at day boundaries."""
+    from datetime import datetime, timezone, date as _date, timedelta
+    from src.models import CalendarEvent
+    from api.routes.today import _bucket_events_by_day
+
+    today = _date.today()
+    tomorrow = today + timedelta(days=1)
+
+    cross = CalendarEvent(
+        id="cross",
+        summary="Late shift",
+        start=datetime(today.year, today.month, today.day, 23, 0, tzinfo=timezone.utc),
+        end=datetime(tomorrow.year, tomorrow.month, tomorrow.day, 2, 0, tzinfo=timezone.utc),
+        color_id=None,
+        is_all_day=False,
+    )
+    per_day, _ = _bucket_events_by_day(
+        [cross], [today - timedelta(days=1), today, tomorrow], "UTC", papyrus_event_ids=set()
+    )
+    today_ids = {e["id"] for e in per_day[1][0]}
+    tomorrow_ids = {e["id"] for e in per_day[2][0]}
+    assert "cross" in today_ids
+    assert "cross" in tomorrow_ids
+
+
+def test_today_uses_user_timezone_not_server_timezone():
+    """Reproduces the bug from the screenshot in CYR-5: server is in UTC,
+    user is in PDT. At 5:04 PM PDT (= 00:04 UTC the *next* day), the user
+    opens /today. The server's `date.today()` already rolled to the next
+    day in UTC, so the user's actual today (e.g. May 1) was rendered as
+    "yesterday" and their May 1 events showed up in the wrong column.
+
+    Fix: derive `today` from _get_now().astimezone(user_tz).date(), not
+    from the server's local time.
+    """
+    from unittest.mock import patch, MagicMock
+    from datetime import datetime, timezone
+    from fastapi.testclient import TestClient
+    from api.main import app
+
+    # 00:04 UTC May 2 == 17:04 PDT May 1 — the exact moment from the bug report
+    mock_now = datetime(2026, 5, 2, 0, 4, 0, tzinfo=timezone.utc)
+
+    mock_sb = MagicMock()
+    # Seed a confirmed schedule for the user's *local* today (May 1 PDT).
+    _mock_schedule_log(mock_sb, [{
+        "schedule_date": "2026-05-01",
+        "proposed_json": json.dumps({"scheduled": [], "pushed": []}),
+        "confirmed_at": "2026-05-01T08:00:00-07:00",
+        "gcal_event_ids": "[]",
+    }])
+
+    with patch("api.routes.today.supabase", mock_sb), \
+         patch("api.routes.today._get_now", return_value=mock_now), \
+         patch("api.routes.today._fetch_gcal_range", return_value=[]), \
+         patch("api.routes.today.reconcile_today"), \
+         patch("api.routes.today.get_user_calendars",
+               return_value=(None, [], "America/Los_Angeles", False, False,
+                             {"user": {"timezone": "America/Los_Angeles"}})), \
+         patch("api.auth.verify_token", lambda token: {"sub": "u-pdt"}):
+        resp = TestClient(app).get("/api/today", headers={"Authorization": "Bearer fake"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # The user's May 1 schedule must surface under "today", not "yesterday".
+    assert body["today"] is not None, "today bucket must exist for user-tz May 1"
+    assert body["today"]["schedule_date"] == "2026-05-01"
+    # And yesterday must be the user-tz April 30.
+    if body["yesterday"]:
+        assert body["yesterday"]["schedule_date"] == "2026-04-30"
