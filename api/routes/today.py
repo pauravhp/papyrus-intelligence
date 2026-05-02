@@ -405,33 +405,29 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
 
     Independent I/O is fanned out via asyncio.gather so total latency is
     dominated by the slowest hop, not their sum:
-      Phase 1: schedule_log read ‖ users-row read
-      Phase 2: GCal range fetch ‖ Todoist (active+completed) ‖ review_queue
+      Phase 1: users-row read (need user's tz before we know which 3 dates)
+      Phase 2: schedule_log read ‖ GCal range ‖ Todoist (active+completed) ‖ review_queue
       Phase 3: reconcile + post-reconcile re-read (sequential — writes)
     """
     user_id: str = user["sub"]
-    today = date.today()
+
+    # ── Phase 1: user row first (we need the user's timezone) ─────────────────
+    # `today` MUST be derived from the user's tz, not the server's. Servers
+    # commonly run in UTC; without this, a user in PDT loading /today at
+    # 5pm-ish their time (= past midnight UTC) sees their current day
+    # rendered as "yesterday". Costs one Supabase RTT before we can fan out.
+    user_data = await asyncio.to_thread(get_user_calendars, user_id)
+    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required, config = user_data
+
+    try:
+        user_tz = ZoneInfo(tz_str)
+    except Exception:
+        user_tz = ZoneInfo("UTC")
+    today = _get_now().astimezone(user_tz).date()
     today_obj = today
     date_objs = [today - timedelta(days=1), today, today + timedelta(days=1)]
     dates = [d.isoformat() for d in date_objs]
     today_str = dates[1]
-
-    # ── Phase 1: parallel reads (schedule_log + users) ────────────────────────
-    schedule_rows, user_data = await asyncio.gather(
-        asyncio.to_thread(_fetch_schedule_log_window, user_id, dates),
-        asyncio.to_thread(get_user_calendars, user_id),
-    )
-    gcal_service, cal_ids, tz_str, todoist_connected, gcal_reconnect_required, config = user_data
-
-    # Group by date — first row per date is the most recent (desc order)
-    by_date: dict[str, dict] = {}
-    for row in (schedule_rows or []):
-        d = row["schedule_date"]
-        if d not in by_date:
-            by_date[d] = row
-
-    # Today's confirmed-schedule check is derivable from the rows we already have
-    has_confirmed_schedule = today_str in by_date
 
     needs_calendar = not config.get("source_calendar_ids")
     needs_todoist = not todoist_connected
@@ -442,18 +438,9 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         "needs_todoist": needs_todoist,
     }
 
-    # Union papyrus_event_ids across ALL three days. A cross-midnight Papyrus
-    # event written for yesterday's row also satisfies GCal's "events on
-    # today" query (its end_time is in today's window), and would otherwise
-    # double-render in today's column as a generic GCal block. Filtering by
-    # the union ensures every column hides every Papyrus-written event.
-    all_papyrus_ids: set[str] = set()
-    for d_str in dates:
-        all_papyrus_ids |= _papyrus_ids(by_date.get(d_str))
-
     cutoff = _cutoff_passed(config)
 
-    # ── Phase 2: parallel external fetches + review queue ─────────────────────
+    # ── Phase 2: schedule_log + GCal + Todoist + review_queue (all parallel) ──
     # Single GCal range call covers all 3 days (was 4 separate calls — 3 for
     # display + 1 unfiltered duplicate for reconcile). The unfiltered today
     # slice is derived from the same response in _bucket_events_by_day.
@@ -462,7 +449,8 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         if todoist_connected
         else _noop_todoist()
     )
-    gcal_events_flat, todoist_data, review_queue = await asyncio.gather(
+    schedule_rows, gcal_events_flat, todoist_data, review_queue = await asyncio.gather(
+        asyncio.to_thread(_fetch_schedule_log_window, user_id, dates),
         asyncio.to_thread(
             _fetch_gcal_range, date_objs[0], date_objs[2], gcal_service, cal_ids, tz_str
         ),
@@ -470,6 +458,24 @@ async def get_today_view(user: dict = Depends(require_beta_access)) -> dict:
         asyncio.to_thread(_compute_review_queue, user_id, today, cutoff),
     )
     todoist_active_ids, todoist_completed_ids, todoist_fetch_ok = todoist_data
+
+    # Group by date — first row per date is the most recent (desc order)
+    by_date: dict[str, dict] = {}
+    for row in (schedule_rows or []):
+        d = row["schedule_date"]
+        if d not in by_date:
+            by_date[d] = row
+
+    has_confirmed_schedule = today_str in by_date
+
+    # Union papyrus_event_ids across ALL three days. A cross-midnight Papyrus
+    # event written for yesterday's row also satisfies GCal's "events on
+    # today" query (its end_time is in today's window), and would otherwise
+    # double-render in today's column as a generic GCal block. Filtering by
+    # the union ensures every column hides every Papyrus-written event.
+    all_papyrus_ids: set[str] = set()
+    for d_str in dates:
+        all_papyrus_ids |= _papyrus_ids(by_date.get(d_str))
 
     gcal_results, today_gcal_dicts = _bucket_events_by_day(
         gcal_events_flat, date_objs, tz_str, all_papyrus_ids
