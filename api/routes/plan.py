@@ -11,8 +11,9 @@ Each route is one LLM call (or zero, for confirm).
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -135,11 +136,33 @@ def _load_user_ctx(user_id: str) -> dict:
     }
 
 
-def _resolve_date(label: str) -> date:
+def _get_now() -> datetime:
+    """Patchable wrapper around datetime.now for testing."""
+    return datetime.now(timezone.utc)
+
+
+def _user_today(tz_str: str) -> date:
+    """Today's date in the user's tz. The VPS runs in UTC; without this,
+    `date.today()` returns the server's UTC date — for a user in PDT loading
+    /api/plan late evening (after midnight UTC) it returns *their* tomorrow,
+    which then makes "tomorrow" resolve to the day after that. Same bug class
+    as the one fixed in /api/today on 2026-05-01."""
+    try:
+        tz = ZoneInfo(tz_str)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    return _get_now().astimezone(tz).date()
+
+
+def _resolve_date(label: str, tz_str: str) -> date:
+    today = _user_today(tz_str)
     if label == "tomorrow":
-        from datetime import timedelta
-        return date.today() + timedelta(days=1)
-    return date.today()
+        return today + timedelta(days=1)
+    return today
+
+
+def _user_tz_str(user_ctx: dict) -> str:
+    return (user_ctx.get("config") or {}).get("user", {}).get("timezone") or "UTC"
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -153,7 +176,7 @@ def _resolve_date(label: str) -> date:
 def plan(body: PlanRequest, user: dict = Depends(require_beta_access)) -> PlanResponse:
     """Propose a schedule for target_date. One LLM call. No external writes."""
     user_ctx = _load_user_ctx(user["sub"])
-    target_date = _resolve_date(body.target_date)
+    target_date = _resolve_date(body.target_date, _user_tz_str(user_ctx))
     try:
         result = planner.plan(user_ctx, target_date, body.context_note or "")
     except RuntimeError as exc:
@@ -173,7 +196,7 @@ def plan(body: PlanRequest, user: dict = Depends(require_beta_access)) -> PlanRe
 def refine(body: RefineRequest, user: dict = Depends(require_beta_access)) -> PlanResponse:
     """Refine an existing proposal with a new instruction. One LLM call."""
     user_ctx = _load_user_ctx(user["sub"])
-    target_date = _resolve_date(body.target_date)
+    target_date = _resolve_date(body.target_date, _user_tz_str(user_ctx))
     try:
         result = planner.refine(
             user_ctx,
@@ -199,7 +222,7 @@ def refine(body: RefineRequest, user: dict = Depends(require_beta_access)) -> Pl
 def confirm(body: ConfirmRequest, user: dict = Depends(require_beta_access)) -> ConfirmResponse:
     """Write the proposed schedule to GCal + Todoist + schedule_log."""
     user_ctx = _load_user_ctx(user["sub"])
-    target_date = _resolve_date(body.target_date)
+    target_date = _resolve_date(body.target_date, _user_tz_str(user_ctx))
     try:
         result = planner.confirm(user_ctx, body.schedule, target_date, target_calendar_id=body.target_calendar_id)
     except planner.AlreadyConfirmedError as exc:

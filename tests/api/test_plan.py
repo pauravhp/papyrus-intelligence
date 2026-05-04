@@ -1524,3 +1524,87 @@ def test_confirm_routes_to_target_calendar_id_when_provided(client, monkeypatch)
     assert kwargs.get("calendar_id") == "papyrus-cal-id-123", (
         f"Expected calendar_id='papyrus-cal-id-123', got {kwargs.get('calendar_id')!r}"
     )
+
+
+def test_plan_resolves_target_date_in_user_tz_not_server_tz(client, monkeypatch):
+    """Regression: VPS runs in UTC. At 22:31 PDT May 3 (= 05:31 UTC May 4),
+    user clicked "Plan tomorrow" expecting May 4. Server's `date.today()`
+    had already rolled to May 4 in UTC, so `tomorrow` resolved to May 5
+    and the plan was generated for the wrong day. Fix: resolve target_date
+    against the user's tz.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    # 05:31 UTC May 4 == 22:31 PDT May 3 — the exact moment from the bug report
+    mock_now = datetime(2026, 5, 4, 5, 31, 0, tzinfo=timezone.utc)
+    expected_target = date(2026, 5, 4)  # May 4 PDT — the user's "tomorrow"
+
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    captured: dict = {}
+
+    def fake_plan(user_ctx, target_date, context_note):
+        captured["target_date"] = target_date
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan._get_now", return_value=mock_now), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.plan", side_effect=fake_plan):
+
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "tomorrow", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["target_date"] == expected_target, (
+        f"expected planner to receive {expected_target} (user-tz tomorrow); "
+        f"got {captured['target_date']} (server-tz next day = bug)"
+    )
+
+
+def test_plan_resolves_today_in_user_tz_not_server_tz(client, monkeypatch):
+    """Same bug class: at 22:31 PDT May 3, "today" must resolve to May 3
+    (user's tz), not May 4 (server's UTC date)."""
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    mock_now = datetime(2026, 5, 4, 5, 31, 0, tzinfo=timezone.utc)
+    expected_target = date(2026, 5, 3)  # May 3 PDT — user's actual today
+
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    captured: dict = {}
+
+    def fake_plan(user_ctx, target_date, context_note):
+        captured["target_date"] = target_date
+        return {"scheduled": [], "pushed": [], "reasoning_summary": ""}
+
+    mock_gcal = MagicMock()
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan._get_now", return_value=mock_now), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.plan", side_effect=fake_plan):
+
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["target_date"] == expected_target, (
+        f"expected planner to receive {expected_target} (user-tz today); "
+        f"got {captured['target_date']} (server-tz date = bug)"
+    )
