@@ -40,10 +40,25 @@ from api.services.schedule_service import schedule_day
 
 logger = logging.getLogger(__name__)
 
-# Truncation tolerance — accept a duration up to this fraction below the
-# original. Below this, we treat it as silent shortening and reject. Tuned to
-# allow tiny rounding (LLM emits 89 vs original 90) without rejecting it.
+# Truncation tolerance — accept a duration this fraction below the original
+# without rejecting. Tuned to allow tiny rounding (LLM emits 89 vs original 90).
+# For tasks ≥ 90m, _LONG_TASK_ABSOLUTE_LENIENCY_MIN provides additional slack so
+# a 120m task placed at 110m (5%-rule would reject — 95%×120=114) is accepted;
+# humans don't notice the last 10–15 min of a long focused block, and rejecting
+# leaves a visible ghost gap in the rendered schedule.
 _TRUNCATION_TOLERANCE = 0.95
+_LONG_TASK_THRESHOLD_MIN = 90
+_LONG_TASK_ABSOLUTE_LENIENCY_MIN = 15
+
+
+def _min_required_duration(original_min: int) -> int:
+    """Floor duration the validator will accept for a task whose declared
+    minimum is `original_min`. Long tasks (≥ 90m) get the more permissive of
+    the 5%-tolerance floor and a flat 15-min absolute leniency."""
+    pct_floor = int(original_min * _TRUNCATION_TOLERANCE)
+    if original_min >= _LONG_TASK_THRESHOLD_MIN:
+        return min(pct_floor, original_min - _LONG_TASK_ABSOLUTE_LENIENCY_MIN)
+    return pct_floor
 
 # Window in which a repeat /api/plan/confirm or /api/replan/confirm POST is
 # treated as a UI double-click and replayed idempotently instead of writing
@@ -440,7 +455,7 @@ def _validate_proposed(
         original = original_durations.get(tid)
         if original and per_item_kept:
             total_dur = sum(int(p.get("duration_minutes", 0) or 0) for p in per_item_kept)
-            min_required = int(original["min"] * _TRUNCATION_TOLERANCE)
+            min_required = _min_required_duration(int(original["min"]))
             if total_dur < min_required:
                 # Truncated. Reject ALL parts and surface as one push.
                 rejected.append({

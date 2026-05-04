@@ -501,6 +501,157 @@ def test_validator_rejects_truncated_task(client, monkeypatch):
     assert "duration" in data["pushed"][0]["reason"].lower() or "fit" in data["pushed"][0]["reason"].lower()
 
 
+def test_validator_allows_15min_leniency_on_long_task(client, monkeypatch):
+    """Reproduces the 2026-05-02 prod bug: a 120m task placed at 110m was
+    rejected by the 5%-tolerance rule (114m floor) and disappeared, leaving a
+    visible gap in the rendered schedule. With absolute 15-min leniency on
+    tasks ≥ 90m, the 105m floor accepts the 110m placement."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    today_iso = _today()
+
+    def fake_schedule_day(**_kwargs):
+        return {
+            "scheduled": [{
+                "task_id": "long-read", "task_name": "Read GPU papers",
+                "duration_minutes": 110,
+                "start_time": f"{today_iso}T17:40:00-07:00",
+                "end_time":   f"{today_iso}T19:30:00-07:00",
+            }],
+            "pushed": [],
+            "reasoning_summary": "ok",
+        }
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+    mock_todoist.get_tasks.return_value = [_stub_task("long-read", "Read GPU papers", 120)]
+    mock_todoist.get_todays_scheduled_tasks.return_value = []
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.get_events", return_value=[]), \
+         patch("api.services.planner.compute_free_windows", return_value=[_stub_window()]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints",
+               return_value=ExtractionResult(blocks=[], cutoff_override_iso=None)), \
+         patch("api.services.planner.schedule_day", side_effect=fake_schedule_day):
+
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    # Task should land in scheduled[], not be rejected as truncation
+    assert len(data["scheduled"]) == 1, f"expected leniency to accept 110m of 120m; got pushed={data['pushed']}"
+    assert data["scheduled"][0]["task_id"] == "long-read"
+    assert not any(p["task_id"] == "long-read" for p in data["pushed"])
+
+
+def test_validator_still_rejects_clear_shortening_of_long_task(client, monkeypatch):
+    """Leniency caps at 15 min absolute. A 180m task placed at 110m is a 70m
+    shortening — well past the leniency budget — and must still be rejected."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    today_iso = _today()
+
+    def fake_schedule_day(**_kwargs):
+        return {
+            "scheduled": [{
+                "task_id": "very-long", "task_name": "Deep work session",
+                "duration_minutes": 110,
+                "start_time": f"{today_iso}T14:00:00-07:00",
+                "end_time":   f"{today_iso}T15:50:00-07:00",
+            }],
+            "pushed": [],
+            "reasoning_summary": "ok",
+        }
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+    mock_todoist.get_tasks.return_value = [_stub_task("very-long", "Deep work session", 180)]
+    mock_todoist.get_todays_scheduled_tasks.return_value = []
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.get_events", return_value=[]), \
+         patch("api.services.planner.compute_free_windows", return_value=[_stub_window()]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints",
+               return_value=ExtractionResult(blocks=[], cutoff_override_iso=None)), \
+         patch("api.services.planner.schedule_day", side_effect=fake_schedule_day):
+
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["scheduled"] == []
+    assert len(data["pushed"]) == 1
+    assert data["pushed"][0]["task_id"] == "very-long"
+
+
+def test_validator_keeps_strict_5pct_for_short_tasks(client, monkeypatch):
+    """The 15-min absolute leniency only kicks in for ≥ 90m tasks. A 60m task
+    placed at 50m is a 17% shortening and must still be rejected (5% rule
+    floor = 57m)."""
+    mock_sb = MagicMock()
+    _mock_user_row(mock_sb)
+    monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
+
+    today_iso = _today()
+
+    def fake_schedule_day(**_kwargs):
+        return {
+            "scheduled": [{
+                "task_id": "short-task", "task_name": "Quick admin",
+                "duration_minutes": 50,
+                "start_time": f"{today_iso}T14:00:00-07:00",
+                "end_time":   f"{today_iso}T14:50:00-07:00",
+            }],
+            "pushed": [],
+            "reasoning_summary": "ok",
+        }
+
+    mock_gcal = MagicMock()
+    mock_todoist = MagicMock()
+    mock_todoist.get_tasks.return_value = [_stub_task("short-task", "Quick admin", 60)]
+    mock_todoist.get_todays_scheduled_tasks.return_value = []
+
+    with patch("api.routes.plan.supabase", mock_sb), \
+         patch("api.routes.plan.build_gcal_service_from_credentials", return_value=(mock_gcal, False)), \
+         patch("api.services.planner.TodoistClient", return_value=mock_todoist), \
+         patch("api.services.planner.get_events", return_value=[]), \
+         patch("api.services.planner.compute_free_windows", return_value=[_stub_window()]), \
+         patch("api.services.planner.get_active_rhythms", return_value=[]), \
+         patch("api.services.planner.extract_constraints",
+               return_value=ExtractionResult(blocks=[], cutoff_override_iso=None)), \
+         patch("api.services.planner.schedule_day", side_effect=fake_schedule_day):
+
+        resp = client.post(
+            "/api/plan",
+            json={"target_date": "today", "context_note": ""},
+            headers={"Authorization": "Bearer fake-jwt"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["scheduled"] == []
+    assert len(data["pushed"]) == 1
+    assert data["pushed"][0]["task_id"] == "short-task"
+
+
 def test_validator_accepts_legitimate_split(client, monkeypatch):
     """A 180m task split into 100m + 80m (sums to 180) passes truncation check."""
     mock_sb = MagicMock()
