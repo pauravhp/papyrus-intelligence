@@ -7,7 +7,7 @@ POST /api/replan/preflight — check which tasks Todoist marks as completed
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -35,8 +35,8 @@ router = APIRouter(prefix="/api")
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_now() -> datetime:
-    """Thin wrapper so tests can patch it."""
-    return datetime.now()
+    """Patchable wrapper around datetime.now for testing."""
+    return datetime.now(timezone.utc)
 
 
 def _sanitize_note(note: str | None, max_chars: int = 300) -> str:
@@ -105,8 +105,8 @@ def _load_user_context(user_id: str) -> dict:
 # Lane A had to keep this local during parallel work; lifted in Lane E.
 
 
-def _load_today_schedule(user_id: str) -> dict | None:
-    """Load most recent confirmed schedule_log row for today."""
+def _load_today_schedule(user_id: str, today_obj: date) -> dict | None:
+    """Load most recent confirmed schedule_log row for today (user-local)."""
     result = (
         supabase.from_("schedule_log")
         .select("id, proposed_json, gcal_event_ids, gcal_write_calendar_id, schedule_date, confirmed_at, replan_trigger")
@@ -120,7 +120,7 @@ def _load_today_schedule(user_id: str) -> dict | None:
     if not rows:
         return None
     row = rows[0]
-    if row.get("schedule_date") != date.today().isoformat():
+    if row.get("schedule_date") != today_obj.isoformat():
         return None
     return row
 
@@ -150,17 +150,17 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
     """Propose a new afternoon schedule. No external writes."""
     user_id: str = user["sub"]
 
-    now = _get_now()
-    if now.hour < 12:
-        raise HTTPException(status_code=400, detail="Replan is only available after noon (before noon is not supported).")
-
     user_ctx = _load_user_context(user_id)
     config = user_ctx["config"]
     tz_str = config.get("user", {}).get("timezone", "UTC")
     tz = ZoneInfo(tz_str)
 
+    now_aware = _get_now().astimezone(tz)
+    if now_aware.hour < 12:
+        raise HTTPException(status_code=400, detail="Replan is only available after noon (before noon is not supported).")
+
     # ── Reconcile today (#6 sync-back) before reading today's schedule ──────
-    today_obj = date.today()
+    today_obj = now_aware.date()
     todoist_active_ids: set[str] = set()
     todoist_completed_ids: set[str] = set()
     if user_ctx.get("todoist_api_key"):
@@ -208,7 +208,7 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
     except Exception:
         logger.warning("[replan] reconcile_today failed — continuing with stale state", exc_info=True)
 
-    today_row = _load_today_schedule(user_id)
+    today_row = _load_today_schedule(user_id, today_obj)
     if not today_row:
         raise HTTPException(status_code=400, detail="No confirmed schedule found for today.")
 
@@ -218,7 +218,6 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
         raise HTTPException(status_code=500, detail="Could not parse today's schedule.")
 
     # Determine afternoon tasks (start_time >= now)
-    now_aware = now.astimezone(tz)
     afternoon_tasks_raw = [
         item for item in schedule.get("scheduled", [])
         if datetime.fromisoformat(item["start_time"]).astimezone(tz) >= now_aware
@@ -295,7 +294,7 @@ def replan(body: ReplanRequest, user: dict = Depends(require_beta_access)) -> di
     try:
         proposed = planner.replan(
             user_ctx=user_ctx,
-            target_date=date.today(),
+            target_date=today_obj,
             candidate_tasks=candidate_tasks,
             prose=prose,
             previous_proposal=body.previous_proposal,
@@ -316,13 +315,14 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
     tz_str = config.get("user", {}).get("timezone", "UTC")
     write_cal_id = config.get("write_calendar_id", "primary")
     tz = ZoneInfo(tz_str)
+    today_obj = _get_now().astimezone(tz).date()
 
     # Idempotency guard: if today's most-recent confirmed row is itself a
     # replan-confirm within the window, this is a UI double-click — no-op
     # and replay the previous result. A non-replan recent row (i.e. a fresh
     # plan-confirm) is allowed to flow through, since the user might
     # legitimately replan immediately after confirming.
-    today_row = _load_today_schedule(user_id)
+    today_row = _load_today_schedule(user_id, today_obj)
     if today_row and today_row.get("replan_trigger") == "mid_day_replan" \
             and _is_within_idempotency_window(today_row.get("confirmed_at")):
         try:
@@ -357,7 +357,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
         write_cal_from_log = (today_row or {}).get("gcal_write_calendar_id") or "primary"
 
     # Delete only afternoon GCal events (start_time >= now)
-    now_aware = datetime.now().astimezone(tz)
+    now_aware = _get_now().astimezone(tz)
     for event_id in gcal_event_ids:
         try:
             # Fetch event to check its start time before deleting
@@ -410,7 +410,7 @@ def replan_confirm(body: ReplanConfirmRequest, background_tasks: BackgroundTasks
     insert_result = supabase.from_("schedule_log").insert({
         "user_id": user_id,
         "run_at": _dt.now().isoformat(),
-        "schedule_date": date.today().isoformat(),
+        "schedule_date": today_obj.isoformat(),
         "proposed_json": _json.dumps(body.schedule),
         "confirmed": 1,
         "confirmed_at": _dt.now().isoformat(),

@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
+
+USER_TZ = ZoneInfo("America/Vancouver")
 
 from api.services.extractor import ExtractionResult
 
@@ -104,7 +107,7 @@ def test_replan_returns_proposed_schedule(client, monkeypatch):
         "reasoning_summary": "Shifted deep work by an hour.",
     }
 
-    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0, tzinfo=USER_TZ)
 
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan.TodoistClient") as MockTodoist, \
@@ -156,7 +159,7 @@ def test_replan_delegates_to_planner_pipeline(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
     today = date.today()
-    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
+    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0, tzinfo=USER_TZ)
 
     captured = {}
     def fake_replan(**kwargs):
@@ -222,7 +225,7 @@ def test_replan_keep_task_project_id_is_string(client, monkeypatch):
 
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
+    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0, tzinfo=USER_TZ)
 
     captured = {}
     def fake_replan(**kwargs):
@@ -263,7 +266,7 @@ def test_replan_disabled_before_noon(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
     # Patch datetime.now() to return 11:00
-    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 11, 0, 0)
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 11, 0, 0, tzinfo=USER_TZ)
 
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan._get_now", return_value=mock_now):
@@ -296,7 +299,7 @@ def test_replan_completed_tasks_auto_promoted(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
     mock_schedule_result = {"scheduled": [], "pushed": [], "reasoning_summary": "Nothing to schedule."}
-    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0, tzinfo=USER_TZ)
 
     captured_planner = {}
     def fake_replan(**kwargs):
@@ -346,7 +349,7 @@ def test_replan_returns_400_todoist_reconnect_required_when_helper_raises(client
     _mock_user_row(mock_sb)
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0, tzinfo=USER_TZ)
 
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan.get_valid_todoist_token",
@@ -381,7 +384,7 @@ def test_replan_surfaces_runtime_auth_failure_as_reconnect_required(client, monk
 
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
-    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0)
+    mock_now = datetime(_today_dt().year, _today_dt().month, _today_dt().day, 14, 0, 0, tzinfo=USER_TZ)
 
     with patch("api.routes.replan.supabase", mock_sb), \
          patch("api.routes.replan.get_valid_todoist_token", return_value="tok-abc"), \
@@ -721,7 +724,7 @@ def test_replan_calls_reconcile_today_with_route_replan(client, monkeypatch):
     monkeypatch.setattr("api.auth.verify_token", lambda token: {"sub": "user-uuid-123"})
 
     today = date.today()
-    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0)
+    mock_now = datetime(today.year, today.month, today.day, 14, 0, 0, tzinfo=USER_TZ)
 
     from api.services.reconcile_service import ReconcileDelta
     fake_recon = MagicMock(return_value=ReconcileDelta())
